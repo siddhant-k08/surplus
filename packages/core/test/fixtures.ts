@@ -14,7 +14,7 @@ export function baseTerms(over: Partial<MandateTerms> = {}): MandateTerms {
         themes: [
             { id: "ai-compute", targetBps: 5000 },
             { id: "platform-giants", targetBps: 3000 },
-            { id: "longetivity-biotech", targetBps: 2000 },
+            { id: "longevity-biotech", targetBps: 2000 },
         ],
         maxCompanyBps: 4000,
         investShareBps: 5000,
