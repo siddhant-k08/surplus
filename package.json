@@ -1,0 +1,9 @@
+{
+    "name": "surplus",
+    "private": true,
+    "workspaces": ["packages/*", "apps/*"],
+    "scripts": {
+        "test": "npm test -w @surplus/core",
+        "typecheck": "npm run typecheck -w @surplus/core"
+    }
+}
