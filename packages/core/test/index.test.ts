@@ -5,7 +5,7 @@ it("exports the public API", () => {
     for (const name of [
         "parseUsdc", "Ledger", "MandateStore", "computeSurplus", "checkProposal", "allocate",
         "loadAllTokens", "validateBrief", "toCandidates", "ProposalMachine", "precheck",
-        "crossCheck", "liquidityScore",
+        "crossCheck", "liquidityScore", "reconcileInternal", "Treasury", "parseKyberRoute",
     ]) {
         expect(name in core).toBe(true);
     }
