@@ -1,0 +1,675 @@
+{
+  "fetchedAt": "2026-11-19T10:43:06.007Z",
+  "pairs": [
+    {
+      "chainId": "base",
+      "dexId": "aero",
+      "url": "https://dexscreener.com/base/0xf668e21993f0acd7ab00bb1cfbaed0df28a3c8ec",
+      "pairAddress": "0xF668e21993f0ACd7ab00BB1cFbAeD0df28A3C8EC",
+      "baseToken": {
+        "address": "0xb20000000000000000000078ee7ce2fE4908108C",
+        "name": "NVIDIA Corporation",
+        "symbol": "NVDAc"
+      },
+      "quoteToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "153.6913",
+      "priceUsd": "153.69",
+      "txns": {
+        "m5": {
+          "buys": 4,
+          "sells": 13
+        },
+        "h1": {
+          "buys": 172,
+          "sells": 140
+        },
+        "h6": {
+          "buys": 1280,
+          "sells": 1054
+        },
+        "h24": {
+          "buys": 6593,
+          "sells": 6685
+        }
+      },
+      "volume": {
+        "h24": 15568783.4,
+        "h6": 3776684.92,
+        "h1": 574390.04,
+        "m5": 55667.93
+      },
+      "priceChange": {
+        "m5": -0.03,
+        "h1": 0.09,
+        "h6": 1.01,
+        "h24": -4.54
+      },
+      "liquidity": {
+        "base": 7025.6375,
+        "quote": 741428,
+        "usd": 1821207.86
+      },
+      "fdv": 8569832,
+      "marketCap": 8569832,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/E1EjcAwgcyu0qKSZ?width=800&height=800&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/base/0xb20000000000000000000078ee7ce2fe4908108c?timestamp=1795084800000",
+        "websites": [
+          {
+            "url": "https://www.coinbase.com/tokenize",
+            "label": "Website"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/coinbase",
+            "type": "twitter"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "base",
+      "dexId": "aero",
+      "url": "https://dexscreener.com/base/0xd072410fa13d242e1d53721bcf7af02e3455dc96",
+      "pairAddress": "0xd072410fa13D242e1d53721Bcf7AF02e3455DC96",
+      "baseToken": {
+        "address": "0xb2000000000000000000008bC8786B856E61707C",
+        "name": "Meta Platforms Inc.",
+        "symbol": "METAc"
+      },
+      "quoteToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "625.5658",
+      "priceUsd": "625.56",
+      "txns": {
+        "m5": {
+          "buys": 4,
+          "sells": 11
+        },
+        "h1": {
+          "buys": 94,
+          "sells": 69
+        },
+        "h6": {
+          "buys": 710,
+          "sells": 593
+        },
+        "h24": {
+          "buys": 3594,
+          "sells": 3755
+        }
+      },
+      "volume": {
+        "h24": 6906163.91,
+        "h6": 1512082.28,
+        "h1": 221417.91,
+        "m5": 21853.81
+      },
+      "priceChange": {
+        "m5": -0.06,
+        "h1": 0.28,
+        "h6": 1.1,
+        "h24": 0.93
+      },
+      "liquidity": {
+        "base": 821.03577,
+        "quote": 200400,
+        "usd": 714012.03
+      },
+      "fdv": 5542866,
+      "marketCap": 5542866,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/5pwl_ygU94ynbG0X?width=800&height=800&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/base/0xb2000000000000000000008bc8786b856e61707c?timestamp=1795084800000",
+        "websites": [
+          {
+            "url": "https://www.coinbase.com/tokenize",
+            "label": "Website"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/coinbase",
+            "type": "twitter"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "base",
+      "dexId": "aero",
+      "url": "https://dexscreener.com/base/0xf5fcb9cdafce67d50afef298f88e709d2b946ba6",
+      "pairAddress": "0xF5FCB9CDAFcE67d50AfEf298F88E709d2B946BA6",
+      "baseToken": {
+        "address": "0xb200000000000000000000C2e324d24d7eEcd1fb",
+        "name": "Apple Inc.",
+        "symbol": "AAPLc"
+      },
+      "quoteToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "353.7882",
+      "priceUsd": "353.78",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 7
+        },
+        "h1": {
+          "buys": 42,
+          "sells": 52
+        },
+        "h6": {
+          "buys": 304,
+          "sells": 387
+        },
+        "h24": {
+          "buys": 1729,
+          "sells": 1884
+        }
+      },
+      "volume": {
+        "h24": 3298462.09,
+        "h6": 869987.28,
+        "h1": 153452.02,
+        "m5": 30653.55
+      },
+      "priceChange": {
+        "m5": -0.1,
+        "h1": -0.04,
+        "h6": -0.15,
+        "h24": 0.87
+      },
+      "liquidity": {
+        "base": 498.6491,
+        "quote": 222283,
+        "usd": 398700.02
+      },
+      "fdv": 2158689,
+      "marketCap": 2158689,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/hDuLkoYmLO0ZCsLU?width=800&height=800&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/base/0xb200000000000000000000c2e324d24d7eecd1fb?timestamp=1795084800000",
+        "websites": [
+          {
+            "url": "http://coinbase.com/tokenize",
+            "label": "Website"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/coinbase",
+            "type": "twitter"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "base",
+      "dexId": "aero",
+      "url": "https://dexscreener.com/base/0x16c70f04c3080a127486cdf5a4c33c066bbf47c3",
+      "pairAddress": "0x16c70F04C3080a127486Cdf5a4C33c066bBF47C3",
+      "baseToken": {
+        "address": "0xb2000000000000000000002D0BA3164cc74f58B7",
+        "name": "Alphabet Inc.",
+        "symbol": "GOOGLc"
+      },
+      "quoteToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "292.9303",
+      "priceUsd": "292.93",
+      "txns": {
+        "m5": {
+          "buys": 8,
+          "sells": 24
+        },
+        "h1": {
+          "buys": 167,
+          "sells": 223
+        },
+        "h6": {
+          "buys": 1077,
+          "sells": 845
+        },
+        "h24": {
+          "buys": 3676,
+          "sells": 3528
+        }
+      },
+      "volume": {
+        "h24": 7593002.61,
+        "h6": 2049015.92,
+        "h1": 423384.24,
+        "m5": 46011.01
+      },
+      "priceChange": {
+        "m5": -0.09,
+        "h1": 0.41,
+        "h6": 2.32,
+        "h24": 3.48
+      },
+      "liquidity": {
+        "base": 3036.423,
+        "quote": 540810,
+        "usd": 1430270.41
+      },
+      "fdv": 10450259,
+      "marketCap": 10450259,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/bjyauz7r4U4dfAE2?width=800&height=800&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/base/0xb2000000000000000000002d0ba3164cc74f58b7?timestamp=1795084800000",
+        "websites": [
+          {
+            "url": "https://www.coinbase.com/tokenize",
+            "label": "Website"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/coinbase",
+            "type": "twitter"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "base",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/base/0x6e2f314be47e82c79adfbf724751d06971921cc3e66758ee65e9da804125fbc6",
+      "pairAddress": "0x6e2f314be47e82c79adfbf724751d06971921cc3e66758ee65e9da804125fbc6",
+      "labels": [
+        "v4"
+      ],
+      "baseToken": {
+        "address": "0xb200000000000000000000d9192b6B456483C2E8",
+        "name": "Amazon.com Inc.",
+        "symbol": "AMZNc"
+      },
+      "quoteToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "273.7811",
+      "priceUsd": "273.78",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 14,
+          "sells": 0
+        },
+        "h6": {
+          "buys": 42,
+          "sells": 8
+        },
+        "h24": {
+          "buys": 199,
+          "sells": 69
+        }
+      },
+      "volume": {
+        "h24": 7037.1,
+        "h6": 1341.96,
+        "h1": 332.3
+      },
+      "priceChange": {
+        "h1": 0.5,
+        "h6": 1.39,
+        "h24": 5.38
+      },
+      "liquidity": {
+        "base": 36.2169,
+        "quote": 19267,
+        "usd": 29183.07
+      },
+      "fdv": 1859386,
+      "marketCap": 1859386,
+      "pairCreatedAt": 1793593489000
+    },
+    {
+      "chainId": "base",
+      "dexId": "aero",
+      "url": "https://dexscreener.com/base/0x2740c0faab738f6e346e545fde02aef9b1a01ee7",
+      "pairAddress": "0x2740C0faAb738F6e346e545fDE02aEF9B1A01ee7",
+      "baseToken": {
+        "address": "0xB200000000000000000000Ab99cFa739E253872B",
+        "name": "Microsoft Corporation",
+        "symbol": "MSFTc"
+      },
+      "quoteToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "514.8757",
+      "priceUsd": "514.87",
+      "txns": {
+        "m5": {
+          "buys": 6,
+          "sells": 8
+        },
+        "h1": {
+          "buys": 72,
+          "sells": 59
+        },
+        "h6": {
+          "buys": 538,
+          "sells": 491
+        },
+        "h24": {
+          "buys": 2419,
+          "sells": 2342
+        }
+      },
+      "volume": {
+        "h24": 3557260.45,
+        "h6": 1103248.24,
+        "h1": 180562.75,
+        "m5": 9697.23
+      },
+      "priceChange": {
+        "m5": -0.03,
+        "h1": 0.24,
+        "h6": 0.74,
+        "h24": 1.35
+      },
+      "liquidity": {
+        "base": 491.7929,
+        "quote": 140842,
+        "usd": 394054.37
+      },
+      "fdv": 1439442,
+      "marketCap": 1439442,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102178281%2Flarge%2Fmsft-200.png%3F1789233933?width=800&height=800&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/base/0xb200000000000000000000ab99cfa739e253872b?timestamp=1795084800000",
+        "websites": [
+          {
+            "url": "https://www.coinbase.com/tokenize",
+            "label": "coinbase.com"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://twitter.com/coinbase",
+            "type": "twitter"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "base",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/base/0x051bdaefdb5714412b33b185464ea8c72e2798954c030f7394857743c996b1de",
+      "pairAddress": "0x051bdaefdb5714412b33b185464ea8c72e2798954c030f7394857743c996b1de",
+      "labels": [
+        "v4"
+      ],
+      "baseToken": {
+        "address": "0xb2000000000000000000004884b426556b92883d",
+        "name": "Strategy Inc.",
+        "symbol": "MSTRc"
+      },
+      "quoteToken": {
+        "address": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+        "name": "Coinbase Wrapped BTC",
+        "symbol": "cbBTC"
+      },
+      "priceNative": "0.001468",
+      "priceUsd": "93.67",
+      "txns": {
+        "m5": {
+          "buys": 1,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 15,
+          "sells": 0
+        },
+        "h6": {
+          "buys": 38,
+          "sells": 0
+        },
+        "h24": {
+          "buys": 61,
+          "sells": 120
+        }
+      },
+      "volume": {
+        "h24": 18730.58,
+        "h6": 7004.8,
+        "h1": 2081.44,
+        "m5": 21.38
+      },
+      "priceChange": {
+        "m5": -0.13,
+        "h1": 0.28,
+        "h6": 2.2,
+        "h24": -5.08
+      },
+      "liquidity": {
+        "base": 565.4604,
+        "quote": 0.5924,
+        "usd": 90762.17
+      },
+      "fdv": 1979204,
+      "marketCap": 1979204,
+      "pairCreatedAt": 1791397761000
+    },
+    {
+      "chainId": "base",
+      "dexId": "aero",
+      "url": "https://dexscreener.com/base/0x2836e062a3fe75943a7f4a552e2365b98e414e75",
+      "pairAddress": "0x2836e062a3fe75943a7F4A552E2365b98E414E75",
+      "baseToken": {
+        "address": "0xb200000000000000000000397293Cb8cda9a10c5",
+        "name": "Sandisk Corporation",
+        "symbol": "SNDKc"
+      },
+      "quoteToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "809.8967",
+      "priceUsd": "809.89",
+      "txns": {
+        "m5": {
+          "buys": 17,
+          "sells": 56
+        },
+        "h1": {
+          "buys": 403,
+          "sells": 416
+        },
+        "h6": {
+          "buys": 2435,
+          "sells": 2378
+        },
+        "h24": {
+          "buys": 12406,
+          "sells": 12467
+        }
+      },
+      "volume": {
+        "h24": 24557023.81,
+        "h6": 5947694.26,
+        "h1": 918678.03,
+        "m5": 107103.89
+      },
+      "priceChange": {
+        "m5": -0.25,
+        "h1": -0.06,
+        "h6": 2.68,
+        "h24": -1.99
+      },
+      "liquidity": {
+        "base": 1329.7831,
+        "quote": 551584,
+        "usd": 1628571.14
+      },
+      "fdv": 2475885,
+      "marketCap": 2475885,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102178283%2Flarge%2Fsndk-200.png%3F1789234014?width=800&height=800&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/base/0xb200000000000000000000397293cb8cda9a10c5?timestamp=1795084800000",
+        "websites": [
+          {
+            "url": "https://www.coinbase.com/tokenize",
+            "label": "coinbase.com"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://twitter.com/coinbase",
+            "type": "twitter"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "base",
+      "dexId": "aero",
+      "url": "https://dexscreener.com/base/0x880db7dda4407d99508574e680d067d1164b3cfe",
+      "pairAddress": "0x880dB7Dda4407D99508574E680d067D1164B3cFE",
+      "baseToken": {
+        "address": "0xb2000000000000000000007b9fcbd005511aCBd5",
+        "name": "Space Exploration Technologies Corp.",
+        "symbol": "SPCXc"
+      },
+      "quoteToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "146.5762",
+      "priceUsd": "146.57",
+      "txns": {
+        "m5": {
+          "buys": 6,
+          "sells": 25
+        },
+        "h1": {
+          "buys": 128,
+          "sells": 183
+        },
+        "h6": {
+          "buys": 1044,
+          "sells": 994
+        },
+        "h24": {
+          "buys": 5370,
+          "sells": 5367
+        }
+      },
+      "volume": {
+        "h24": 10356236.41,
+        "h6": 2734536.06,
+        "h1": 389958.4,
+        "m5": 66244.88
+      },
+      "priceChange": {
+        "m5": -0.1,
+        "h1": -0.22,
+        "h6": 1.13,
+        "h24": 2.87
+      },
+      "liquidity": {
+        "base": 2589.7047,
+        "quote": 602274,
+        "usd": 981863.82
+      },
+      "fdv": 4019757,
+      "marketCap": 4019757,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/https%3A%2F%2Fcoin-images.coingecko.com%2Fcoins%2Fimages%2F102178284%2Flarge%2Fspcx-200.png%3F1789234077?width=800&height=800&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/base/0xb2000000000000000000007b9fcbd005511acbd5?timestamp=1795084800000",
+        "websites": [
+          {
+            "url": "https://coinbase.com/tokenize",
+            "label": "coinbase.com"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://twitter.com/coinbase",
+            "type": "twitter"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "base",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/base/0x342af3dc58e331704cd79b187098e43cc7bf76b7938e3bf63aa1b2f3b2d9e965",
+      "pairAddress": "0x342af3dc58e331704cd79b187098e43cc7bf76b7938e3bf63aa1b2f3b2d9e965",
+      "labels": [
+        "v4"
+      ],
+      "baseToken": {
+        "address": "0xb2000000000000000000001e800a7f5189430cD0",
+        "name": "Tesla Inc.",
+        "symbol": "TSLAc"
+      },
+      "quoteToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "name": "USD Coin",
+        "symbol": "USDC"
+      },
+      "priceNative": "389.5636",
+      "priceUsd": "389.56",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 2,
+          "sells": 1
+        },
+        "h6": {
+          "buys": 35,
+          "sells": 7
+        },
+        "h24": {
+          "buys": 235,
+          "sells": 196
+        }
+      },
+      "volume": {
+        "h24": 8541.36,
+        "h6": 847.64,
+        "h1": 43.19
+      },
+      "priceChange": {
+        "h1": 0.03,
+        "h6": 1.02,
+        "h24": 1.29
+      },
+      "liquidity": {
+        "base": 47.6801,
+        "quote": 9235.628,
+        "usd": 27810.07
+      },
+      "fdv": 2469079,
+      "marketCap": 2469079,
+      "pairCreatedAt": 1793593731000
+    }
+  ]
+}
