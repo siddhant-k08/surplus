@@ -142,18 +142,22 @@ export function validateBrief(b: Brief, ctx: ValidationContext): ValidationIssue
     return issues;
 }
 
-/** Turns scored fits into allocator candidates. Floats are used for ranking only, then rounded to integers. */
+/**
+ * Turns scored fits into allocator candidates. Floats are used for ranking only, then rounded to integers.
+ * `minLiquidity` (0 to 5) drops tokens that are too illiquid to trade; the default keeps everything.
+ */
 export function toCandidates(
     fits: readonly Fit[],
     liquidity: ReadonlyMap<string, number>,
     floor = 3,
+    minLiquidity = 0,
 ): Candidate[] {
-    return fits
-        .filter((f) => f.fit >= floor)
-        .map((f) => {
-            const asset = f.asset.toLowerCase();
-            const liq = Math.min(5, Math.max(0, liquidity.get(asset) ?? 0));
-            const rank = 0.5 * f.fit + 0.2 * f.evidence + 0.3 * liq;
-            return { asset, symbol: f.symbol, weight: Math.max(1, Math.round(rank * 100)) };
-        });
+    return fits.flatMap((f) => {
+        if (f.fit < floor) return [];
+        const asset = f.asset.toLowerCase();
+        const liq = Math.min(5, Math.max(0, liquidity.get(asset) ?? 0));
+        if (liq < minLiquidity) return [];
+        const rank = 0.5 * f.fit + 0.2 * f.evidence + 0.3 * liq;
+        return [{ asset, symbol: f.symbol, weight: Math.max(1, Math.round(rank * 100)) }];
+    });
 }

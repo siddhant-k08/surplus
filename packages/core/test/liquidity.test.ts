@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { parsePairs, usdcPools, liquidityScore, liquidityScores, BASE_USDC } from "../src/liquidity";
+import {
+    parsePairs,
+    usdcPools,
+    liquidityScore,
+    liquidityScores,
+    fetchTokenPairs,
+    loadLiquidityScores,
+    BASE_USDC,
+} from "../src/liquidity";
 import { toCandidates } from "../src/research";
 import { addr, NVDA, MSFT } from "./fixtures";
 
@@ -74,5 +82,44 @@ describe("liquidity", () => {
         const c = toCandidates([{ asset: NVDA, symbol: "NVDAc", fit: 4, evidence: 4, claimIds: [] }], m);
         // 0.5*4 + 0.2*4 + 0.3*5 = 4.3 -> 430
         expect(c[0]!.weight).toBe(430);
+    });
+
+    it("fetchTokenPairs requests the lowercase per-token URL and throws on a non-OK response", async () => {
+        const urls: string[] = [];
+        const ok = (async (url: string) => {
+            urls.push(url);
+            return { ok: true, status: 200, json: async () => [] };
+        }) as unknown as typeof fetch;
+        await fetchTokenPairs(NVDA.toUpperCase().replace("0X", "0x"), ok);
+        expect(urls[0]).toBe(`https://api.dexscreener.com/token-pairs/v1/base/${NVDA}`);
+
+        const bad = (async () => ({ ok: false, status: 429, json: async () => ({}) })) as unknown as typeof fetch;
+        await expect(fetchTokenPairs(NVDA, bad)).rejects.toThrow(/HTTP 429/);
+    });
+
+    it("loadLiquidityScores makes one spaced request per token and scores the deepest pool", async () => {
+        const msftPair = (usd: number, id: string) =>
+            pair({ pairAddress: id, baseToken: { address: MSFT, symbol: "MSFTc" }, liquidity: { usd } });
+        const byToken: Record<string, unknown[]> = {
+            [NVDA]: [pair({ liquidity: { usd: 300_000 } }), pair({ pairAddress: "0xp2", liquidity: { usd: 1_200_000 } })],
+            [MSFT]: [msftPair(30_000, "0xm1"), msftPair(40_000, "0xm2")],
+        };
+        const requested: string[] = [];
+        const fake = (async (url: string) => {
+            const token = url.split("/").pop()!;
+            requested.push(token);
+            return { ok: true, status: 200, json: async () => byToken[token] ?? [] };
+        }) as unknown as typeof fetch;
+        let sleeps = 0;
+        const { scores, pairs } = await loadLiquidityScores([NVDA, MSFT, addr("9")], {
+            fetchImpl: fake,
+            sleep: async () => { sleeps += 1; },
+        });
+        expect(requested).toEqual([NVDA, MSFT, addr("9")]);
+        expect(sleeps).toBe(2);
+        expect(pairs).toHaveLength(4);
+        expect(scores.get(NVDA)).toBe(5);
+        expect(scores.get(MSFT)).toBe(1);
+        expect(scores.get(addr("9"))).toBe(0);
     });
 });

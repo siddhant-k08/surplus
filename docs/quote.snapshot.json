@@ -1,0 +1,765 @@
+{
+  "fetchedAt": "2026-11-19T20:41:00.730Z",
+  "amountInUsdcMinor": "1000000",
+  "raw": {
+    "NVDAc": {
+      "code": 0,
+      "message": "successfully",
+      "data": {
+        "routeSummary": {
+          "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "amountIn": "1000000",
+          "amountInUsd": "0.9984140970944364",
+          "tokenOut": "0xb20000000000000000000078ee7ce2fe4908108c",
+          "amountOut": "678637",
+          "amountOutUsd": "0.9993128717852657",
+          "gas": "1256331",
+          "gasPrice": "6000000",
+          "gasUsd": "0.013249495953443116",
+          "l1FeeUsd": "0.00008869617887705925",
+          "extraFee": {
+            "feeAmount": "",
+            "chargeFeeBy": "",
+            "isInBps": false,
+            "feeReceiver": ""
+          },
+          "route": [
+            [
+              {
+                "pool": "0xc7fd29b23c9de23d2dc0d22973aed01660ebd3aa0429332e7958579736c2ade9",
+                "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "tokenOut": "0xb20000000000000000000078ee7ce2fe4908108c",
+                "swapAmount": "1000000",
+                "amountOut": "678637",
+                "exchange": "flux-prop",
+                "poolType": "flux-prop",
+                "poolExtra": {
+                  "blockNumber": 59652375,
+                  "qC": "0x998B2F003e79C01b88B3CDBFDE90CAdEf53D996b",
+                  "s": "0x388e0D8f610a80C75e8a049C39DDc5816f56c012",
+                  "v": "0x0F8E0136f09e8b188d21EdDF17f65522f81f7151"
+                },
+                "extra": {
+                  "_ce": {
+                    "prCnt": 1,
+                    "tgtAmtOut": "678637",
+                    "ces": [
+                      {
+                        "pool": "pmm_20_0x833589fcd6edb6e08f4c7c32d4f71b54bda02913_0xb20000000000000000000078ee7ce2fe4908108c",
+                        "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                        "tokenOut": "0xb20000000000000000000078ee7ce2fe4908108c",
+                        "swapAmount": "1000000",
+                        "amountOut": "678334",
+                        "exchange": "pmm-20",
+                        "poolType": "orderbook",
+                        "poolExtra": {
+                          "approvalAddress": "",
+                          "blockNumber": 0
+                        },
+                        "extra": null,
+                        "gas": 700000
+                      },
+                      {
+                        "pool": "0xf668e21993f0acd7ab00bb1cfbaed0df28a3c8ec",
+                        "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                        "tokenOut": "0xb20000000000000000000078ee7ce2fe4908108c",
+                        "swapAmount": "1000000",
+                        "amountOut": "678687",
+                        "exchange": "aero-cl",
+                        "poolType": "uniswapv3",
+                        "poolExtra": {
+                          "swapFee": 158,
+                          "priceLimit": "4295558253",
+                          "blockNumber": 59652353,
+                          "sB": 59652353
+                        },
+                        "extra": {
+                          "rAI": "0",
+                          "nSqrtRx96": "65275308161376278824774976187",
+                          "nT": -3875
+                        },
+                        "gas": 310000
+                      }
+                    ]
+                  },
+                  "_cs": "16903333137757142605",
+                  "_ts": "1795120852",
+                  "ri": "02b1d36cBhxLyrd7"
+                },
+                "gas": 150000
+              }
+            ]
+          ],
+          "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+          "routeID": "02b1d36cBhxLyrd7",
+          "checksum": "16903333137757142605",
+          "timestamp": 1795120852
+        },
+        "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+      },
+      "requestId": "02b1d36c-061c-4bca-b77b-15ab56e665fc"
+    },
+    "METAc": {
+      "code": 0,
+      "message": "successfully",
+      "data": {
+        "routeSummary": {
+          "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "amountIn": "1000000",
+          "amountInUsd": "0.9984140970944364",
+          "tokenOut": "0xb2000000000000000000008bc8786b856e61707c",
+          "amountOut": "167208",
+          "amountOutUsd": "0.9982288376612719",
+          "gas": "330498",
+          "gasPrice": "6000000",
+          "gasUsd": "0.0034854922099518703",
+          "l1FeeUsd": "0.00008869617887705925",
+          "extraFee": {
+            "feeAmount": "",
+            "chargeFeeBy": "",
+            "isInBps": false,
+            "feeReceiver": ""
+          },
+          "route": [
+            [
+              {
+                "pool": "0xeaf57753bc382e0324a1d43f72e7027705a2273e",
+                "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "tokenOut": "0xb2000000000000000000008bc8786b856e61707c",
+                "swapAmount": "1000000",
+                "amountOut": "167208",
+                "exchange": "aerodrome-cl-3",
+                "poolType": "slipstream",
+                "poolExtra": {
+                  "swapFee": 500,
+                  "priceLimit": "4295558253",
+                  "blockNumber": 59652285,
+                  "sB": 59652285
+                },
+                "extra": {
+                  "_cs": "4227174692143445299",
+                  "_ss": {
+                    "pool": "0x5cc24bfd60c0cf655e968cc0b3c623107481cc5d",
+                    "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "tokenOut": "0xb2000000000000000000008bc8786b856e61707c",
+                    "swapAmount": "1000000",
+                    "amountOut": "167319",
+                    "exchange": "metric-propamm",
+                    "poolType": "metric-propamm",
+                    "poolExtra": {
+                      "swapDir": false,
+                      "priceProvider": "",
+                      "blockNumber": 52832690
+                    },
+                    "extra": null,
+                    "gas": 215383
+                  },
+                  "_ts": "1795120853",
+                  "nSqrtRx96": "32404955688639783711817367746",
+                  "nT": -17882,
+                  "rAI": "0",
+                  "ri": "87d9d9dfjvBM-psv"
+                },
+                "gas": 109334
+              }
+            ]
+          ],
+          "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+          "routeID": "87d9d9dfjvBM-psv",
+          "checksum": "4227174692143445299",
+          "timestamp": 1795120853
+        },
+        "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+      },
+      "requestId": "87d9d9df-8ef0-4cfa-9b2f-02b9652f07f2"
+    },
+    "AAPLc": {
+      "code": 0,
+      "message": "successfully",
+      "data": {
+        "routeSummary": {
+          "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "amountIn": "1000000",
+          "amountInUsd": "0.9984140970944364",
+          "tokenOut": "0xb200000000000000000000c2e324d24d7eecd1fb",
+          "amountOut": "286511",
+          "amountOutUsd": "0.9982848930191776",
+          "gas": "330498",
+          "gasPrice": "6000000",
+          "gasUsd": "0.0034854922099518703",
+          "l1FeeUsd": "0.00008869617887705925",
+          "extraFee": {
+            "feeAmount": "",
+            "chargeFeeBy": "",
+            "isInBps": false,
+            "feeReceiver": ""
+          },
+          "route": [
+            [
+              {
+                "pool": "0xa3b1e3f9747065e2073722ff4c9027d3ea4994f0",
+                "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "tokenOut": "0xb200000000000000000000c2e324d24d7eecd1fb",
+                "swapAmount": "1000000",
+                "amountOut": "286511",
+                "exchange": "aerodrome-cl-3",
+                "poolType": "slipstream",
+                "poolExtra": {
+                  "swapFee": 500,
+                  "priceLimit": "4295558253",
+                  "blockNumber": 59652285,
+                  "sB": 59652285
+                },
+                "extra": {
+                  "_cs": "7535303257106522689",
+                  "_ss": {
+                    "pool": "0x749f424a5a14aad0d51cbb38eba57f690d71ba19",
+                    "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "tokenOut": "0xb200000000000000000000c2e324d24d7eecd1fb",
+                    "swapAmount": "1000000",
+                    "amountOut": "286598",
+                    "exchange": "metric-propamm",
+                    "poolType": "metric-propamm",
+                    "poolExtra": {
+                      "swapDir": false,
+                      "priceProvider": "",
+                      "blockNumber": 52832761
+                    },
+                    "extra": null,
+                    "gas": 215383
+                  },
+                  "_ts": "1795120853",
+                  "nSqrtRx96": "42418421604048271074442781981",
+                  "nT": -12496,
+                  "rAI": "0",
+                  "ri": "57bf0b034zRAlIwr"
+                },
+                "gas": 109334
+              }
+            ]
+          ],
+          "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+          "routeID": "57bf0b034zRAlIwr",
+          "checksum": "7535303257106522689",
+          "timestamp": 1795120853
+        },
+        "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+      },
+      "requestId": "57bf0b03-e334-4094-8c2b-ad05534ab319"
+    },
+    "GOOGLc": {
+      "code": 0,
+      "message": "successfully",
+      "data": {
+        "routeSummary": {
+          "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "amountIn": "1000000",
+          "amountInUsd": "0.9985953117887395",
+          "tokenOut": "0xb2000000000000000000002d0ba3164cc74f58b7",
+          "amountOut": "364388",
+          "amountOutUsd": "0.9976058620906909",
+          "gas": "330498",
+          "gasPrice": "6000000",
+          "gasUsd": "0.0034854922099518703",
+          "l1FeeUsd": "0.00008869617887705925",
+          "extraFee": {
+            "feeAmount": "",
+            "chargeFeeBy": "",
+            "isInBps": false,
+            "feeReceiver": ""
+          },
+          "route": [
+            [
+              {
+                "pool": "0xb1987cad1682841b4b641d50e520777ec5ab5542",
+                "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "tokenOut": "0xb2000000000000000000002d0ba3164cc74f58b7",
+                "swapAmount": "1000000",
+                "amountOut": "364388",
+                "exchange": "aerodrome-cl-3",
+                "poolType": "slipstream",
+                "poolExtra": {
+                  "swapFee": 500,
+                  "priceLimit": "4295558253",
+                  "blockNumber": 59652279,
+                  "sB": 59652279
+                },
+                "extra": {
+                  "_cs": "620019259847024344",
+                  "_ss": {
+                    "pool": "0x16386325559de16076be4edf07a554b321c931f8",
+                    "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "tokenOut": "0xb2000000000000000000002d0ba3164cc74f58b7",
+                    "swapAmount": "1000000",
+                    "amountOut": "364610",
+                    "exchange": "metric-propamm",
+                    "poolType": "metric-propamm",
+                    "poolExtra": {
+                      "swapDir": false,
+                      "priceProvider": "",
+                      "blockNumber": 52832820
+                    },
+                    "extra": null,
+                    "gas": 215383
+                  },
+                  "_ts": "1795120854",
+                  "nSqrtRx96": "47836587599026058969896322290",
+                  "nT": -10092,
+                  "rAI": "0",
+                  "ri": "9c41ba6bzMxC_74i"
+                },
+                "gas": 109334
+              }
+            ]
+          ],
+          "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+          "routeID": "9c41ba6bzMxC_74i",
+          "checksum": "620019259847024344",
+          "timestamp": 1795120854
+        },
+        "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+      },
+      "requestId": "9c41ba6b-cccc-42ff-be22-6d91bf8bea8d"
+    },
+    "AMZNc": {
+      "code": 0,
+      "message": "successfully",
+      "data": {
+        "routeSummary": {
+          "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "amountIn": "1000000",
+          "amountInUsd": "0.9984140970944364",
+          "tokenOut": "0xb200000000000000000000d9192b6b456483c2e8",
+          "amountOut": "387800",
+          "amountOutUsd": "0.9976007525711967",
+          "gas": "330498",
+          "gasPrice": "6000000",
+          "gasUsd": "0.0034854922099518703",
+          "l1FeeUsd": "0.00008869617887705925",
+          "extraFee": {
+            "feeAmount": "",
+            "chargeFeeBy": "",
+            "isInBps": false,
+            "feeReceiver": ""
+          },
+          "route": [
+            [
+              {
+                "pool": "0xd03bc8c7f2faedce2aac81bf0444aea08ea06e9b",
+                "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "tokenOut": "0xb200000000000000000000d9192b6b456483c2e8",
+                "swapAmount": "1000000",
+                "amountOut": "387800",
+                "exchange": "aerodrome-cl-3",
+                "poolType": "uniswapv3",
+                "poolExtra": {
+                  "swapFee": 500,
+                  "priceLimit": "4295558253",
+                  "blockNumber": 59652280,
+                  "sB": 59652280
+                },
+                "extra": {
+                  "_cs": "16956849698408366157",
+                  "_ss": {
+                    "pool": "0x3a4d76933e4b3135dc3bdf6778c6430aa65a3003",
+                    "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "tokenOut": "0xb200000000000000000000d9192b6b456483c2e8",
+                    "swapAmount": "1000000",
+                    "amountOut": "387852",
+                    "exchange": "metric-propamm",
+                    "poolType": "metric-propamm",
+                    "poolExtra": {
+                      "swapDir": false,
+                      "priceProvider": "",
+                      "blockNumber": 52832693
+                    },
+                    "extra": null,
+                    "gas": 215383
+                  },
+                  "_ts": "1795120855",
+                  "nSqrtRx96": "49350285853434895910692126072",
+                  "nT": -9469,
+                  "rAI": "0",
+                  "ri": "4ea37a41c2NPPoe0"
+                },
+                "gas": 109334
+              }
+            ]
+          ],
+          "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+          "routeID": "4ea37a41c2NPPoe0",
+          "checksum": "16956849698408366157",
+          "timestamp": 1795120855
+        },
+        "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+      },
+      "requestId": "4ea37a41-7363-4f3e-87b4-16051dd94666"
+    },
+    "MSFTc": {
+      "code": 0,
+      "message": "successfully",
+      "data": {
+        "routeSummary": {
+          "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "amountIn": "1000000",
+          "amountInUsd": "0.9984140970944364",
+          "tokenOut": "0xb200000000000000000000ab99cfa739e253872b",
+          "amountOut": "199740",
+          "amountOutUsd": "0.997163173186365",
+          "gas": "330498",
+          "gasPrice": "6000000",
+          "gasUsd": "0.0034854922099518703",
+          "l1FeeUsd": "0.00008869617887705925",
+          "extraFee": {
+            "feeAmount": "",
+            "chargeFeeBy": "",
+            "isInBps": false,
+            "feeReceiver": ""
+          },
+          "route": [
+            [
+              {
+                "pool": "0x7103eb3c9590d1281f7dc03b2a9ee27c39df5d54",
+                "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "tokenOut": "0xb200000000000000000000ab99cfa739e253872b",
+                "swapAmount": "1000000",
+                "amountOut": "199740",
+                "exchange": "aerodrome-cl-3",
+                "poolType": "uniswapv3",
+                "poolExtra": {
+                  "swapFee": 500,
+                  "priceLimit": "4295558253",
+                  "blockNumber": 59651650,
+                  "sB": 59651650
+                },
+                "extra": {
+                  "_cs": "14835003265252979393",
+                  "_ss": {
+                    "pool": "0x4ca5700b8094c5605d23cec7e6e7946ee02b0d00",
+                    "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "tokenOut": "0xb200000000000000000000ab99cfa739e253872b",
+                    "swapAmount": "1000000",
+                    "amountOut": "177290",
+                    "exchange": "scale",
+                    "poolType": "equalizer",
+                    "poolExtra": {
+                      "stable": false,
+                      "blockNumber": 58719843
+                    },
+                    "extra": null,
+                    "gas": 227000
+                  },
+                  "_ts": "1795120856",
+                  "nSqrtRx96": "35416978246873944857386197407",
+                  "nT": -16104,
+                  "rAI": "0",
+                  "ri": "c2f40e10KqpNAIqW"
+                },
+                "gas": 109334
+              }
+            ]
+          ],
+          "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+          "routeID": "c2f40e10KqpNAIqW",
+          "checksum": "14835003265252979393",
+          "timestamp": 1795120856
+        },
+        "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+      },
+      "requestId": "c2f40e10-2aaa-4d00-8a96-6637f1dbdda8"
+    },
+    "MSTRc": {
+      "code": 0,
+      "message": "successfully",
+      "data": {
+        "routeSummary": {
+          "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "amountIn": "1000000",
+          "amountInUsd": "0.9984140970944364",
+          "tokenOut": "0xb2000000000000000000004884b426556b92883d",
+          "amountOut": "1153063",
+          "amountOutUsd": "0.9977273817127815",
+          "gas": "330498",
+          "gasPrice": "6000000",
+          "gasUsd": "0.0034854922099518703",
+          "l1FeeUsd": "0.00008869617887705925",
+          "extraFee": {
+            "feeAmount": "",
+            "chargeFeeBy": "",
+            "isInBps": false,
+            "feeReceiver": ""
+          },
+          "route": [
+            [
+              {
+                "pool": "0x8b27f626ab668197000bc722a1012022caed10e2",
+                "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "tokenOut": "0xb2000000000000000000004884b426556b92883d",
+                "swapAmount": "1000000",
+                "amountOut": "1153063",
+                "exchange": "aerodrome-cl-3",
+                "poolType": "uniswapv3",
+                "poolExtra": {
+                  "swapFee": 500,
+                  "priceLimit": "4295558253",
+                  "blockNumber": 59652286,
+                  "sB": 59652286
+                },
+                "extra": {
+                  "_cs": "9530615532783706119",
+                  "_ss": {
+                    "pool": "0xcc2cb77d25efaf5f4516eb1cfc01d876bef27ca2",
+                    "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "tokenOut": "0xb2000000000000000000004884b426556b92883d",
+                    "swapAmount": "1000000",
+                    "amountOut": "975684",
+                    "exchange": "scale",
+                    "poolType": "equalizer",
+                    "poolExtra": {
+                      "stable": false,
+                      "blockNumber": 59565097
+                    },
+                    "extra": null,
+                    "gas": 227000
+                  },
+                  "_ts": "1795120857",
+                  "nSqrtRx96": "85095864441441867896829470192",
+                  "nT": 1429,
+                  "rAI": "0",
+                  "ri": "985299b5XPxM85oJ"
+                },
+                "gas": 109334
+              }
+            ]
+          ],
+          "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+          "routeID": "985299b5XPxM85oJ",
+          "checksum": "9530615532783706119",
+          "timestamp": 1795120857
+        },
+        "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+      },
+      "requestId": "985299b5-5cfc-4cf3-9a09-c863165f2ce2"
+    },
+    "SNDKc": {
+      "code": 0,
+      "message": "successfully",
+      "data": {
+        "routeSummary": {
+          "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "amountIn": "1000000",
+          "amountInUsd": "0.9984140970944364",
+          "tokenOut": "0xb200000000000000000000397293cb8cda9a10c5",
+          "amountOut": "130514",
+          "amountOutUsd": "0.9980159598842774",
+          "gas": "330498",
+          "gasPrice": "6000000",
+          "gasUsd": "0.0034854922099518703",
+          "l1FeeUsd": "0.00008869617887705925",
+          "extraFee": {
+            "feeAmount": "",
+            "chargeFeeBy": "",
+            "isInBps": false,
+            "feeReceiver": ""
+          },
+          "route": [
+            [
+              {
+                "pool": "0x5a8236f575471e7bfca2c8462a200c28f737246e",
+                "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "tokenOut": "0xb200000000000000000000397293cb8cda9a10c5",
+                "swapAmount": "1000000",
+                "amountOut": "130514",
+                "exchange": "aerodrome-cl-3",
+                "poolType": "uniswapv3",
+                "poolExtra": {
+                  "swapFee": 500,
+                  "priceLimit": "4295558253",
+                  "blockNumber": 59652363,
+                  "sB": 59652363
+                },
+                "extra": {
+                  "_cs": "6322402975898868067",
+                  "_ss": {
+                    "pool": "0x507b27040e73d67b72bb6620a4fed123cd866c8a",
+                    "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "tokenOut": "0xb200000000000000000000397293cb8cda9a10c5",
+                    "swapAmount": "1000000",
+                    "amountOut": "110808",
+                    "exchange": "scale",
+                    "poolType": "equalizer",
+                    "poolExtra": {
+                      "stable": false,
+                      "blockNumber": 59590482
+                    },
+                    "extra": null,
+                    "gas": 227000
+                  },
+                  "_ts": "1795120858",
+                  "nSqrtRx96": "28629408009646008907715447736",
+                  "nT": -20359,
+                  "rAI": "0",
+                  "ri": "707f353dqRdEWKTl"
+                },
+                "gas": 109334
+              }
+            ]
+          ],
+          "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+          "routeID": "707f353dqRdEWKTl",
+          "checksum": "6322402975898868067",
+          "timestamp": 1795120858
+        },
+        "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+      },
+      "requestId": "707f353d-a917-4458-a4e5-a19164e15d6f"
+    },
+    "SPCXc": {
+      "code": 0,
+      "message": "successfully",
+      "data": {
+        "routeSummary": {
+          "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "amountIn": "1000000",
+          "amountInUsd": "0.9985953117887395",
+          "tokenOut": "0xb2000000000000000000007b9fcbd005511acbd5",
+          "amountOut": "728857",
+          "amountOutUsd": "0.9974030643159608",
+          "gas": "330498",
+          "gasPrice": "6000703",
+          "gasUsd": "0.003485900593455803",
+          "l1FeeUsd": "0.00008686868668012187",
+          "extraFee": {
+            "feeAmount": "",
+            "chargeFeeBy": "",
+            "isInBps": false,
+            "feeReceiver": ""
+          },
+          "route": [
+            [
+              {
+                "pool": "0x0bf58fe0fac935ac69595c19b12ba0d75e3f8c0e",
+                "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "tokenOut": "0xb2000000000000000000007b9fcbd005511acbd5",
+                "swapAmount": "1000000",
+                "amountOut": "728857",
+                "exchange": "aerodrome-cl-3",
+                "poolType": "uniswapv3",
+                "poolExtra": {
+                  "swapFee": 500,
+                  "priceLimit": "4295558253",
+                  "blockNumber": 59652325,
+                  "sB": 59652325
+                },
+                "extra": {
+                  "_cs": "17864312732861255715",
+                  "_ss": {
+                    "pool": "0x00fbd3068aa6d1ef916ff0ed68aaa0ba7cad2c8a",
+                    "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "tokenOut": "0xb2000000000000000000007b9fcbd005511acbd5",
+                    "swapAmount": "1000000",
+                    "amountOut": "729128",
+                    "exchange": "metric-propamm",
+                    "poolType": "metric-propamm",
+                    "poolExtra": {
+                      "swapDir": false,
+                      "priceProvider": "",
+                      "blockNumber": 52832710
+                    },
+                    "extra": null,
+                    "gas": 215383
+                  },
+                  "_ts": "1795120859",
+                  "nSqrtRx96": "67655062767682755448357905301",
+                  "nT": -3159,
+                  "rAI": "0",
+                  "ri": "d4b2c0f7xR9N3IQD"
+                },
+                "gas": 109334
+              }
+            ]
+          ],
+          "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+          "routeID": "d4b2c0f7xR9N3IQD",
+          "checksum": "17864312732861255715",
+          "timestamp": 1795120859
+        },
+        "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+      },
+      "requestId": "d4b2c0f7-c51f-4ddc-8403-5f87eaefb3fb"
+    },
+    "TSLAc": {
+      "code": 0,
+      "message": "successfully",
+      "data": {
+        "routeSummary": {
+          "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "amountIn": "1000000",
+          "amountInUsd": "0.9985953117887395",
+          "tokenOut": "0xb2000000000000000000001e800a7f5189430cd0",
+          "amountOut": "266246",
+          "amountOutUsd": "0.9981135598965992",
+          "gas": "330498",
+          "gasPrice": "6000703",
+          "gasUsd": "0.003485900593455803",
+          "l1FeeUsd": "0.00008686868668012187",
+          "extraFee": {
+            "feeAmount": "",
+            "chargeFeeBy": "",
+            "isInBps": false,
+            "feeReceiver": ""
+          },
+          "route": [
+            [
+              {
+                "pool": "0x469337fdcc5e8f38e2e4b670b04f57865d13a7bb",
+                "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "tokenOut": "0xb2000000000000000000001e800a7f5189430cd0",
+                "swapAmount": "1000000",
+                "amountOut": "266246",
+                "exchange": "aerodrome-cl-3",
+                "poolType": "uniswapv3",
+                "poolExtra": {
+                  "swapFee": 500,
+                  "priceLimit": "4295558253",
+                  "blockNumber": 59651368,
+                  "sB": 59651368
+                },
+                "extra": {
+                  "_cs": "7813356856685235336",
+                  "_ss": {
+                    "pool": "0x519974ceba3437ab1ced0b77570ca65a25a9ab78",
+                    "tokenIn": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "tokenOut": "0xb2000000000000000000001e800a7f5189430cd0",
+                    "swapAmount": "1000000",
+                    "amountOut": "233798",
+                    "exchange": "scale",
+                    "poolType": "equalizer",
+                    "poolExtra": {
+                      "stable": false,
+                      "blockNumber": 56610014
+                    },
+                    "extra": null,
+                    "gas": 227000
+                  },
+                  "_ts": "1795120860",
+                  "nSqrtRx96": "40890626195394646922335604316",
+                  "nT": -13230,
+                  "rAI": "0",
+                  "ri": "efda2f77D_1IGaNo"
+                },
+                "gas": 109334
+              }
+            ]
+          ],
+          "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+          "routeID": "efda2f77D_1IGaNo",
+          "checksum": "7813356856685235336",
+          "timestamp": 1795120860
+        },
+        "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+      },
+      "requestId": "efda2f77-0ffd-4819-a368-fdcba5819147"
+    }
+  }
+}

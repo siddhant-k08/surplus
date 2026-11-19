@@ -104,6 +104,14 @@ describe("toCandidates", () => {
         expect(c.map((x) => x.weight)).toEqual([450, 270]);
     });
 
+    it("drops tokens below the minimum liquidity score", () => {
+        const liq = new Map([[NVDA, 4], [TSLA, 0]]);
+        const all = [fits[0]!, fits[2]!];
+        expect(toCandidates(all, liq).map((x) => x.symbol)).toEqual(["NVDAc", "TSLAc"]);
+        expect(toCandidates(all, liq, 3, 1).map((x) => x.symbol)).toEqual(["NVDAc"]);
+        expect(toCandidates(all, new Map(), 3, 1)).toEqual([]);
+    });
+
     it("treats missing liquidity as zero and clamps to the 0 to 5 range", () => {
         const c = toCandidates([fits[0]!], new Map([[NVDA, 99]]));
         expect(c[0]!.weight).toBe(Math.round((0.5 * 5 + 0.2 * 4 + 0.3 * 5) * 100));

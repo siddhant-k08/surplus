@@ -113,3 +113,40 @@ export function liquidityScores(
     }
     return out;
 }
+
+export const DEXSCREENER_TOKEN_PAIRS_URL = "https://api.dexscreener.com/token-pairs/v1/base";
+
+/** Every pool for one token. The batch endpoint returns only one pool per token, so use this one. */
+export async function fetchTokenPairs(
+    token: string,
+    fetchImpl: typeof fetch = fetch,
+): Promise<unknown> {
+    const res = await fetchImpl(`${DEXSCREENER_TOKEN_PAIRS_URL}/${token.toLowerCase()}`);
+    if (!res.ok) throw new Error(`DexScreener returned HTTP ${res.status} for ${token}`);
+    return res.json();
+}
+
+export interface LiquidityLoad {
+    scores: Map<string, number>;
+    pairs: Pair[];
+}
+
+/** One request per token, spaced out, then scores from each token's deepest USDC pool. */
+export async function loadLiquidityScores(
+    tokens: readonly string[],
+    opts: {
+        fetchImpl?: typeof fetch;
+        delayMs?: number;
+        sleep?: (ms: number) => Promise<void>;
+        usdc?: string;
+    } = {},
+): Promise<LiquidityLoad> {
+    const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const delay = opts.delayMs ?? 400;
+    const pairs: Pair[] = [];
+    for (const [i, token] of tokens.entries()) {
+        if (i > 0 && delay > 0) await sleep(delay);
+        pairs.push(...parsePairs(await fetchTokenPairs(token, opts.fetchImpl)));
+    }
+    return { scores: liquidityScores(pairs, tokens, opts.usdc), pairs };
+}
