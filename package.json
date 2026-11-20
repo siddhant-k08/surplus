@@ -1,9 +1,13 @@
 {
     "name": "surplus",
     "private": true,
-    "workspaces": ["packages/*", "apps/*"],
+    "workspaces": [
+        "packages/*",
+        "apps/*"
+    ],
     "scripts": {
         "test": "npm test -w @surplus/core",
-        "typecheck": "npm run typecheck -w @surplus/core"
+        "typecheck": "npm run typecheck -w @surplus/core",
+        "typecheck:scripts": "tsc -p scripts"
     }
 }
