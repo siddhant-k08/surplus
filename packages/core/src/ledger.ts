@@ -38,6 +38,8 @@ export interface PostInput {
     memo?: string;
     txHash?: string;
     idempotencyKey?: string;
+    /** What this movement was for. Structured so state can be rebuilt from the ledger, unlike a memo. */
+    briefId?: string;
 }
 
 export interface LedgerTx {
@@ -49,6 +51,7 @@ export interface LedgerTx {
     readonly memo?: string;
     readonly txHash?: string;
     readonly idempotencyKey?: string;
+    readonly briefId?: string;
 }
 
 function sameLines(a: readonly Line[], b: readonly Line[]): boolean {
@@ -103,6 +106,7 @@ export class Ledger {
             ...(input.memo !== undefined && { memo: input.memo }),
             ...(input.txHash !== undefined && { txHash: input.txHash }),
             ...(input.idempotencyKey !== undefined && { idempotencyKey: input.idempotencyKey }),
+            ...(input.briefId !== undefined && { briefId: input.briefId }),
         });
 
         this.txs.push(tx);
@@ -143,6 +147,7 @@ export class Ledger {
                 ...(t.memo !== undefined && { memo: t.memo }),
                 ...(t.txHash !== undefined && { txHash: t.txHash }),
                 ...(t.idempotencyKey !== undefined && { idempotencyKey: t.idempotencyKey }),
+                ...(t.briefId !== undefined && { briefId: t.briefId }),
             });
         }
         return ledger;
