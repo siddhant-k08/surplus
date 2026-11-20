@@ -30,13 +30,13 @@ npm test                    # all core tests
 npm run typecheck           # core
 npm run typecheck:scripts   # scripts
 npx tsx scripts/demo-sim.ts             # fully simulated loop
-npx tsx scripts/demo-live.ts            # real token list, liquidity, KyberSwap quotes; simulated fills
+npx tsx scripts/demo-live.ts            # newest real brief, token list, liquidity, KyberSwap quotes; simulated fills
 npx tsx scripts/demo-research.ts --dry-run   # real SEC filings, no model calls, prints prompt sizes
 npx tsx scripts/demo-research.ts             # real research brief (costs a few cents, or free tier)
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: 20 files, 182 tests. 187 once the theme-keyword patch is applied (see HANDOFF, "Where we stopped").
+Last known test count: 20 files, 189 tests.
 
 ## Money and ledger rules (do not break)
 

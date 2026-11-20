@@ -1,0 +1,443 @@
+{
+  "provider": "gemini",
+  "model": "gemini-3.1-flash-lite",
+  "brief": {
+    "id": "brief-2026-11-20T21-04-54-556Z",
+    "createdAt": "2026-11-20T21:04:54.556Z",
+    "sources": [
+      {
+        "id": "TSLA-10-K-0001628280-26-003952",
+        "tier": 1,
+        "title": "Tesla, Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1318605/000162828026003952/tsla-20251231.htm",
+        "publishedAt": "2026-01-29",
+        "retrievedAt": "2026-11-20T21:04:55.709Z",
+        "excerpt": "we currently expect our capital expenditures to be in excess of $20 billion in 2026, driven by our AI initiatives, including investments in compute infrastructure and data centers"
+      },
+      {
+        "id": "GOOGL-10-Q-0001652044-26-000084",
+        "tier": 1,
+        "title": "Alphabet Inc. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000084/goog-20260930.htm",
+        "publishedAt": "2026-10-29",
+        "retrievedAt": "2026-11-20T21:04:56.336Z",
+        "excerpt": "Google Cloud generates product revenues primarily from the sale of TPU systems."
+      },
+      {
+        "id": "SNDK-10-Q-0001628280-26-068601",
+        "tier": 1,
+        "title": "Sandisk Corp 10-Q for period ending 2026-10-02",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/2023554/000162828026068601/sndk-20261002.htm",
+        "publishedAt": "2026-10-30",
+        "retrievedAt": "2026-11-20T21:04:56.875Z",
+        "excerpt": "our broad and ever-expanding portfolio delivers powerful flash storage solutions for artificial intelligence (“AI”) workloads in datacenters"
+      },
+      {
+        "id": "NVDA-10-K-0001045810-26-000021",
+        "tier": 1,
+        "title": "NVIDIA CORP 10-K for period ending 2026-01-25",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+        "publishedAt": "2026-02-25",
+        "retrievedAt": "2026-11-20T21:04:58.012Z",
+        "excerpt": "All major cloud service providers, or CSPs, AI model makers, and enterprises use our data center-scale infrastructure and computing platforms"
+      },
+      {
+        "id": "META-10-Q-0001628280-26-066773",
+        "tier": 1,
+        "title": "Meta Platforms, Inc. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1326801/000162828026066773/meta-20260930.htm",
+        "publishedAt": "2026-10-22",
+        "retrievedAt": "2026-11-20T21:04:59.265Z",
+        "excerpt": "we have significantly increased our infrastructure investments in connection with our AI initiatives, including third-party cloud capacity arrangements and investments in servers, data centers"
+      },
+      {
+        "id": "MSFT-10-K-0001193125-26-323660",
+        "tier": 1,
+        "title": "MICROSOFT CORP 10-K for period ending 2026-06-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526323660/msft-20260630.htm",
+        "publishedAt": "2026-07-29",
+        "retrievedAt": "2026-11-20T21:04:59.931Z",
+        "excerpt": "We have made and are continuing to make significant capital and operational investments to develop, train, deploy, and support AI models and related cloud-based services, including building and expanding datacenters"
+      },
+      {
+        "id": "AMZN-10-K-0001018724-26-000004",
+        "tier": 1,
+        "title": "AMAZON COM INC 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000004/amzn-20251231.htm",
+        "publishedAt": "2026-02-06",
+        "retrievedAt": "2026-11-20T21:05:01.161Z",
+        "excerpt": "through AWS, which offers a broad set of on-demand technology services, including compute, storage, database, analytics, artificial intelligence and machine learning"
+      },
+      {
+        "id": "META-10-K-0001628280-26-003942",
+        "tier": 1,
+        "title": "Meta Platforms, Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1326801/000162828026003942/meta-20251231.htm",
+        "publishedAt": "2026-01-29",
+        "retrievedAt": "2026-11-20T21:04:59.151Z",
+        "excerpt": "Currently, we generate substantially all of our revenue from selling advertising placements on our family of apps to marketers, which is reflected in FoA."
+      },
+      {
+        "id": "AMZN-10-Q-0001018724-26-000040",
+        "tier": 1,
+        "title": "AMAZON COM INC 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000040/amzn-20260930.htm",
+        "publishedAt": "2026-10-30",
+        "retrievedAt": "2026-11-20T21:05:01.312Z",
+        "excerpt": "The North America segment primarily consists of amounts earned from retail sales of consumer products (including from sellers) and advertising and subscription services through North America-focused online and physical stores."
+      },
+      {
+        "id": "SPCX-10-Q-0001628280-26-066880",
+        "tier": 1,
+        "title": "SPACE EXPLORATION TECHNOLOGIES CORP 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1181412/000162828026066880/spcx-20260930.htm",
+        "publishedAt": "2026-10-22",
+        "retrievedAt": "2026-11-20T21:04:58.550Z",
+        "excerpt": "SI segment generates revenue from (i) the sale of ad products displayed on its X platform, and (ii) providing SI solutions and infrastructure, which includes subscription-related offerings for Grok, Cursor, and X products"
+      }
+    ],
+    "themes": [
+      {
+        "themeId": "ai-compute",
+        "claims": [
+          {
+            "id": "ai-compute:c1",
+            "type": "fact",
+            "text": "Tesla is investing in compute hardware and expanding data centers to support its artificial intelligence training capacity.",
+            "sourceIds": [
+              "TSLA-10-K-0001628280-26-003952"
+            ],
+            "quotes": [
+              {
+                "sourceId": "TSLA-10-K-0001628280-26-003952",
+                "text": "we currently expect our capital expenditures to be in excess of $20 billion in 2026, driven by our AI initiatives, including investments in compute infrastructure and data centers"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c2",
+            "type": "fact",
+            "text": "Alphabet generates revenue from cloud-based solutions and products including Tensor Processing Unit (TPU) systems.",
+            "sourceIds": [
+              "GOOGL-10-Q-0001652044-26-000084"
+            ],
+            "quotes": [
+              {
+                "sourceId": "GOOGL-10-Q-0001652044-26-000084",
+                "text": "Google Cloud generates product revenues primarily from the sale of TPU systems."
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c3",
+            "type": "fact",
+            "text": "Sandisk produces flash storage solutions specifically for AI workloads in datacenters.",
+            "sourceIds": [
+              "SNDK-10-Q-0001628280-26-068601"
+            ],
+            "quotes": [
+              {
+                "sourceId": "SNDK-10-Q-0001628280-26-068601",
+                "text": "our broad and ever-expanding portfolio delivers powerful flash storage solutions for artificial intelligence (“AI”) workloads in datacenters"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c4",
+            "type": "fact",
+            "text": "NVIDIA provides data center-scale infrastructure and computing platforms used by major cloud service providers to accelerate AI solutions.",
+            "sourceIds": [
+              "NVDA-10-K-0001045810-26-000021"
+            ],
+            "quotes": [
+              {
+                "sourceId": "NVDA-10-K-0001045810-26-000021",
+                "text": "All major cloud service providers, or CSPs, AI model makers, and enterprises use our data center-scale infrastructure and computing platforms"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c5",
+            "type": "fact",
+            "text": "Meta is making significant investments in infrastructure to support AI initiatives including third-party cloud capacity and data centers.",
+            "sourceIds": [
+              "META-10-Q-0001628280-26-066773"
+            ],
+            "quotes": [
+              {
+                "sourceId": "META-10-Q-0001628280-26-066773",
+                "text": "we have significantly increased our infrastructure investments in connection with our AI initiatives, including third-party cloud capacity arrangements and investments in servers, data centers"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c6",
+            "type": "fact",
+            "text": "Microsoft is investing in cloud and AI infrastructure to support services like Azure, which include AI and datacenter capabilities.",
+            "sourceIds": [
+              "MSFT-10-K-0001193125-26-323660"
+            ],
+            "quotes": [
+              {
+                "sourceId": "MSFT-10-K-0001193125-26-323660",
+                "text": "We have made and are continuing to make significant capital and operational investments to develop, train, deploy, and support AI models and related cloud-based services, including building and expanding datacenters"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c7",
+            "type": "fact",
+            "text": "Amazon serves developers and enterprises through AWS, which provides cloud computing, storage, and AI and machine learning services.",
+            "sourceIds": [
+              "AMZN-10-K-0001018724-26-000004"
+            ],
+            "quotes": [
+              {
+                "sourceId": "AMZN-10-K-0001018724-26-000004",
+                "text": "through AWS, which offers a broad set of on-demand technology services, including compute, storage, database, analytics, artificial intelligence and machine learning"
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb2000000000000000000001e800a7f5189430cd0",
+            "symbol": "TSLAc",
+            "fit": 3,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c1"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000002d0ba3164cc74f58b7",
+            "symbol": "GOOGLc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c2"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000397293cb8cda9a10c5",
+            "symbol": "SNDKc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c3"
+            ]
+          },
+          {
+            "asset": "0xb20000000000000000000078ee7ce2fe4908108c",
+            "symbol": "NVDAc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c4"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000008bc8786b856e61707c",
+            "symbol": "METAc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c5"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000ab99cfa739e253872b",
+            "symbol": "MSFTc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c6"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000d9192b6b456483c2e8",
+            "symbol": "AMZNc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c7"
+            ]
+          }
+        ],
+        "gap": false
+      },
+      {
+        "themeId": "platform-giants",
+        "claims": [
+          {
+            "id": "platform-giants:c1",
+            "type": "fact",
+            "text": "Tesla generates revenue from subscriptions for FSD (Supervised) and premium connectivity.",
+            "sourceIds": [
+              "TSLA-10-K-0001628280-26-003952"
+            ],
+            "quotes": [
+              {
+                "sourceId": "TSLA-10-K-0001628280-26-003952",
+                "text": "Customers may purchase subscriptions, including FSD (Supervised) and premium connectivity, after taking delivery of their vehicles. Revenue from subscriptions is recognized either over time or point in time depending on the nature of contractual terms."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c3",
+            "type": "fact",
+            "text": "Meta generates substantially all of its revenue from selling advertising placements.",
+            "sourceIds": [
+              "META-10-K-0001628280-26-003942"
+            ],
+            "quotes": [
+              {
+                "sourceId": "META-10-K-0001628280-26-003942",
+                "text": "Currently, we generate substantially all of our revenue from selling advertising placements on our family of apps to marketers, which is reflected in FoA."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c4",
+            "type": "fact",
+            "text": "Microsoft generates revenue through advertising, subscriptions for consumer services, and the sale of devices.",
+            "sourceIds": [
+              "MSFT-10-K-0001193125-26-323660"
+            ],
+            "quotes": [
+              {
+                "sourceId": "MSFT-10-K-0001193125-26-323660",
+                "text": "We generate revenue by offering a wide range of cloud-based solutions, content, and other services to people and businesses; licensing and supporting an array of software products; delivering relevant online advertising to a global audience; and designing and selling devices."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c6",
+            "type": "fact",
+            "text": "Amazon generates revenue through e-commerce retail sales, advertising services, and subscription services.",
+            "sourceIds": [
+              "AMZN-10-Q-0001018724-26-000040"
+            ],
+            "quotes": [
+              {
+                "sourceId": "AMZN-10-Q-0001018724-26-000040",
+                "text": "The North America segment primarily consists of amounts earned from retail sales of consumer products (including from sellers) and advertising and subscription services through North America-focused online and physical stores."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c7",
+            "type": "fact",
+            "text": "SpaceX generates revenue from advertising on its X platform and subscriptions for Grok and X products.",
+            "sourceIds": [
+              "SPCX-10-Q-0001628280-26-066880"
+            ],
+            "quotes": [
+              {
+                "sourceId": "SPCX-10-Q-0001628280-26-066880",
+                "text": "SI segment generates revenue from (i) the sale of ad products displayed on its X platform, and (ii) providing SI solutions and infrastructure, which includes subscription-related offerings for Grok, Cursor, and X products"
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb2000000000000000000001e800a7f5189430cd0",
+            "symbol": "TSLAc",
+            "fit": 3,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c1"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000008bc8786b856e61707c",
+            "symbol": "METAc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c3"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000ab99cfa739e253872b",
+            "symbol": "MSFTc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c4"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000d9192b6b456483c2e8",
+            "symbol": "AMZNc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c6"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000007b9fcbd005511acbd5",
+            "symbol": "SPCXc",
+            "fit": 3,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c7"
+            ]
+          }
+        ],
+        "gap": false
+      },
+      {
+        "themeId": "longevity-biotech",
+        "claims": [
+          {
+            "id": "longevity-biotech:c1",
+            "type": "fact",
+            "text": "NVIDIA provides Clara for healthcare, which is part of their full software stack, as an application for enterprise AI.",
+            "sourceIds": [
+              "NVDA-10-K-0001045810-26-000021"
+            ],
+            "quotes": [
+              {
+                "sourceId": "NVDA-10-K-0001045810-26-000021",
+                "text": "Over the past 5 years, we have built full software stacks that run on top of our GPUs and CUDA to bring AI to the world’s largest industries, including NVIDIA DRIVE stack for autonomous driving, Clara for healthcare"
+              }
+            ]
+          }
+        ],
+        "fits": [],
+        "gap": true,
+        "gapReason": "No candidate had a fit supported by a verified fact from the retrieved sources."
+      }
+    ],
+    "disclaimer": "Informational research only. Not investment advice. Simulated where labeled."
+  },
+  "issues": [],
+  "rejected": [
+    "platform-giants: platform-giants:c2: fact dropped, quote is 343 characters, over the 300 limit. Tried: \"We generate revenues by delivering relevant, cost-effective online advertising; cloud-based solutions that provide enter\"",
+    "platform-giants: platform-giants:c5: fact dropped, quote not found in the cited document. Tried: \"The Company’s advertising services include third-party licensing arrangements and the Company’s own advertising platform\"",
+    "platform-giants: fit GOOGLc: no surviving fact about this company",
+    "platform-giants: fit AAPLc: no surviving fact about this company",
+    "longevity-biotech: fit NVDAc: no supporting quote mentions the theme (aging, ageing, longevity, healthspan, lifespan, age-related, therapeutic, therapeutics, drug, drugs, disease, diseases, biotech, biotechnology)"
+  ],
+  "usage": {
+    "inputTokens": 70584,
+    "outputTokens": 2361,
+    "calls": 3
+  },
+  "costUsd": 0.0211875,
+  "costUsdcMinor": "21188",
+  "secWarnings": []
+}

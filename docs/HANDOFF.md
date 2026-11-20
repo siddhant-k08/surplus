@@ -4,29 +4,48 @@ Written 21 Nov 2026 when the project moved from a Claude chat to Claude Code. Th
 
 ## Where we stopped
 
-1. The research pipeline works end to end against real SEC filings and Gemini (`gemini-3.1-flash-lite`). Latest real run: 3 model calls, about 70,000 input tokens, cost about $0.021 booked at paid-tier rates, zero validation issues.
-2. A patch was just handed over and may not be applied yet. Check with `npm test`: 187 tests means applied, 182 means not. The patch:
-   - `ThemeSpec` gains optional `keywords`. A fit survives only if one of its supporting quotes mentions a keyword (`mentionsAny`, whole word or phrase, case-insensitive). Evidence counts only supporting facts that pass this.
-   - When a fact is dropped for a non-verbatim quote, the message includes `Tried: "<first 120 chars of the attempted quote>"`.
-   - `keywordsFor` (passage selection) also uses the theme keywords.
-   - `scripts/demo-research.ts` THEMES get keyword lists (ai-compute, platform-giants, longevity-biotech).
-   - Five new tests: `mentionsAny`, keyword drop, attempted-quote message.
-3. Open diagnosis: in the last run, NVDA, MSFT and AMZN dropped out of ai-compute because their quotes were not verbatim. After the patch, rerun `demo-research.ts` and read the `Tried:` lines. If the model paraphrased, it is a Flash-Lite limit: keep Flash-Lite for testing, use a Flash model for the recorded demo. If a quote looks exact but failed, `htmlToText` in `src/edgar.ts` is altering filing text; fix it.
-4. Also seen in the last run: Alphabet got fit 3 in longevity-biotech from a quote about X, its moonshot factory. The keyword patch is meant to stop that; confirm longevity-biotech comes out as a gap.
+1. The research pipeline works end to end against real SEC filings and Gemini (`gemini-3.1-flash-lite`). Latest real run: 3 model calls, about 70,600 input tokens, cost about $0.021 booked at paid-tier rates, zero validation issues.
+2. The keyword patch is applied and committed. `npm test` is 188 tests in 20 files.
+3. Milestone 1 (research quality) is closed, 21 Nov 2026. What the diagnosis found:
+   - The dominant cause of dropped facts was never paraphrasing or `htmlToText`. It was the `MAX_QUOTE` 300-character cap. The model quoted real filing text and ran past 300 characters, usually to finish a sentence or a list of examples, and `quoteInText` rejected it on length while the drop message said "no verbatim quote found". A read-only spike confirmed the Alphabet quote was present verbatim in the filing; `htmlToText` is exonerated.
+   - Fixed by `quoteCheck` in `src/pipeline.ts`, which returns `ok`, `too_short`, `too_long`, `not_found`, plus an `uncited_source` case in `assembleTheme`. Drop messages now name the reason and the character count. `quoteInText` is a boolean wrapper over it, so callers are unchanged.
+   - The prompt now states the cap as a hard rule, asks for under 200 characters, allows a quote to start and stop mid-sentence, and forbids extending a quote to finish a sentence or a list.
+   - Result: drops fell from 9 to 5. ai-compute recovered GOOGL, NVDA, MSFT and AMZN (all at evidence 2). platform-giants went from 1 surviving fit to 5 (META, AMZN, MSFT, TSLA, SPCX).
+   - longevity-biotech comes out as a gap, and the Alphabet moonshot-factory leak is gone. NVDA is now correctly dropped there by the keyword rule. The keyword patch does what it was meant to do.
+4. Residual, and it is a model limit rather than a bug: Flash-Lite still produces the occasional over-long or recited quote. In the last run GOOGL lost a fact to a 343-character quote and AAPL lost one to a quote not present in the cited document. Both are reported accurately now. Per the original plan, keep Flash-Lite for testing and use a Flash model for the recorded demo; expect those two to survive there.
+
+## Integration milestone, closed 21 Nov 2026
+
+`demo-live.ts` now runs the real loop: newest brief from `docs/briefs/`, real metered cost booked, surplus, allocation, real KyberSwap quotes, simulated fills, reconciled ledger.
+
+- `loadLatestBrief()` reads `docs/briefs/*.json`, picks the newest by `brief.createdAt`, and reads `costUsdcMinor` as a decimal string so the cost never passes through a float.
+- The brief is re-checked with `validateBrief` against the set trusted right now, not the set trusted when it was written, and the script refuses to trade if it does not validate. A brief can outlive a token's trusted status.
+- Cost booked as `accrueCost({ kind: "llm", amount: costUsdcMinor, memo: "metered estimate at paid-tier rates" })`, ids keyed to the brief id so a rerun is idempotent. The $3.00 sale price is still simulated and labelled.
+- Each proposed leg prints the verified claim and its quote underneath, which is the rule from "Known limits of the research checks".
+- Last run: 12 legs, 0.991524 USDC total, 32 pre-trade gates ok, 0 warnings, 0 blocks, 12 simulated fills, `reconcileInternal` ok. longevity-biotech stays uninvested with reason `gap` and 1 unit lands as `unassigned` rounding.
+
+Bug this found and fixed in core: `Treasury.execute` keyed fills `fill:<proposal>:<asset>`, so a proposal holding two legs for the same asset threw "Idempotency key reused with different content" and the whole loop died. Real research puts one company in several themes (TSLA, META, MSFT and AMZN each appear twice), which the placeholder fits never did. The key is now `fill:<proposal>:<legIndex>:<asset>`; legs are fixed when the proposal is created, so the index is stable across retries. Regression test added in `test/treasury.test.ts`.
+
+## Open question for Siddhant, before mainnet
+
+The 12 legs average about $0.083, and the quotes report about $0.0032 gas each, so roughly 4 percent per leg and about $0.038 total on $0.99 invested. Four of the ten tokens are bought twice because they sit in two themes, paying gas twice for the same token. Two possible answers, both his call because both change money semantics:
+
+1. Merge legs with the same asset across themes before execution, keeping per-theme attribution in the ledger lines. Saves four swaps.
+2. Raise `minTradeUsdc` so fewer, larger legs survive, and accept more uninvested money with reason `below_minimum`.
+
+Nothing is changed here yet. The existing behaviour is correct, just gas-inefficient at these sizes.
 
 ## Next milestones, in order
 
-1. Close the research-quality loop above.
-2. Integration: make `demo-live.ts` use the latest real brief from `docs/briefs/` instead of placeholder fits, and book the real model cost with `Treasury.accrueCost({ kind: "llm", ... })`, memo "metered estimate at paid-tier rates". Result: research, booked cost, surplus, allocation, real quotes, simulated fills, reconciled ledger.
-3. x402 paid endpoint on Base Sepolia in `apps/api`. Verify package names and flow against the CDP seller quickstart (https://docs.cdp.coinbase.com/x402/quickstart-for-sellers) before writing code. The free x402.org facilitator supports Base Sepolia only; mainnet needs the CDP facilitator. Needs a funded test wallet.
-4. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.
-5. Owner EIP-712 signature on approvals, persistence, deployment, onchain reconciliation.
-6. Demo rehearsal, video, X post tagging @buildonbase, submission form. Re-check the Quest page rules on 24 Nov and 2 Dec, and re-read base.org/stocks before any mainnet use.
-7. Real swaps only after Siddhant's explicit authorization, eligibility advice, a spend cap, the mainnet flag, and a throwaway wallet. Use fewer, larger legs (about $1 minimum): gas is 2 to 4 percent of a $0.10 leg.
+1. x402 paid endpoint on Base Sepolia in `apps/api`. Verify package names and flow against the CDP seller quickstart (https://docs.cdp.coinbase.com/x402/quickstart-for-sellers) before writing code. The free x402.org facilitator supports Base Sepolia only; mainnet needs the CDP facilitator. Needs a funded test wallet.
+2. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.
+3. Owner EIP-712 signature on approvals, persistence, deployment, onchain reconciliation.
+4. Demo rehearsal, video, X post tagging @buildonbase, submission form. Re-check the Quest page rules on 24 Nov and 2 Dec, and re-read base.org/stocks before any mainnet use.
+5. Real swaps only after Siddhant's explicit authorization, eligibility advice, a spend cap, the mainnet flag, and a throwaway wallet. Use fewer, larger legs (about $1 minimum): gas is 2 to 4 percent of a $0.10 leg.
 
 ## Core modules (packages/core/src)
 
-money, ledger, mandate, surplus, policy, allocator (water-filling; leaves unplaceable money uninvested with reasons gap, company_cap, max_trade, below_minimum, unassigned), tokens (Coinbase token API, paginated by next_page_token), research (brief types, `validateBrief`, `isFactSupported`, `toCandidates(fits, liquidity, floor = 3, minLiquidity = 0)`), approval (proposal state machine), registry, liquidity (DexScreener per-token endpoint), reconcile, treasury, quote (KyberSwap), gates, pipeline (research orchestration and verification), edgar (SEC client and doc provider), anthropic, gemini.
+money, ledger, mandate, surplus, policy, allocator (water-filling; leaves unplaceable money uninvested with reasons gap, company_cap, max_trade, below_minimum, unassigned), tokens (Coinbase token API, paginated by next_page_token), research (brief types, `validateBrief`, `isFactSupported`, `toCandidates(fits, liquidity, floor = 3, minLiquidity = 0)`), approval (proposal state machine), registry, liquidity (DexScreener per-token endpoint), reconcile, treasury, quote (KyberSwap), gates, pipeline (research orchestration and verification; `quoteCheck` gives the per-quote verdict, `quoteInText` wraps it, `mentionsAny` is the theme-relevance rule), edgar (SEC client and doc provider), anthropic, gemini.
 
 ## Verified facts (with where they came from)
 
@@ -51,6 +70,8 @@ money, ledger, mandate, surplus, policy, allocator (water-filling; leaves unplac
 - A verbatim quote proves the text exists, not that it supports the claim. Numbers are checked in code; extra words (product names, causes) are discouraged only by the prompt. Always show the quote under each claim in any UI.
 - Text injected into a filing and quoted verbatim would pass verification (a test documents this).
 - Custom user themes have no keywords yet, so the relevance check does not apply to them.
+- The 300-character cap discards accurate quotes. This is deliberate (short excerpts, and a fact's text is checked only against its quotes) but it means a fact whose only proof is one long sentence cannot survive. The prompt now steers around it and the drop message names it, so it is visible rather than silent.
+- A `not_found` verdict can mean the model recited a different filing from memory rather than inventing text. AAPL did this in the 21 Nov run, quoting Apple advertising language absent from the retrieved document.
 
 ## Environment (.env, never committed)
 
