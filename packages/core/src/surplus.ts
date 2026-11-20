@@ -42,7 +42,7 @@ export function computeSurplus(i: SurplusInput): SurplusResult {
 export function bookSurplus(
     ledger: Ledger,
     r: SurplusResult,
-    opts: { mode: Mode; at: Date; key: string },
+    opts: { mode: Mode; at: Date; key: string; briefId?: string },
 ): void {
     if (r.reserveTopUp > 0n) {
         ledger.post({
@@ -50,6 +50,7 @@ export function bookSurplus(
             mode: opts.mode,
             at: opts.at,
             idempotencyKey: `${opts.key}:reserve`,
+            ...(opts.briefId !== undefined && { briefId: opts.briefId }),
             lines: [
                 { account: "reserve", amount: r.reserveTopUp },
                 { account: "cash.operating", amount: -r.reserveTopUp },
@@ -65,6 +66,7 @@ export function bookSurplus(
             mode: opts.mode,
             at: opts.at,
             idempotencyKey: `${opts.key}:alloc`,
+            ...(opts.briefId !== undefined && { briefId: opts.briefId }),
             lines,
         });
     }

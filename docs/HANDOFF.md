@@ -5,7 +5,7 @@ Written 21 Nov 2026 when the project moved from a Claude chat to Claude Code. Th
 ## Where we stopped
 
 1. The research pipeline works end to end against real SEC filings and Gemini (`gemini-3.1-flash-lite`). Latest real run: 3 model calls, about 70,600 input tokens, cost about $0.021 booked at paid-tier rates, zero validation issues.
-2. `npm test` runs core (208 tests, 23 files) and the API (23 tests).
+2. `npm test` runs core (214 tests, 23 files) and the API (23 tests).
 3. Milestone 1 (research quality) is closed, 21 Nov 2026. What the diagnosis found:
    - The dominant cause of dropped facts was never paraphrasing or `htmlToText`. It was the `MAX_QUOTE` 300-character cap. The model quoted real filing text and ran past 300 characters, usually to finish a sentence or a list of examples, and `quoteInText` rejected it on length while the drop message said "no verbatim quote found". A read-only spike confirmed the Alphabet quote was present verbatim in the filing; `htmlToText` is exonerated.
    - Fixed by `quoteCheck` in `src/pipeline.ts`, which returns `ok`, `too_short`, `too_long`, `not_found`, plus an `uncited_source` case in `assembleTheme`. Drop messages now name the reason and the character count. `quoteInText` is a boolean wrapper over it, so callers are unchanged.
@@ -109,7 +109,25 @@ How it hangs together:
 
 Verified live, not just in tests: fresh ledger, real purchase, kill, restart. The restart reported `1 entries restored, 1 sales, cash 0.010000 USDC` and `/ledger` returned the entry with its `txHash` and the brief id. A second purchase appended as id 2 rather than overwriting. Sale transactions `0x137ee4ca...` and `0xaabf0aed...`.
 
-Known limit, worth stating: `Treasury` keeps its per-brief revenue and cost tallies and its `seenPayments`/`seenCosts` sets in memory, and those are not rebuilt by replaying the ledger. Double booking is still prevented, because the ledger's own idempotency index is restored and that is the real guard. But `settleBrief` after a restart would compute a surplus from zero revenue. The API never calls it, so nothing is wrong today; fix this before the API settles briefs or invests.
+## Treasury state restored from the ledger, closed 21 Nov 2026
+
+The limit left by the persistence milestone is fixed: `Treasury` now rebuilds its derived state from the ledger, so a restored ledger gives a correct treasury rather than one that thinks every brief earned nothing.
+
+The blocker was that the ledger had no structured record of what a movement was *for*. A memo is free-form, so attributing revenue meant parsing prose. `PostInput` and `LedgerTx` therefore gained an optional `briefId`, which `Treasury` sets on `PAYMENT_RECEIVED` and `COST_ACCRUED`, and `bookSurplus` sets on `RESERVE_TOPUP` and `SURPLUS_ALLOCATED`. It persists and replays like any other field.
+
+`rebuildFromLedger` runs automatically in the constructor whenever the injected ledger has entries, so a caller cannot forget to ask for it. It restores:
+
+- `seenPayments` and `seenCosts`, from the `pay:` and `cost:` idempotency key prefixes
+- per-brief `revenue` and `costs`, from the cash line of each attributed entry
+- the settled `SurplusResult`, where `reserveTopUp`, `surplus`, `investable` and `retained` come straight from the booked lines, and `net` and `shortfall` follow from revenue minus costs
+
+Why restoring the settled result matters, and it is the sharp edge here: after a restart the reserve is already at target, so recomputing a settlement would see no reserve gap and report a larger surplus than was actually booked. Worse, `bookSurplus` would then try to post that different result under the same idempotency key. Verified against the pre-fix code, that throws `Idempotency key brief-b1:alloc reused with different content`. So the old behaviour was not merely wrong numbers, it would break the settle path after any restart. Five tests cover this, all four of the main ones confirmed failing against the old code.
+
+A brief that settled with net at or below zero books nothing and leaves no trace, so it is treated as unsettled on restore. Re-settling it books nothing again, so this is harmless.
+
+Backward compatibility: entries written before `briefId` existed still load, and their payment ids are still restored so they cannot be booked twice, but their money is not attributed to any brief. The two demo sales already in `data/ledger-testnet.jsonl` are in that state. Deleting that file gives a clean start; the onchain record is permanent either way. Pinned by a test.
+
+Still in memory and not restored: `records`, the proposal and approval state machines. That is correct for now because an approval is bound to a quote and expires in minutes, so a proposal should not survive a restart. Revisit it with the EIP-712 signature milestone.
 
 ## Next milestones, in order
 

@@ -64,6 +64,75 @@ export class Treasury {
     ) {
         this.ledger = opts.ledger ?? new Ledger();
         this.now = opts.now ?? (() => new Date());
+        // Always rebuild: a caller who hands over a ledger with history must not have to remember to ask.
+        if (this.ledger.all().length > 0) this.rebuildFromLedger();
+    }
+
+    /**
+     * Restores the per-brief tallies and the seen-id sets from the ledger.
+     *
+     * Without this, a Treasury handed a restored ledger would think every brief had zero revenue, so
+     * `settleBrief` would compute a surplus from nothing. Double booking is already prevented by the
+     * ledger's own idempotency index; this is about the derived state being right as well.
+     *
+     * Everything needed is in the entries: the `briefId` field says what each movement was for, the
+     * amounts are in the lines, and `net` and `shortfall` follow from revenue and costs.
+     */
+    private rebuildFromLedger(): void {
+        const booked = new Map<string, { reserveTopUp: bigint; surplus: bigint; investable: bigint; retained: bigint }>();
+
+        for (const tx of this.ledger.all()) {
+            const key = tx.idempotencyKey;
+            const line = (account: AccountId): bigint =>
+                tx.lines.find((l) => l.account === account)?.amount ?? 0n;
+
+            switch (tx.type) {
+                case "PAYMENT_RECEIVED": {
+                    if (key?.startsWith("pay:") === true) this.seenPayments.add(key.slice(4));
+                    if (tx.briefId !== undefined) this.brief(tx.briefId).revenue += line("cash.operating");
+                    break;
+                }
+                case "COST_ACCRUED": {
+                    if (key?.startsWith("cost:") === true) this.seenCosts.add(key.slice(5));
+                    // the cash line is negative; the cost is its magnitude
+                    if (tx.briefId !== undefined) this.brief(tx.briefId).costs += -line("cash.operating");
+                    break;
+                }
+                case "RESERVE_TOPUP": {
+                    if (tx.briefId === undefined) break;
+                    const b = booked.get(tx.briefId) ?? { reserveTopUp: 0n, surplus: 0n, investable: 0n, retained: 0n };
+                    b.reserveTopUp += line("reserve");
+                    booked.set(tx.briefId, b);
+                    break;
+                }
+                case "SURPLUS_ALLOCATED": {
+                    if (tx.briefId === undefined) break;
+                    const b = booked.get(tx.briefId) ?? { reserveTopUp: 0n, surplus: 0n, investable: 0n, retained: 0n };
+                    b.surplus += -line("cash.operating");
+                    b.investable += line("surplus.investable");
+                    b.retained += line("surplus.retained");
+                    booked.set(tx.briefId, b);
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+
+        // A brief that was settled and booked something is settled; one that booked nothing (net <= 0)
+        // leaves no trace, and re-settling it books nothing again, so treating it as unsettled is safe.
+        for (const [briefId, b] of booked) {
+            const acct = this.brief(briefId);
+            const net = acct.revenue - acct.costs;
+            acct.result = {
+                net,
+                shortfall: net < 0n ? -net : 0n,
+                reserveTopUp: b.reserveTopUp,
+                surplus: b.surplus,
+                investable: b.investable,
+                retained: b.retained,
+            };
+        }
     }
 
     private brief(id: string): BriefAccount {
@@ -93,6 +162,7 @@ export class Treasury {
             mode: this.opts.mode,
             at: this.now(),
             idempotencyKey: `pay:${i.id}`,
+            briefId: i.briefId,
             ...(i.txHash !== undefined && { txHash: i.txHash }),
             ...(i.memo !== undefined && { memo: i.memo }),
             lines: [
@@ -112,6 +182,7 @@ export class Treasury {
             mode: this.opts.mode,
             at: this.now(),
             idempotencyKey: `cost:${i.id}`,
+            briefId: i.briefId,
             ...(i.memo !== undefined && { memo: i.memo }),
             lines: [
                 { account: COST_ACCOUNT[i.kind], amount: i.amount },
@@ -134,7 +205,7 @@ export class Treasury {
             reserveTarget: terms.reserveTargetUsdc,
             investShareBps: terms.investShareBps,
         });
-        bookSurplus(this.ledger, result, { mode: this.opts.mode, at: this.now(), key: `brief-${briefId}` });
+        bookSurplus(this.ledger, result, { mode: this.opts.mode, at: this.now(), key: `brief-${briefId}`, briefId });
         b.result = result;
         return result;
     }

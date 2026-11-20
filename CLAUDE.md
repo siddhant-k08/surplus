@@ -40,7 +40,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 23 files, 208 tests. API 3 files, 23 tests.
+Last known test count: core 23 files, 214 tests. API 3 files, 23 tests.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -48,6 +48,7 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 
 - Money is `bigint` USDC minor units (6 decimals). Percentages are basis points. Round down when allocating, round up when booking costs (`usdToUsdcMinor`). No floats for money except display and ranking.
 - Ledger is double-entry, append-only, idempotent by key, chronological, and every entry carries a mode tag: `sim`, `testnet` or `mainnet`.
+- Money entries carry a structured `briefId` saying what the movement was for; `Treasury` rebuilds its per-brief tallies, seen-id sets and settled results from it on construction. Never attribute money by parsing a memo.
 - Persistence is append-only JSONL (`src/ledgerstore.ts`), amounts as decimal strings of minor units, one file per mode. Replaying must restore `idempotencyKey` and `txHash`, not just balances: the restored dedup index is what stops a settlement booking twice after a restart. Reading money back off disk fails loudly rather than skipping a bad line.
 - Mandates are versioned and hashed; the agent never changes user constraints. Unplaceable money stays uninvested with a stated reason.
 - Approvals bind to proposal hash, mandate version and hash, max spend and expiry. Drift beyond tolerance means REAPPROVAL_REQUIRED.

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Treasury } from "../src/treasury";
+import { Ledger } from "../src/ledger";
 import { MandateStore } from "../src/mandate";
 import { allocate } from "../src/allocator";
 import { reconcileInternal } from "../src/reconcile";
@@ -241,5 +242,81 @@ describe("treasury", () => {
         const onNvda = legs.filter((l) => l.asset === NVDA).reduce((a, l) => a + l.usdcIn, 0n);
         expect(tr.ledger.balance(`positions.${NVDA}`)).toBe(onNvda);
         expect(reconcileInternal(tr.ledger).ok).toBe(true);
+    });
+});
+describe("restoring a treasury from its ledger", () => {
+    // what a process restart looks like: same mandate, same mode, ledger replayed from disk
+    const restart = (tr: Treasury, mandates: MandateStore) =>
+        new Treasury({ mode: "sim", mandates, ledger: Ledger.replay(tr.ledger.all()) });
+
+    it("rebuilds per-brief revenue and costs, so settleBrief is not computed from zero", () => {
+        const { tr, mandates } = setup(); // books b1: 3.00 revenue, 0.60 costs, then settles
+        const before = tr.settleBrief("b1");
+
+        const again = restart(tr, mandates);
+        const after = again.settleBrief("b1");
+        expect(after).toEqual(before);
+        expect(again.ledger.all().length).toBe(tr.ledger.all().length); // nothing re-booked
+    });
+
+    it("knows a brief was already settled and does not re-derive it against the topped-up reserve", () => {
+        const { tr, mandates } = setup();
+        const first = tr.settleBrief("b1");
+        expect(first.reserveTopUp).toBeGreaterThan(0n);
+
+        // the hazard: after a restart the reserve is already at target, so a recompute would see no gap
+        // and report a larger surplus than was actually booked
+        const again = restart(tr, mandates);
+        expect(again.settleBrief("b1")).toEqual(first);
+    });
+
+    it("restores the seen-payment and seen-cost ids", () => {
+        const { tr, mandates } = setup();
+        const again = restart(tr, mandates);
+        const n = again.ledger.all().length;
+        again.receivePayment({ id: "p1", briefId: "b1", amount: u("3") });
+        again.accrueCost({ id: "c1", briefId: "b1", kind: "llm", amount: u("0.50") });
+        expect(again.ledger.all().length).toBe(n);
+        expect(again.settleBrief("b1")).toEqual(tr.settleBrief("b1"));
+    });
+
+    it("keeps revenue attributed to the right brief", () => {
+        const { tr, mandates } = setup();
+        tr.receivePayment({ id: "p2", briefId: "b2", amount: u("1.00") });
+        tr.accrueCost({ id: "c3", briefId: "b2", kind: "llm", amount: u("0.10") });
+
+        const again = restart(tr, mandates);
+        const b2 = again.settleBrief("b2");
+        expect(b2.net).toBe(u("0.90"));
+        expect(again.settleBrief("b1").net).toBe(u("3") - u("0.60"));
+    });
+
+    it("tolerates entries written before briefId existed, without attributing them", () => {
+        // the field was added later; an older ledger file must load rather than crash, and its money
+        // stays out of the per-brief tallies because nothing records which brief it belonged to
+        const mandates = new MandateStore();
+        mandates.create(baseTerms());
+        const old = new Ledger();
+        old.post({
+            type: "PAYMENT_RECEIVED", mode: "testnet", at: new Date(T0), idempotencyKey: "pay:x402:0xold",
+            txHash: "0xold", memo: "brief-old",
+            lines: [
+                { account: "cash.operating", amount: u("0.01") },
+                { account: "revenue.research", amount: u("-0.01") },
+            ],
+        });
+        const tr = new Treasury({ mode: "testnet", mandates, ledger: old });
+        expect(tr.ledger.balance("cash.operating")).toBe(u("0.01"));
+        expect(tr.settleBrief("brief-old").net).toBe(0n);
+        // the payment id is still restored, so it cannot be booked a second time
+        tr.receivePayment({ id: "x402:0xold", briefId: "brief-old", amount: u("0.01") });
+        expect(tr.ledger.all().length).toBe(1);
+    });
+
+    it("starts empty when handed a fresh ledger", () => {
+        const mandates = new MandateStore();
+        mandates.create(baseTerms());
+        const tr = new Treasury({ mode: "sim", mandates, ledger: new Ledger() });
+        expect(tr.settleBrief("nothing").net).toBe(0n);
     });
 });
