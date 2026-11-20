@@ -5,7 +5,7 @@ Written 21 Nov 2026 when the project moved from a Claude chat to Claude Code. Th
 ## Where we stopped
 
 1. The research pipeline works end to end against real SEC filings and Gemini (`gemini-3.1-flash-lite`). Latest real run: 3 model calls, about 70,600 input tokens, cost about $0.021 booked at paid-tier rates, zero validation issues.
-2. The keyword patch is applied and committed. `npm test` is 188 tests in 20 files.
+2. The keyword patch is applied and committed. `npm test` runs core (196 tests, 21 files) and the API (14 tests).
 3. Milestone 1 (research quality) is closed, 21 Nov 2026. What the diagnosis found:
    - The dominant cause of dropped facts was never paraphrasing or `htmlToText`. It was the `MAX_QUOTE` 300-character cap. The model quoted real filing text and ran past 300 characters, usually to finish a sentence or a list of examples, and `quoteInText` rejected it on length while the drop message said "no verbatim quote found". A read-only spike confirmed the Alphabet quote was present verbatim in the filing; `htmlToText` is exonerated.
    - Fixed by `quoteCheck` in `src/pipeline.ts`, which returns `ok`, `too_short`, `too_long`, `not_found`, plus an `uncited_source` case in `assembleTheme`. Drop messages now name the reason and the character count. `quoteInText` is a boolean wrapper over it, so callers are unchanged.
@@ -22,30 +22,75 @@ Written 21 Nov 2026 when the project moved from a Claude chat to Claude Code. Th
 - The brief is re-checked with `validateBrief` against the set trusted right now, not the set trusted when it was written, and the script refuses to trade if it does not validate. A brief can outlive a token's trusted status.
 - Cost booked as `accrueCost({ kind: "llm", amount: costUsdcMinor, memo: "metered estimate at paid-tier rates" })`, ids keyed to the brief id so a rerun is idempotent. The $3.00 sale price is still simulated and labelled.
 - Each proposed leg prints the verified claim and its quote underneath, which is the rule from "Known limits of the research checks".
-- Last run: 12 legs, 0.991524 USDC total, 32 pre-trade gates ok, 0 warnings, 0 blocks, 12 simulated fills, `reconcileInternal` ok. longevity-biotech stays uninvested with reason `gap` and 1 unit lands as `unassigned` rounding.
+- Last run: 12 legs merged into 8 swaps, 0.991524 USDC total, 32 pre-trade gates ok, 0 warnings, 0 blocks, 12 simulated fills, `reconcileInternal` ok. longevity-biotech stays uninvested with reason `gap` and 1 unit lands as `unassigned` rounding.
 
 Bug this found and fixed in core: `Treasury.execute` keyed fills `fill:<proposal>:<asset>`, so a proposal holding two legs for the same asset threw "Idempotency key reused with different content" and the whole loop died. Real research puts one company in several themes (TSLA, META, MSFT and AMZN each appear twice), which the placeholder fits never did. The key is now `fill:<proposal>:<legIndex>:<asset>`; legs are fixed when the proposal is created, so the index is stable across retries. Regression test added in `test/treasury.test.ts`.
 
-## Open question for Siddhant, before mainnet
+## Gas per leg: decided 21 Nov 2026, merge swaps
 
-The 12 legs average about $0.083, and the quotes report about $0.0032 gas each, so roughly 4 percent per leg and about $0.038 total on $0.99 invested. Four of the ten tokens are bought twice because they sit in two themes, paying gas twice for the same token. Two possible answers, both his call because both change money semantics:
+The problem: 12 legs averaging about $0.083, about $0.0032 quoted gas each, so roughly 4 percent per leg and about $0.038 on $0.99 invested. Four tokens were bought twice because they sit in two themes.
 
-1. Merge legs with the same asset across themes before execution, keeping per-theme attribution in the ledger lines. Saves four swaps.
-2. Raise `minTradeUsdc` so fewer, larger legs survive, and accept more uninvested money with reason `below_minimum`.
+Decision: merge swaps, in `src/swapplan.ts`. Raising `minTradeUsdc` was rejected for two reasons. It is a term of the user's mandate, and the agent never changes user constraints. It also leaves the owner's money uninvested to save the agent gas, which is the wrong trade to make on someone else's behalf.
 
-Nothing is changed here yet. The existing behaviour is correct, just gas-inefficient at these sizes.
+How it is built, and what it deliberately does not touch:
+
+- `swapPlan(legs, maxTradeUsdc)` groups legs buying the same token into one `SwapOrder`, with `parts` recording how much each theme contributed. On the current brief this is 8 swaps for 12 legs, so four swaps of gas are saved with the allocation unchanged.
+- Allocation, policy checks, approvals and the ledger still work on per-theme legs. This matters: `checkProposal` verifies theme targets by grouping legs on `leg.theme`, so collapsing two themes into one leg would break a mandate guarantee. Merging belongs to execution, not to allocation.
+- Each order is capped at `maxTradeUsdc` and split when the merged total would exceed it. That term is the owner's limit on a single trade, and merging must not quietly widen it. A split keeps the remainder rather than dropping it.
+- A merged order takes the tightest `maxSlippageBps` of its legs, never the loosest.
+- `swapPlanTotal` must equal the leg total; `demo-live.ts` asserts this before proposing.
+
+Still to do when real execution is built (milestone 5): the executor should swap once per `SwapOrder` while the ledger keeps posting one `PURCHASE_SETTLED` per leg, so theme attribution survives in the ledger. Today's fills are simulated, so the plan is printed and asserted but not yet the thing that moves money.
+
+## x402 endpoint, started 21 Nov 2026
+
+`apps/api` (`@surplus/api`) serves the paid brief. It runs and returns a correct 402 challenge against the live free facilitator. What is left is an actual paid request, which needs a funded test wallet.
+
+Package choice, verified rather than assumed. The CDP seller quickstart describes `@coinbase/cdp-sdk/x402` with `createX402Server` and `CDP_API_KEY_ID`/`CDP_API_KEY_SECRET`. Web results described the older `x402-express` with `paymentMiddleware(payTo, routes, facilitator)`. Both are real but they are different generations, so the npm registry settled it: `@x402/core`, `@x402/evm` and `@x402/express` are at 2.32.0 published 20 Nov 2026, while `x402-express` has sat at 1.2.0 since April 2026 and `@coinbase/x402` since Dec 2025. We use the 2.x scoped line with the free facilitator, so no CDP account or API keys are needed.
+
+API shape was read from the installed package's own README and type declarations, not from a blog post:
+
+- `paymentMiddleware(routes, resourceServer)` from `@x402/express`
+- `new x402ResourceServer(facilitator).register("eip155:84532", new ExactEvmScheme()).onAfterSettle(hook)`
+- `HTTPFacilitatorClient` from `@x402/core/server`, `ExactEvmScheme` from `@x402/evm/exact/server`
+- `@x402/paywall` is an optional peer dependency, left out: this endpoint serves agents, not a browser paywall
+- networks are CAIP-2 (`eip155:84532`), not the old `"base-sepolia"` strings
+
+Routes: `GET /brief` is paid; `GET /health` and `GET /ledger` are free. The 402 body is `{"error":"Payment required"}` only, so the brief never leaks in the challenge.
+
+Money rules, in `bookSettlement` and unit tested:
+
+- revenue is booked in `onAfterSettle`, never in the route handler, so nothing is recorded until the facilitator confirms settlement
+- the ledger key is the settlement transaction, so a replayed settlement is idempotent
+- the settled amount counts as USDC minor units only when the asset is the expected USDC; atomic units of another token are refused with `wrong_asset`
+- entries are tagged `testnet` or `mainnet`, never `sim`
+- `loadConfig` refuses mainnet unless `MAINNET_ENABLED=true` and refuses an unknown network rather than defaulting
+
+Also moved: `loadLatestBrief` now lives in `src/briefstore.ts` in core, shared by `demo-live.ts` and the API instead of being duplicated. It uses `node:fs`; core already used `node:crypto`, so node builtins in core are not new.
+
+Verified facts worth keeping:
+
+- `https://x402.org/facilitator/supported` advertises `exact` on `eip155:84532` and no other EVM network. This confirms the earlier note that the free facilitator is testnet only and mainnet needs a different one.
+- USDC on Base Sepolia is `0x036CbD53842c5426634e7929541eC2318f3dCF7e` (Circle's contract address list, read 21 Nov 2026). The same page gives Base mainnet as `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, matching the address already verified here, which is what makes the testnet one credible. The running server's own challenge then resolved `$3.00` to amount `3000000` against that asset with `extra {name: USDC, version: 2}`, confirming it independently.
+- `npm audit --omit=dev` is clean with the new dependencies. The 6 reported vulnerabilities are dev-only.
+
+Next on this milestone:
+
+1. Fund a throwaway Base Sepolia wallet and make one real paid request with an x402 client, then confirm `/ledger` shows a `testnet` `PAYMENT_RECEIVED` carrying the transaction hash.
+2. Decide the real price. `$3.00` matches the figure `demo-live.ts` books, but it means a buyer needs 3 test USDC.
+3. Persist the ledger. State is in memory, so a restart loses booked sales.
+4. Feed the endpoint's booked revenue into the investing loop instead of the simulated `$3.00` payment.
 
 ## Next milestones, in order
 
-1. x402 paid endpoint on Base Sepolia in `apps/api`. Verify package names and flow against the CDP seller quickstart (https://docs.cdp.coinbase.com/x402/quickstart-for-sellers) before writing code. The free x402.org facilitator supports Base Sepolia only; mainnet needs the CDP facilitator. Needs a funded test wallet.
-2. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.
-3. Owner EIP-712 signature on approvals, persistence, deployment, onchain reconciliation.
-4. Demo rehearsal, video, X post tagging @buildonbase, submission form. Re-check the Quest page rules on 24 Nov and 2 Dec, and re-read base.org/stocks before any mainnet use.
-5. Real swaps only after Siddhant's explicit authorization, eligibility advice, a spend cap, the mainnet flag, and a throwaway wallet. Use fewer, larger legs (about $1 minimum): gas is 2 to 4 percent of a $0.10 leg.
+1. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.
+2. Owner EIP-712 signature on approvals, persistence, deployment, onchain reconciliation.
+3. Demo rehearsal, video, X post tagging @buildonbase, submission form. Re-check the Quest page rules on 24 Nov and 2 Dec, and re-read base.org/stocks before any mainnet use.
+4. Real swaps only after Siddhant's explicit authorization, eligibility advice, a spend cap, the mainnet flag, and a throwaway wallet. Execute one swap per `SwapOrder` from `swapPlan`, not one per leg: gas is 2 to 4 percent of a $0.10 leg.
 
 ## Core modules (packages/core/src)
 
-money, ledger, mandate, surplus, policy, allocator (water-filling; leaves unplaceable money uninvested with reasons gap, company_cap, max_trade, below_minimum, unassigned), tokens (Coinbase token API, paginated by next_page_token), research (brief types, `validateBrief`, `isFactSupported`, `toCandidates(fits, liquidity, floor = 3, minLiquidity = 0)`), approval (proposal state machine), registry, liquidity (DexScreener per-token endpoint), reconcile, treasury, quote (KyberSwap), gates, pipeline (research orchestration and verification; `quoteCheck` gives the per-quote verdict, `quoteInText` wraps it, `mentionsAny` is the theme-relevance rule), edgar (SEC client and doc provider), anthropic, gemini.
+money, ledger, mandate, surplus, policy, allocator (water-filling; leaves unplaceable money uninvested with reasons gap, company_cap, max_trade, below_minimum, unassigned), tokens (Coinbase token API, paginated by next_page_token), research (brief types, `validateBrief`, `isFactSupported`, `toCandidates(fits, liquidity, floor = 3, minLiquidity = 0)`), approval (proposal state machine), registry, liquidity (DexScreener per-token endpoint), swapplan (`swapPlan` merges same-token legs into one swap each, capped at `maxTradeUsdc`), reconcile, treasury, quote (KyberSwap), gates, pipeline (research orchestration and verification; `quoteCheck` gives the per-quote verdict, `quoteInText` wraps it, `mentionsAny` is the theme-relevance rule), edgar (SEC client and doc provider), anthropic, gemini.
 
 ## Verified facts (with where they came from)
 

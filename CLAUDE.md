@@ -20,15 +20,18 @@ Full history, decisions, verified facts and open questions: read `docs/HANDOFF.m
 
 - `packages/core` (`@surplus/core`): all domain logic, TypeScript strict, ESM, tests in `packages/core/test` (vitest 2.x, pinned; do not upgrade to a newer major). `src/index.ts` re-exports every module.
 - `scripts/`: runnable demos and read-only spikes (`spike-*.mjs`, `survey-*.mjs`, `demo-sim.ts`, `demo-live.ts`, `demo-research.ts`), typechecked by `scripts/tsconfig.json`.
-- `apps/`: reserved for the API (x402 endpoint) and web UI, not built yet.
+- `apps/api` (`@surplus/api`): the x402 paid research endpoint, Express 5 plus `@x402/*` 2.x, tests with vitest and supertest. See `apps/api/README.md`. The web UI is still not built.
 - `docs/briefs/`: research briefs saved by `demo-research.ts`.
 
 ## Commands (from repo root, Node 22)
 
 ```bash
-npm test                    # all core tests
-npm run typecheck           # core
+npm test                    # core tests, then API tests
+npm run test:core           # core only
+npm run test:api            # API only
+npm run typecheck           # core, then API
 npm run typecheck:scripts   # scripts
+X402_PAY_TO=0x... npm run api   # the x402 endpoint on Base Sepolia
 npx tsx scripts/demo-sim.ts             # fully simulated loop
 npx tsx scripts/demo-live.ts            # newest real brief, token list, liquidity, KyberSwap quotes; simulated fills
 npx tsx scripts/demo-research.ts --dry-run   # real SEC filings, no model calls, prints prompt sizes
@@ -36,7 +39,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: 20 files, 189 tests.
+Last known test count: core 21 files, 196 tests. API 2 files, 14 tests.
 
 ## Money and ledger rules (do not break)
 
@@ -51,7 +54,9 @@ Last known test count: 20 files, 189 tests.
 - Tradable set = Base's official registry (`src/registry.ts`, read from base.org/stocks on 19 Nov 2026) intersected with the Coinbase Tokenized Stocks API. Tokens only in the API are excluded.
 - Pre-trade gates: trusted, no paused flags (any flag blocks), liquidity score at least 2, quote younger than 25 s, NAV deviation over 300 bps blocks only when NAV is fresh.
 - Quotes come from the KyberSwap aggregator with the router address pinned. NAV is a reference value, never an execution price.
-- Mainnet stays off (`MAINNET_ENABLED=false`) until Siddhant explicitly authorizes it, with a spend cap and a throwaway wallet.
+- Mainnet stays off (`MAINNET_ENABLED=false`) until Siddhant explicitly authorizes it, with a spend cap and a throwaway wallet. The API refuses to start on Base mainnet without that flag.
+- The free x402.org facilitator serves Base Sepolia (`eip155:84532`) only; it advertises no other EVM network. Mainnet needs a different facilitator.
+- Sale revenue is booked only from a confirmed settlement, idempotent on the settlement transaction, and only when the settled asset is the expected USDC.
 
 ## Research pipeline rules
 

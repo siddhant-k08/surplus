@@ -6,8 +6,11 @@
         "apps/*"
     ],
     "scripts": {
-        "test": "npm test -w @surplus/core",
-        "typecheck": "npm run typecheck -w @surplus/core",
-        "typecheck:scripts": "tsc -p scripts"
+        "test": "npm test -w @surplus/core && npm test -w @surplus/api",
+        "test:core": "npm test -w @surplus/core",
+        "test:api": "npm test -w @surplus/api",
+        "typecheck": "npm run typecheck -w @surplus/core && npm run typecheck -w @surplus/api",
+        "typecheck:scripts": "tsc -p scripts",
+        "api": "npm start -w @surplus/api"
     }
 }
