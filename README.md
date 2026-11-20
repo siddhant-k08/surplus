@@ -85,3 +85,38 @@ node scripts/survey-liquidity.mjs
 ```
 
 Snapshots are point-in-time research inputs, not live execution data. Review their timestamps and refresh them before making decisions.
+
+## Minimal library example
+
+```ts
+import { computeSurplus, formatUsdc } from "@surplus/core";
+
+const result = computeSurplus({
+  revenue: 1_000_000n,       // $1,000.00 in USDC minor units
+  costs: 250_000n,           // $250.00
+  reserveBalance: 100_000n,
+  reserveTarget: 200_000n,
+  investShareBps: 7_500,     // 75%
+});
+
+console.log(formatUsdc(result.investable));
+```
+
+For allocations, provide `allocate` with an investable `bigint`, theme candidates, and validated mandate terms. For execution safety, proposals should pass policy checks and the approval `precheck` immediately before execution.
+
+## Safety and scope
+
+This codebase does not place trades, manage wallets, fetch executable quotes, or provide legal, tax, or investment advice. In particular:
+
+- NAV values are reference values, not execution prices.
+- Liquidity thresholds are heuristic recommendations.
+- The registry is a trust anchor and must be rechecked against the official source before mainnet use.
+- Token API records with paused features or invalid multipliers are conservatively rejected by the tradability screen.
+- Public API snapshots can become stale or change shape; parsers report rejected records and pagination failures rather than silently accepting them.
+- Mainnet integration still needs an execution adapter, wallet/key management, fresh quote handling, reconciliation, operational monitoring, and a review of applicable compliance requirements.
+
+Treat the current package as deterministic policy and accounting infrastructure, not as an autonomous trading system.
+
+## License
+
+No license is currently declared in `package.json` or the repository. Confirm the intended license before distributing the project.
