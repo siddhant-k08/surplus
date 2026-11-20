@@ -125,6 +125,13 @@ export class Ledger {
         return this.txs;
     }
 
+    /**
+     * Rebuilds a ledger from its own entries.
+     *
+     * Every field has to come back, not just the amounts. Losing `idempotencyKey` would empty the dedup
+     * index and let a replayed ledger book the same payment or fill twice; losing `txHash` would cut the
+     * link to the onchain transaction.
+     */
     static replay(txs: readonly LedgerTx[]): Ledger {
         const ledger = new Ledger();
         for (const t of txs) {
@@ -134,8 +141,8 @@ export class Ledger {
                 lines: t.lines,
                 at: new Date(t.at),
                 ...(t.memo !== undefined && { memo: t.memo }),
-                ...(t.txHash !== undefined && { memo: t.txHash }),
-                ...(t.idempotencyKey !== undefined && { memo: t.idempotencyKey }),
+                ...(t.txHash !== undefined && { txHash: t.txHash }),
+                ...(t.idempotencyKey !== undefined && { idempotencyKey: t.idempotencyKey }),
             });
         }
         return ledger;

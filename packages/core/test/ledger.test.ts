@@ -180,4 +180,40 @@ describe("ledger", () => {
     const again = Ledger.replay(l.all());
     expect([...again.balances()]).toEqual([...l.balances()]);
   });
+
+  it("replay restores every field, not just the amounts", () => {
+    const l = new Ledger();
+    l.post({
+      type: "PAYMENT_RECEIVED", mode: "testnet", at: t(0),
+      idempotencyKey: "x402:0xfeed", txHash: "0xfeed", memo: "first sale",
+      lines: [
+        { account: "cash.operating", amount: u("0.01") },
+        { account: "revenue.research", amount: u("-0.01") },
+      ],
+    });
+    const again = Ledger.replay(l.all());
+    expect(again.all()).toEqual(l.all());
+    const back = again.all()[0]!;
+    expect(back.txHash).toBe("0xfeed");          // the onchain link must survive
+    expect(back.idempotencyKey).toBe("x402:0xfeed");
+    expect(back.memo).toBe("first sale");
+  });
+
+  it("a replayed ledger still refuses a duplicate payment", () => {
+    const l = new Ledger();
+    const sale = {
+      type: "PAYMENT_RECEIVED" as const, mode: "testnet" as const, at: t(0),
+      idempotencyKey: "x402:0xfeed", txHash: "0xfeed",
+      lines: [
+        { account: "cash.operating" as const, amount: u("0.01") },
+        { account: "revenue.research" as const, amount: u("-0.01") },
+      ],
+    };
+    l.post(sale);
+    const again = Ledger.replay(l.all());
+    // the same settlement arriving again after a restart must not book twice
+    again.post(sale);
+    expect(again.all().length).toBe(1);
+    expect(again.balance("cash.operating")).toBe(u("0.01"));
+  });
 });

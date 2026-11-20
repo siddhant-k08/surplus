@@ -84,7 +84,8 @@ export class Treasury {
         if (!r) throw new Error(`Unknown proposal ${id}`);
         return r;
     }
-    receivePayment(i: { id: string; briefId: string; amount: bigint; txHash?: string }): void {
+    /** `memo` is free-form provenance; pass the brief id so a persisted entry says what was sold. */
+    receivePayment(i: { id: string; briefId: string; amount: bigint; txHash?: string; memo?: string }): void {
         if (i.amount <= 0n) throw new Error("payment amount must be positive");
         if (this.seenPayments.has(i.id)) return;
         this.ledger.post({
@@ -93,6 +94,7 @@ export class Treasury {
             at: this.now(),
             idempotencyKey: `pay:${i.id}`,
             ...(i.txHash !== undefined && { txHash: i.txHash }),
+            ...(i.memo !== undefined && { memo: i.memo }),
             lines: [
                 { account: "cash.operating", amount: i.amount },
                 { account: "revenue.research", amount: -i.amount },

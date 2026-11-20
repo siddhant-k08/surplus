@@ -1,5 +1,6 @@
 export * from "./money";
 export * from "./ledger";
+export * from "./ledgerstore";
 export * from "./mandate";
 export * from "./surplus";
 export * from "./policy";
