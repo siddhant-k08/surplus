@@ -1,0 +1,468 @@
+{
+  "provider": "gemini",
+  "model": "gemini-3.1-flash-lite",
+  "brief": {
+    "id": "brief-2026-11-20T20-35-26-739Z",
+    "createdAt": "2026-11-20T20:35:26.739Z",
+    "sources": [
+      {
+        "id": "TSLA-10-K-0001628280-26-003952",
+        "tier": 1,
+        "title": "Tesla, Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1318605/000162828026003952/tsla-20251231.htm",
+        "publishedAt": "2026-01-29",
+        "retrievedAt": "2026-11-20T20:35:27.128Z",
+        "excerpt": "We currently expect our capital expenditures to be in excess of $20 billion in 2026, driven by our AI initiatives, including investments in compute infrastructure and data centers"
+      },
+      {
+        "id": "GOOGL-10-K-0001652044-26-000018",
+        "tier": 1,
+        "title": "Alphabet Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000018/goog-20251231.htm",
+        "publishedAt": "2026-02-05",
+        "retrievedAt": "2026-11-20T20:35:27.772Z",
+        "excerpt": "Our AI infrastructure delivers cost-performance for AI workloads. We offer a range of AI accelerators, including our custom TPUs and specialized GPUs"
+      },
+      {
+        "id": "SNDK-10-Q-0001628280-26-068601",
+        "tier": 1,
+        "title": "Sandisk Corp 10-Q for period ending 2026-10-02",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/2023554/000162828026068601/sndk-20261002.htm",
+        "publishedAt": "2026-10-30",
+        "retrievedAt": "2026-11-20T20:35:28.451Z",
+        "excerpt": "In the first quarter, we continued to observe that the rapid growth of AI infrastructure is driving demand for high-performance storage products, and AI adoption is driving the need for NAND storage to support these workloads"
+      },
+      {
+        "id": "NVDA-10-K-0001045810-26-000021",
+        "tier": 1,
+        "title": "NVIDIA CORP 10-K for period ending 2026-01-25",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+        "publishedAt": "2026-02-25",
+        "retrievedAt": "2026-11-20T20:35:29.563Z",
+        "excerpt": "NVIDIA is now a data center scale AI infrastructure company reshaping all industries."
+      },
+      {
+        "id": "META-10-Q-0001628280-26-066773",
+        "tier": 1,
+        "title": "Meta Platforms, Inc. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1326801/000162828026066773/meta-20260930.htm",
+        "publishedAt": "2026-10-22",
+        "retrievedAt": "2026-11-20T20:35:30.771Z",
+        "excerpt": "In particular, we have significantly increased our infrastructure investments in connection with our AI initiatives, including third-party cloud capacity arrangements and investments in servers, data centers, and network infrastructure"
+      },
+      {
+        "id": "MSFT-10-K-0001193125-26-323660",
+        "tier": 1,
+        "title": "MICROSOFT CORP 10-K for period ending 2026-06-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526323660/msft-20260630.htm",
+        "publishedAt": "2026-07-29",
+        "retrievedAt": "2026-11-20T20:35:31.280Z",
+        "excerpt": "We will continue to invest in capital expenditures to support growth in our cloud offerings and our investments in AI training and other infrastructure."
+      },
+      {
+        "id": "AAPL-10-K-0000320193-26-000026",
+        "tier": 1,
+        "title": "Apple Inc. 10-K for period ending 2026-09-26",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000026/aapl-20260926.htm",
+        "publishedAt": "2026-11-03",
+        "retrievedAt": "2026-11-20T20:35:31.835Z",
+        "excerpt": "The Company’s business, including its artificial intelligence and machine learning offerings, also depends on access to sufficient compute capacity and storage resources."
+      },
+      {
+        "id": "AMZN-10-Q-0001018724-26-000040",
+        "tier": 1,
+        "title": "AMAZON COM INC 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000040/amzn-20260930.htm",
+        "publishedAt": "2026-10-30",
+        "retrievedAt": "2026-11-20T20:35:32.709Z",
+        "excerpt": "Infrastructure costs include servers, networking equipment, and data center related depreciation and amortization, rent, utilities, and other expenses necessary to support AWS and other Amazon businesses."
+      },
+      {
+        "id": "GOOGL-10-Q-0001652044-26-000084",
+        "tier": 1,
+        "title": "Alphabet Inc. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000084/goog-20260930.htm",
+        "publishedAt": "2026-10-29",
+        "retrievedAt": "2026-11-20T20:35:27.906Z",
+        "excerpt": "Google Services generates revenues primarily from advertising; fees received for consumer subscription-based products such as YouTube TV, YouTube Music and Premium, and NFL Sunday Ticket, as well as Google One; the sale of apps and in-app purchases; and consumer devices."
+      },
+      {
+        "id": "META-10-K-0001628280-26-003942",
+        "tier": 1,
+        "title": "Meta Platforms, Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1326801/000162828026003942/meta-20251231.htm",
+        "publishedAt": "2026-01-29",
+        "retrievedAt": "2026-11-20T20:35:30.648Z",
+        "excerpt": "Currently, we generate substantially all of our revenue from selling advertising placements on our family of apps to marketers, which is reflected in FoA. Ads on our platform enable marketers to reach people across a range of marketing objectives, such as generating leads or driving awareness."
+      },
+      {
+        "id": "MSFT-10-Q-0001193125-26-436133",
+        "tier": 1,
+        "title": "MICROSOFT CORP 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526436133/msft-20260930.htm",
+        "publishedAt": "2026-10-28",
+        "retrievedAt": "2026-11-20T20:35:31.415Z",
+        "excerpt": "We generate revenue by offering a wide range of cloud-based solutions, content, and other services to people and businesses; licensing and supporting an array of software products; delivering relevant online advertising to a global audience; and designing and selling devices."
+      },
+      {
+        "id": "AAPL-10-Q-0000320193-26-000020",
+        "tier": 1,
+        "title": "Apple Inc. 10-Q for period ending 2026-06-27",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000020/aapl-20260627.htm",
+        "publishedAt": "2026-07-31",
+        "retrievedAt": "2026-11-20T20:35:31.971Z",
+        "excerpt": "Services net sales increased during the third quarter and first nine months of 2026 compared to the same periods in 2025 primarily due to higher net sales from advertising and cloud services."
+      }
+    ],
+    "themes": [
+      {
+        "themeId": "ai-compute",
+        "claims": [
+          {
+            "id": "ai-compute:c1",
+            "type": "fact",
+            "text": "Tesla is investing in compute hardware and data centers to support AI training and inference, with 2026 capital expenditures expected to exceed $20 billion.",
+            "sourceIds": [
+              "TSLA-10-K-0001628280-26-003952"
+            ],
+            "quotes": [
+              {
+                "sourceId": "TSLA-10-K-0001628280-26-003952",
+                "text": "We currently expect our capital expenditures to be in excess of $20 billion in 2026, driven by our AI initiatives, including investments in compute infrastructure and data centers"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c2",
+            "type": "fact",
+            "text": "Alphabet's Google Cloud generates significant revenue from AI-optimized infrastructure, which includes custom TPUs and specialized GPUs.",
+            "sourceIds": [
+              "GOOGL-10-K-0001652044-26-000018"
+            ],
+            "quotes": [
+              {
+                "sourceId": "GOOGL-10-K-0001652044-26-000018",
+                "text": "Our AI infrastructure delivers cost-performance for AI workloads. We offer a range of AI accelerators, including our custom TPUs and specialized GPUs"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c3",
+            "type": "fact",
+            "text": "SanDisk provides flash storage solutions for AI workloads in datacenters, with demand driven by rapid growth in AI infrastructure.",
+            "sourceIds": [
+              "SNDK-10-Q-0001628280-26-068601"
+            ],
+            "quotes": [
+              {
+                "sourceId": "SNDK-10-Q-0001628280-26-068601",
+                "text": "In the first quarter, we continued to observe that the rapid growth of AI infrastructure is driving demand for high-performance storage products, and AI adoption is driving the need for NAND storage to support these workloads"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c4",
+            "type": "fact",
+            "text": "NVIDIA is a data center scale AI infrastructure company providing GPU-based compute and networking offerings to CSPs and enterprises.",
+            "sourceIds": [
+              "NVDA-10-K-0001045810-26-000021"
+            ],
+            "quotes": [
+              {
+                "sourceId": "NVDA-10-K-0001045810-26-000021",
+                "text": "NVIDIA is now a data center scale AI infrastructure company reshaping all industries."
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c5",
+            "type": "fact",
+            "text": "Meta is making substantial infrastructure investments in servers, data centers, and network capacity to support the deployment of AI technologies.",
+            "sourceIds": [
+              "META-10-Q-0001628280-26-066773"
+            ],
+            "quotes": [
+              {
+                "sourceId": "META-10-Q-0001628280-26-066773",
+                "text": "In particular, we have significantly increased our infrastructure investments in connection with our AI initiatives, including third-party cloud capacity arrangements and investments in servers, data centers, and network infrastructure"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c6",
+            "type": "fact",
+            "text": "Microsoft is investing at scale in datacenters and related infrastructure to support the growth of Azure cloud services and AI model training.",
+            "sourceIds": [
+              "MSFT-10-K-0001193125-26-323660"
+            ],
+            "quotes": [
+              {
+                "sourceId": "MSFT-10-K-0001193125-26-323660",
+                "text": "We will continue to invest in capital expenditures to support growth in our cloud offerings and our investments in AI training and other infrastructure."
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c7",
+            "type": "fact",
+            "text": "Apple's artificial intelligence and machine learning offerings depend on access to compute capacity and storage resources, leading to investments in data center infrastructure and third-party cloud services.",
+            "sourceIds": [
+              "AAPL-10-K-0000320193-26-000026"
+            ],
+            "quotes": [
+              {
+                "sourceId": "AAPL-10-K-0000320193-26-000026",
+                "text": "The Company’s business, including its artificial intelligence and machine learning offerings, also depends on access to sufficient compute capacity and storage resources."
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c8",
+            "type": "fact",
+            "text": "Amazon's AWS provides on-demand technology services including compute and AI/machine learning infrastructure, which represent a significant portion of its capital spending.",
+            "sourceIds": [
+              "AMZN-10-Q-0001018724-26-000040"
+            ],
+            "quotes": [
+              {
+                "sourceId": "AMZN-10-Q-0001018724-26-000040",
+                "text": "Infrastructure costs include servers, networking equipment, and data center related depreciation and amortization, rent, utilities, and other expenses necessary to support AWS and other Amazon businesses."
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb2000000000000000000001e800a7f5189430cd0",
+            "symbol": "TSLAc",
+            "fit": 4,
+            "evidence": 4,
+            "claimIds": [
+              "ai-compute:c1"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000002d0ba3164cc74f58b7",
+            "symbol": "GOOGLc",
+            "fit": 5,
+            "evidence": 5,
+            "claimIds": [
+              "ai-compute:c2"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000397293cb8cda9a10c5",
+            "symbol": "SNDKc",
+            "fit": 4,
+            "evidence": 4,
+            "claimIds": [
+              "ai-compute:c3"
+            ]
+          },
+          {
+            "asset": "0xb20000000000000000000078ee7ce2fe4908108c",
+            "symbol": "NVDAc",
+            "fit": 5,
+            "evidence": 5,
+            "claimIds": [
+              "ai-compute:c4"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000008bc8786b856e61707c",
+            "symbol": "METAc",
+            "fit": 4,
+            "evidence": 4,
+            "claimIds": [
+              "ai-compute:c5"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000ab99cfa739e253872b",
+            "symbol": "MSFTc",
+            "fit": 5,
+            "evidence": 5,
+            "claimIds": [
+              "ai-compute:c6"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000c2e324d24d7eecd1fb",
+            "symbol": "AAPLc",
+            "fit": 3,
+            "evidence": 3,
+            "claimIds": [
+              "ai-compute:c7"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000d9192b6b456483c2e8",
+            "symbol": "AMZNc",
+            "fit": 5,
+            "evidence": 5,
+            "claimIds": [
+              "ai-compute:c8"
+            ]
+          }
+        ],
+        "gap": false
+      },
+      {
+        "themeId": "platform-giants",
+        "claims": [
+          {
+            "id": "platform-giants:c1",
+            "type": "fact",
+            "text": "Alphabet generates revenue from online advertising, consumer subscriptions (YouTube services, Google One), and sales of apps, devices, and platforms.",
+            "sourceIds": [
+              "GOOGL-10-Q-0001652044-26-000084"
+            ],
+            "quotes": [
+              {
+                "sourceId": "GOOGL-10-Q-0001652044-26-000084",
+                "text": "Google Services generates revenues primarily from advertising; fees received for consumer subscription-based products such as YouTube TV, YouTube Music and Premium, and NFL Sunday Ticket, as well as Google One; the sale of apps and in-app purchases; and consumer devices."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c2",
+            "type": "fact",
+            "text": "Meta generates substantially all of its revenue from selling advertising placements on its family of apps and generates additional revenue from Reality Labs consumer hardware, software, and content.",
+            "sourceIds": [
+              "META-10-K-0001628280-26-003942"
+            ],
+            "quotes": [
+              {
+                "sourceId": "META-10-K-0001628280-26-003942",
+                "text": "Currently, we generate substantially all of our revenue from selling advertising placements on our family of apps to marketers, which is reflected in FoA. Ads on our platform enable marketers to reach people across a range of marketing objectives, such as generating leads or driving awareness."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c3",
+            "type": "fact",
+            "text": "Microsoft generates revenue from consumer subscriptions (Microsoft 365, XBOX Game Pass), advertising (Bing, LinkedIn Marketing Solutions), and device sales.",
+            "sourceIds": [
+              "MSFT-10-Q-0001193125-26-436133"
+            ],
+            "quotes": [
+              {
+                "sourceId": "MSFT-10-Q-0001193125-26-436133",
+                "text": "We generate revenue by offering a wide range of cloud-based solutions, content, and other services to people and businesses; licensing and supporting an array of software products; delivering relevant online advertising to a global audience; and designing and selling devices."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c4",
+            "type": "fact",
+            "text": "Apple generates revenue from service platforms (advertising, cloud services) and product sales.",
+            "sourceIds": [
+              "AAPL-10-Q-0000320193-26-000020"
+            ],
+            "quotes": [
+              {
+                "sourceId": "AAPL-10-Q-0000320193-26-000020",
+                "text": "Services net sales increased during the third quarter and first nine months of 2026 compared to the same periods in 2025 primarily due to higher net sales from advertising and cloud services."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c5",
+            "type": "fact",
+            "text": "Amazon generates revenue from retail sales, advertising services, and subscription services (Prime membership fees, digital content).",
+            "sourceIds": [
+              "AMZN-10-Q-0001018724-26-000040"
+            ],
+            "quotes": [
+              {
+                "sourceId": "AMZN-10-Q-0001018724-26-000040",
+                "text": "Service sales primarily represent third-party seller fees, which include commissions and any related fulfillment and shipping fees, AWS sales, advertising services, Amazon Prime membership fees, and certain digital media content subscriptions."
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb2000000000000000000002d0ba3164cc74f58b7",
+            "symbol": "GOOGLc",
+            "fit": 5,
+            "evidence": 5,
+            "claimIds": [
+              "platform-giants:c1"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000008bc8786b856e61707c",
+            "symbol": "METAc",
+            "fit": 5,
+            "evidence": 5,
+            "claimIds": [
+              "platform-giants:c2"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000ab99cfa739e253872b",
+            "symbol": "MSFTc",
+            "fit": 5,
+            "evidence": 5,
+            "claimIds": [
+              "platform-giants:c3"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000c2e324d24d7eecd1fb",
+            "symbol": "AAPLc",
+            "fit": 5,
+            "evidence": 5,
+            "claimIds": [
+              "platform-giants:c4"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000d9192b6b456483c2e8",
+            "symbol": "AMZNc",
+            "fit": 5,
+            "evidence": 5,
+            "claimIds": [
+              "platform-giants:c5"
+            ]
+          }
+        ],
+        "gap": false
+      },
+      {
+        "themeId": "longevity-biotech",
+        "claims": [],
+        "fits": [],
+        "gap": true,
+        "gapReason": "No candidate had a fit supported by a verified fact from the retrieved sources."
+      }
+    ],
+    "disclaimer": "Informational research only. Not investment advice. Simulated where labeled."
+  },
+  "issues": [],
+  "rejected": [
+    "longevity-biotech: longevity-biotech:c1: fact dropped, no verbatim quote found",
+    "longevity-biotech: fit GOOGLc: no surviving fact about this company"
+  ],
+  "usage": {
+    "inputTokens": 69681,
+    "outputTokens": 2635,
+    "calls": 3
+  },
+  "costUsd": 0.02137275,
+  "costUsdcMinor": "21373",
+  "secWarnings": []
+}
