@@ -1,0 +1,51 @@
+Loading the token list...
+API tokens 378, trusted 10, missing from API 0, symbol mismatches 0
+Loading pool liquidity (one request per token, spaced out)...
+
+Simulated surplus: 1.900000, investable 0.950000
+
+Proposed legs (fits are demo placeholders, not research):
+  NVDAc   0.180953 USDC (ai-compute)
+  MSFTc   0.139484 USDC (ai-compute)
+  GOOGLc  0.154563 USDC (ai-compute)
+  METAc   0.096610 USDC (platform-giants)
+  AMZNc   0.099026 USDC (platform-giants)
+  AAPLc   0.089364 USDC (platform-giants)
+  uninvested 0.190000 USDC: gap (longevity-biotech)
+
+Getting real quotes from KyberSwap (read-only)...
+Proposal accepted by the policy engine.
+Waiting 3 seconds, then re-quoting (this is what the pre-execution check uses)...
+Executed (SIMULATED fills at real quoted prices).
+
+Price check: quote vs the token list's NAV (reference only)
+┌─────────┬──────────┬──────────┬──────────┬──────────┬───────────┬───────────────┬─────────┬──────────┐
+│ (index) │ symbol   │ quotePx  │ nav      │ vsNavPct │ navStatus │ quoteDriftBps │ costBps │ gasUsd   │
+├─────────┼──────────┼──────────┼──────────┼──────────┼───────────┼───────────────┼─────────┼──────────┤
+│ 0       │ 'NVDAc'  │ '144.35' │ '144.31' │ '0.02'   │ 'fresh'   │ 0             │ 1       │ '0.0035' │
+│ 1       │ 'MSFTc'  │ '493.80' │ '492.24' │ '0.32'   │ 'stale'   │ 0             │ 4       │ '0.0035' │
+│ 2       │ 'GOOGLc' │ '273.35' │ '273.44' │ '-0.03'  │ 'fresh'   │ 0             │ 6       │ '0.0035' │
+│ 3       │ 'METAc'  │ '588.62' │ '586.93' │ '0.29'   │ 'fresh'   │ 0             │ 18      │ '0.0035' │
+│ 4       │ 'AMZNc'  │ '255.72' │ '255.39' │ '0.13'   │ 'stale'   │ 0             │ -6      │ '0.0035' │
+│ 5       │ 'AAPLc'  │ '350.57' │ '350.60' │ '-0.01'  │ 'stale'   │ 0             │ 1       │ '0.0035' │
+└─────────┴──────────┴──────────┴──────────┴──────────┴───────────┴───────────────┴─────────┴──────────┘
+Ledger
+┌─────────┬────┬─────────────────────┬───────┬────────────────────────────────────────────────────────────────┐
+│ (index) │ id │ type                │ mode  │ memo                                                           │
+├─────────┼────┼─────────────────────┼───────┼────────────────────────────────────────────────────────────────┤
+│ 0       │ 1  │ 'OPENING_BALANCE'   │ 'sim' │ 'opening reserve (simulated)'                                  │
+│ 1       │ 2  │ 'PAYMENT_RECEIVED'  │ 'sim' │ ''                                                             │
+│ 2       │ 3  │ 'COST_ACCRUED'      │ 'sim' │ 'metered estimate'                                             │
+│ 3       │ 4  │ 'COST_ACCRUED'      │ 'sim' │ 'metered estimate'                                             │
+│ 4       │ 5  │ 'RESERVE_TOPUP'     │ 'sim' │ ''                                                             │
+│ 5       │ 6  │ 'SURPLUS_ALLOCATED' │ 'sim' │ ''                                                             │
+│ 6       │ 7  │ 'PROPOSAL_CREATED'  │ 'sim' │ 'proposal live-1: 6 legs, total 0.760000 USDC, hash b49182596' │
+│ 7       │ 8  │ 'APPROVAL_RECORDED' │ 'sim' │ 'proposal live-1 approved by owner, expires 2026-11-20T09:04:' │
+│ 8       │ 9  │ 'PURCHASE_SETTLED'  │ 'sim' │ 'SIMULATED fill NVDAc: 0.180953 USDC at 144350136 => 125357 u' │
+│ 9       │ 10 │ 'PURCHASE_SETTLED'  │ 'sim' │ 'SIMULATED fill MSFTc: 0.139484 USDC at 493801111 => 28247 un' │
+│ 10      │ 11 │ 'PURCHASE_SETTLED'  │ 'sim' │ 'SIMULATED fill GOOGLc: 0.154563 USDC at 273349957 => 56544 u' │
+│ 11      │ 12 │ 'PURCHASE_SETTLED'  │ 'sim' │ 'SIMULATED fill METAc: 0.096610 USDC at 588618777 => 16413 un' │
+│ 12      │ 13 │ 'PURCHASE_SETTLED'  │ 'sim' │ 'SIMULATED fill AMZNc: 0.099026 USDC at 255715945 => 38725 un' │
+│ 13      │ 14 │ 'PURCHASE_SETTLED'  │ 'sim' │ 'SIMULATED fill AAPLc: 0.089364 USDC at 350570789 => 25491 un' │
+└─────────┴────┴─────────────────────┴───────┴────────────────────────────────────────────────────────────────┘
+Reconcile: { ok: true, issues: [] }
