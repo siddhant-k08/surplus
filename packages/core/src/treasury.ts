@@ -204,7 +204,7 @@ export class Treasury {
     /** Simulated execution: re-checks everything, then books fills at the fresh prices. */
     execute(
         id: string,
-        i: { freshPrices: PriceMap; decimals: ReadonlyMap<string, number> },
+        i: { freshPrices: PriceMap; decimals: ReadonlyMap<string, number>; blocks?: readonly string[] },
     ): ExecuteResult {
         const rec = this.get(id);
         if (rec.machine.state !== "APPROVED" || !rec.approval) {
@@ -234,7 +234,7 @@ export class Treasury {
         }
 
         const total = sumLegs(rec.proposal.legs);
-        const reasons = [...pre.reasons];
+        const reasons = [...pre.reasons, ...(i.blocks ?? [])];
         if (reasons.length === 0 && this.ledger.balance("surplus.investable") < total) {
             reasons.push("insufficient investable surplus");
         }

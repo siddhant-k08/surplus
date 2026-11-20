@@ -194,4 +194,18 @@ describe("treasury", () => {
         expect(() => tr.execute("pr1", { freshPrices: quoted, decimals: new Map() })).toThrow(/Missing decimals/);
         expect(tr.state("pr1")).toBe("APPROVED");
     });
+
+    it("stops when pre-trade gates report a block, and books nothing", () => {
+        const { tr } = setup();
+        tr.createProposal({ id: "pr1", legs: exampleLegs(), quotedPrices: quoted });
+        tr.approve("pr1", "owner");
+        const r = tr.execute("pr1", { freshPrices: quoted, decimals, blocks: ["NVDAc quote: quote is 40s old (limit 25s)"] });
+        expect(r.ok).toBe(false);
+        if (!r.ok) {
+            expect(r.outcome).toBe("REAPPROVAL_REQUIRED");
+            expect(r.reasons).toEqual(["NVDAc quote: quote is 40s old (limit 25s)"]);
+        }
+        expect(types(tr)).not.toContain("PURCHASE_SETTLED");
+        expect(tr.ledger.all().at(-1)!.type).toBe("REFUSAL");
+    });
 });
