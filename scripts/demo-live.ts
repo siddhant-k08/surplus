@@ -1,12 +1,14 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
+    loadLatestBrief,
     loadAllTokens,
     crossCheck,
     loadLiquidityScores,
     toCandidates,
     validateBrief,
     allocate,
+    swapPlan,
+    swapPlanTotal,
+    describeSwapPlan,
     quoteLegs,
     preTradeChecks,
     blockReasons,
@@ -18,7 +20,6 @@ import {
     reconcileInternal,
     parseUsdc as u,
     formatUsdc,
-    type Brief,
     type Claim,
     type ThemeInput,
 } from "../packages/core/src/index";
@@ -26,48 +27,6 @@ import {
 const SLIPPAGE_BPS = 100;
 const BRIEFS_DIR = "docs/briefs";
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-interface SavedBrief {
-    file: string;
-    provider: string;
-    model: string;
-    brief: Brief;
-    costUsdcMinor: bigint;
-    costUsd: number;
-}
-
-/**
- * Reads the newest brief written by demo-research.ts. The saved file holds the brief plus the metered model
- * cost; the cost is stored as a decimal string of USDC minor units so it survives JSON without a float.
- */
-function loadLatestBrief(): SavedBrief {
-    const files = readdirSync(BRIEFS_DIR).filter((f) => f.endsWith(".json"));
-    if (files.length === 0) {
-        throw new Error(`No briefs in ${BRIEFS_DIR}. Run "npx tsx scripts/demo-research.ts" first.`);
-    }
-    const saved = files.map((file) => {
-        const raw: unknown = JSON.parse(readFileSync(join(BRIEFS_DIR, file), "utf8"));
-        if (typeof raw !== "object" || raw === null) throw new Error(`${file} is not an object`);
-        const r = raw as Record<string, unknown>;
-        const brief = r.brief as Brief | undefined;
-        if (brief === undefined || typeof brief.id !== "string" || !Array.isArray(brief.themes)) {
-            throw new Error(`${file} has no usable brief`);
-        }
-        if (typeof r.costUsdcMinor !== "string" || !/^\d+$/.test(r.costUsdcMinor)) {
-            throw new Error(`${file} has no costUsdcMinor`);
-        }
-        return {
-            file,
-            provider: typeof r.provider === "string" ? r.provider : "unknown",
-            model: typeof r.model === "string" ? r.model : "unknown",
-            brief,
-            costUsdcMinor: BigInt(r.costUsdcMinor),
-            costUsd: typeof r.costUsd === "number" ? r.costUsd : 0,
-        };
-    });
-    saved.sort((a, b) => Date.parse(b.brief.createdAt) - Date.parse(a.brief.createdAt));
-    return saved[0]!;
-}
 
 async function main(): Promise<void> {
     console.log("Loading the token list...");
@@ -86,7 +45,7 @@ async function main(): Promise<void> {
     console.log("Loading pool liquidity (one request per token, spaced out)...");
     const liquidity = await loadLiquidityScores(check.trusted.map((t) => t.address));
 
-    const saved = loadLatestBrief();
+    const saved = loadLatestBrief(BRIEFS_DIR);
     const brief = saved.brief;
     console.log(
         `\nUsing brief ${brief.id} from ${saved.file}\n` +
@@ -168,6 +127,15 @@ async function main(): Promise<void> {
     }
     for (const x of alloc.uninvested) console.log(`  uninvested ${formatUsdc(x.amount)} USDC: ${x.reason} (${x.theme ?? "no theme"})`);
     if (alloc.legs.length === 0) throw new Error("Nothing to propose");
+
+    // Legs stay per theme for the mandate checks and the ledger. The swap plan is how the money would
+    // actually be spent onchain: one swap per token, so gas is paid once per token rather than once per theme.
+    const terms = mandates.current().terms;
+    const plan = swapPlan(alloc.legs, terms.maxTradeUsdc);
+    const legTotal = alloc.legs.reduce((a, l) => a + l.usdcIn, 0n);
+    if (swapPlanTotal(plan) !== legTotal) throw new Error("swap plan does not spend what the legs spend");
+    console.log(`\nSwap plan: ${plan.length} swaps for ${alloc.legs.length} legs (gas is paid per swap)`);
+    for (const line of describeSwapPlan(plan)) console.log(`  ${line}`);
 
     console.log("\nGetting real quotes from KyberSwap (read-only)...");
     const q1 = await quoteLegs(alloc.legs, decimals, { slippageBps: SLIPPAGE_BPS });
