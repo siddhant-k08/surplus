@@ -247,7 +247,9 @@ export class Treasury {
         rec.machine.transition("EXECUTING", this.now());
         const fills: Fill[] = [];
         try {
-            for (const leg of rec.proposal.legs) {
+            // The same asset can appear in more than one theme, so the key is per leg, not per asset.
+            // Legs are fixed when the proposal is created, so the index is stable across retries.
+            for (const [n, leg] of rec.proposal.legs.entries()) {
                 const key = leg.asset.toLowerCase();
                 const price = i.freshPrices.get(key)!;
                 const quantity = (leg.usdcIn * 10n ** BigInt(i.decimals.get(key)!)) / price;
@@ -256,7 +258,7 @@ export class Treasury {
                     type: "PURCHASE_SETTLED",
                     mode: this.opts.mode,
                     at: this.now(),
-                    idempotencyKey: `fill:${id}:${key}`,
+                    idempotencyKey: `fill:${id}:${n}:${key}`,
                     memo: `${tag}fill ${leg.symbol}: ${formatUsdc(leg.usdcIn)} USDC at ${price} => ${quantity} units`,
                     lines: [
                         { account: `positions.${key}`, amount: leg.usdcIn },

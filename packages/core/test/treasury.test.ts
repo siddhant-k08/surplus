@@ -208,4 +208,38 @@ describe("treasury", () => {
         expect(types(tr)).not.toContain("PURCHASE_SETTLED");
         expect(tr.ledger.all().at(-1)!.type).toBe("REFUSAL");
     });
+
+    it("fills both legs when one asset appears in two themes, and aggregates the position", () => {
+        const { tr } = setup();
+        // real research puts the same company in more than one theme; each leg must still book its own fill
+        const legs = allocate({
+            investable: u("0.95"),
+            terms: baseTerms(),
+            themes: [
+                {
+                    id: "ai-compute", candidates: [
+                        { asset: NVDA, symbol: "NVDAc", weight: 40 },
+                        { asset: MSFT, symbol: "MSFTc", weight: 60 },
+                    ]
+                },
+                {
+                    id: "platform-giants", candidates: [
+                        { asset: NVDA, symbol: "NVDAc", weight: 50 },
+                        { asset: META, symbol: "METAc", weight: 50 },
+                    ]
+                },
+            ],
+        }).legs;
+        expect(legs.filter((l) => l.asset === NVDA).length).toBe(2);
+
+        tr.createProposal({ id: "dup", legs, quotedPrices: quoted });
+        tr.approve("dup", "owner");
+        const r = tr.execute("dup", { freshPrices: quoted, decimals });
+        expect(r.ok).toBe(true);
+        if (r.ok) expect(r.fills.length).toBe(legs.length);
+        expect(types(tr).filter((t) => t === "PURCHASE_SETTLED").length).toBe(legs.length);
+        const onNvda = legs.filter((l) => l.asset === NVDA).reduce((a, l) => a + l.usdcIn, 0n);
+        expect(tr.ledger.balance(`positions.${NVDA}`)).toBe(onNvda);
+        expect(reconcileInternal(tr.ledger).ok).toBe(true);
+    });
 });
