@@ -15,5 +15,5 @@
     "include": [
         "./**/*.ts",
         "../packages/core/src/**/*.ts"
-    ]
+, "spike-edgar.mjs"    ]
 }
