@@ -5,8 +5,11 @@ import { ExactEvmScheme } from "@x402/evm/exact/server";
 import {
     Treasury,
     MandateStore,
+    JsonlLedgerStore,
+    flushNewEntries,
     loadLatestBrief,
     formatUsdc,
+    type LedgerTx,
     type MandateTerms,
     type SavedBrief,
 } from "@surplus/core";
@@ -64,6 +67,7 @@ export function bookSettlement(args: {
         briefId,
         amount,
         txHash: facts.transaction,
+        memo: briefId, // provenance: a persisted entry should say which brief was sold
     });
     if (!sales.some((s) => s.transaction === facts.transaction)) {
         sales.push({
@@ -82,6 +86,31 @@ export interface ServerDeps {
     terms: MandateTerms;
     /** Overridable so tests can run without the docs/briefs directory. */
     readBrief?: () => SavedBrief;
+    /** When given, the ledger is loaded from this file on boot and appended to after every sale. */
+    store?: JsonlLedgerStore;
+}
+
+/**
+ * Rebuilds the sales list from ledger entries rather than storing it twice.
+ *
+ * A booked sale is a PAYMENT_RECEIVED entry carrying the settlement transaction, so the ledger already
+ * holds everything the list shows. Deriving it keeps the two from disagreeing after a restart.
+ */
+export function salesFromLedger(entries: readonly LedgerTx[]): BookedSale[] {
+    const out: BookedSale[] = [];
+    for (const e of entries) {
+        if (e.type !== "PAYMENT_RECEIVED" || e.txHash === undefined) continue;
+        const cash = e.lines.find((l) => l.account === "cash.operating");
+        if (cash === undefined) continue;
+        out.push({
+            transaction: e.txHash,
+            payer: undefined, // the payer is not kept in the ledger; it lives in the settlement record
+            amountUsdcMinor: cash.amount,
+            briefId: e.memo ?? "unknown",
+            at: e.at,
+        });
+    }
+    return out;
 }
 
 export interface BuiltServer {
@@ -101,13 +130,18 @@ export interface BuiltServer {
  * every claim carries the quote it came from so a reader can check it.
  */
 export function buildServer(deps: ServerDeps): BuiltServer {
-    const { config, terms } = deps;
+    const { config, terms, store } = deps;
     const readBrief = deps.readBrief ?? ((): SavedBrief => loadLatestBrief(config.briefsDir));
 
     const mandates = new MandateStore();
     mandates.create(terms);
-    const treasury = new Treasury({ mode: config.mode, mandates });
-    const sales: BookedSale[] = [];
+
+    // Replaying the stored entries restores the balances and, importantly, the dedup index: a settlement
+    // that arrives again after a restart is refused by the ledger rather than booked a second time.
+    const ledger = store?.loadLedger();
+    const treasury = new Treasury({ mode: config.mode, mandates, ...(ledger && { ledger }) });
+    const sales: BookedSale[] = ledger ? salesFromLedger(ledger.all()) : [];
+    let persistedId = ledger ? (ledger.all().at(-1)?.id ?? 0) : 0;
 
     const facilitator = new HTTPFacilitatorClient({ url: config.facilitatorUrl });
     const resourceServer = new x402ResourceServer(facilitator)
@@ -134,6 +168,11 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 );
             } else if (verdict === "booked") {
                 const amount = BigInt(result.amount ?? requirements.amount);
+                if (store !== undefined) {
+                    // flush straight after booking: a crash before this loses the entry, and the onchain
+                    // payment would then have to be reconciled by hand
+                    persistedId = flushNewEntries(treasury.ledger, store, persistedId);
+                }
                 console.log(`booked ${formatUsdc(amount)} USDC (tx ${result.transaction})`);
             }
         });

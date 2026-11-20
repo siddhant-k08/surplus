@@ -1,4 +1,5 @@
 import type { Mode } from "@surplus/core";
+import { fromRepoRoot, REPO_ROOT } from "./paths";
 
 /** CAIP-2 network ids. The free x402.org facilitator serves Base Sepolia only (checked 21 Nov 2026). */
 export const BASE_SEPOLIA = "eip155:84532" as const;
@@ -25,13 +26,19 @@ export interface ApiConfig {
     briefsDir: string;
     /** The asset the settled amount must be denominated in before any revenue is booked. */
     expectedAsset: string;
+    /** Append-only JSONL file the ledger is persisted to. */
+    ledgerPath: string;
     /** Ledger mode tag. Never "sim": money really moves on a testnet. */
     mode: Mode;
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
     const v = env[name];
-    if (v === undefined || v.trim() === "") throw new Error(`${name} is not set`);
+    if (v === undefined || v.trim() === "") {
+        // Name where it was looked for: npm runs a workspace script from apps/api, and a .env that was
+        // never loaded looks exactly like a value that was never set.
+        throw new Error(`${name} is not set. Looked in the environment and in ${REPO_ROOT}/.env`);
+    }
     return v.trim();
 }
 
@@ -54,7 +61,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     const payTo = required(env, "X402_PAY_TO");
     if (!/^0x[0-9a-fA-F]{40}$/.test(payTo)) throw new Error("X402_PAY_TO must be a 20 byte hex address");
 
-    const priceUsd = (env.BRIEF_PRICE_USD ?? "$3.00").trim();
+    const priceUsd = (env.BRIEF_PRICE_USD ?? "$0.01").trim();
     if (!/^\$\d+(\.\d{1,6})?$/.test(priceUsd)) throw new Error(`BRIEF_PRICE_USD must look like "$3.00", got ${priceUsd}`);
 
     const portRaw = (env.PORT ?? "4021").trim();
@@ -70,7 +77,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         facilitatorUrl: (env.X402_FACILITATOR_URL ?? "https://x402.org/facilitator").trim(),
         payTo,
         priceUsd,
-        briefsDir: (env.BRIEFS_DIR ?? "docs/briefs").trim(),
+        briefsDir: fromRepoRoot((env.BRIEFS_DIR ?? "docs/briefs").trim()),
+        // one file per mode: a testnet ledger and a mainnet ledger must never share a file
+        ledgerPath: fromRepoRoot((env.LEDGER_PATH ?? `data/ledger-${network === BASE_MAINNET ? "mainnet" : "testnet"}.jsonl`).trim()),
         expectedAsset,
         mode: network === BASE_MAINNET ? "mainnet" : "testnet",
     };

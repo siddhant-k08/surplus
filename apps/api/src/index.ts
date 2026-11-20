@@ -1,9 +1,9 @@
-import { existsSync } from "node:fs";
-import { parseUsdc as u, BASE_REGISTRY, type MandateTerms } from "@surplus/core";
+import { parseUsdc as u, BASE_REGISTRY, JsonlLedgerStore, formatUsdc, type MandateTerms } from "@surplus/core";
 import { loadConfig } from "./config";
 import { buildServer, BRIEF_ROUTE } from "./server";
+import { loadRootEnv } from "./paths";
 
-if (existsSync(".env")) process.loadEnvFile(".env");
+const envPath = loadRootEnv();
 
 /**
  * The endpoint sells research; it does not invest. The treasury still settles against a real mandate, so the
@@ -29,14 +29,22 @@ const terms: MandateTerms = {
 
 function main(): void {
     const config = loadConfig();
-    const { app } = buildServer({ config, terms });
+    const store = new JsonlLedgerStore(config.ledgerPath);
+    const { app, treasury, sales } = buildServer({ config, terms, store });
 
     app.listen(config.port, () => {
         console.log(`Surplus research endpoint on http://localhost:${config.port}`);
+        console.log(`  env         ${envPath ?? "no .env found at the repo root; using the process environment"}`);
         console.log(`  mode        ${config.mode}  (ledger entries are tagged ${config.mode})`);
         console.log(`  network     ${config.network}`);
         console.log(`  facilitator ${config.facilitatorUrl}`);
         console.log(`  paid route  GET ${BRIEF_ROUTE} at ${config.priceUsd}, paid to ${config.payTo}`);
+        console.log(`  briefs      ${config.briefsDir}`);
+        console.log(
+            `  ledger      ${config.ledgerPath} ` +
+            `(${treasury.ledger.all().length} entries restored, ${sales.length} sales, ` +
+            `cash ${formatUsdc(treasury.ledger.balance("cash.operating"))} USDC)`,
+        );
         console.log(`  free        GET /health, GET /ledger`);
     });
 }

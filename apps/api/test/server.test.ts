@@ -1,7 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import request from "supertest";
-import { parseUsdc as u, BASE_REGISTRY, type MandateTerms, type SavedBrief, type Brief } from "@surplus/core";
-import { buildServer, bookSettlement, BRIEF_ROUTE, type BookedSale } from "../src/server";
+import { parseUsdc as u, BASE_REGISTRY, JsonlLedgerStore, flushNewEntries, Ledger, type MandateTerms, type SavedBrief, type Brief } from "@surplus/core";
+import { buildServer, bookSettlement, salesFromLedger, BRIEF_ROUTE, type BookedSale } from "../src/server";
 import { loadConfig, USDC, BASE_SEPOLIA } from "../src/config";
 
 const PAY_TO = "0x" + "a".repeat(40);
@@ -131,5 +134,83 @@ describe("bookSettlement", () => {
             briefId: brief.id, facts: facts({ asset: ASSET.toLowerCase() }),
         });
         expect(v).toBe("booked");
+    });
+});
+
+describe("persistence", () => {
+    let dir: string;
+    let store: JsonlLedgerStore;
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), "surplus-api-"));
+        store = new JsonlLedgerStore(join(dir, "ledger.jsonl"));
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    const bookOne = (tx: string) => {
+        const built = buildServer({ config, terms, readBrief: () => saved, store });
+        const verdict = bookSettlement({
+            treasury: built.treasury,
+            sales: built.sales,
+            expectedAsset: ASSET,
+            briefId: brief.id,
+            facts: facts({ transaction: tx, requiredAmount: "10000" }),
+        });
+        return { built, verdict };
+    };
+
+    it("survives a restart: balances, sales and the brief sold all come back", () => {
+        const first = bookOne("0xaaa");
+        expect(first.verdict).toBe("booked");
+        // the server flushes inside the settle hook, so flush here the way the hook does
+        flushNewEntries(first.built.treasury.ledger, store, 0);
+
+        const restarted = buildServer({ config, terms, readBrief: () => saved, store });
+        expect(restarted.treasury.ledger.balance("cash.operating")).toBe(u("0.01"));
+        expect(restarted.sales.length).toBe(1);
+        expect(restarted.sales[0]!.transaction).toBe("0xaaa");
+        expect(restarted.sales[0]!.briefId).toBe(brief.id);
+        expect(restarted.treasury.ledger.all()[0]!.txHash).toBe("0xaaa");
+    });
+
+    it("refuses to book the same settlement again after a restart", () => {
+        const first = bookOne("0xaaa");
+        flushNewEntries(first.built.treasury.ledger, store, 0);
+
+        const restarted = buildServer({ config, terms, readBrief: () => saved, store });
+        const again = bookSettlement({
+            treasury: restarted.treasury,
+            sales: restarted.sales,
+            expectedAsset: ASSET,
+            briefId: brief.id,
+            facts: facts({ transaction: "0xaaa", requiredAmount: "10000" }),
+        });
+        expect(again).toBe("booked"); // idempotent, not an error
+        expect(restarted.treasury.ledger.all().filter((e) => e.type === "PAYMENT_RECEIVED").length).toBe(1);
+        expect(restarted.treasury.ledger.balance("cash.operating")).toBe(u("0.01"));
+        expect(restarted.sales.length).toBe(1);
+    });
+
+    it("starts clean when there is no ledger file yet", () => {
+        const built = buildServer({ config, terms, readBrief: () => saved, store });
+        expect(built.treasury.ledger.all()).toEqual([]);
+        expect(built.sales).toEqual([]);
+    });
+
+    it("works with no store at all, keeping everything in memory", () => {
+        const built = buildServer({ config, terms, readBrief: () => saved });
+        expect(built.sales).toEqual([]);
+        expect(existsSync(join(dir, "ledger.jsonl"))).toBe(false);
+    });
+});
+
+describe("salesFromLedger", () => {
+    it("ignores entries that are not booked sales", () => {
+        const l = new Ledger();
+        l.post({ type: "REFUSAL", mode: "testnet", at: new Date("2026-11-21T00:00:00Z"), lines: [], memo: "nope" });
+        l.post({
+            type: "COST_ACCRUED", mode: "testnet", at: new Date("2026-11-21T00:00:01Z"),
+            lines: [{ account: "expense.llm", amount: u("0.02") }, { account: "cash.operating", amount: u("-0.02") }],
+        });
+        expect(salesFromLedger(l.all())).toEqual([]);
     });
 });

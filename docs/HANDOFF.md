@@ -5,7 +5,7 @@ Written 21 Nov 2026 when the project moved from a Claude chat to Claude Code. Th
 ## Where we stopped
 
 1. The research pipeline works end to end against real SEC filings and Gemini (`gemini-3.1-flash-lite`). Latest real run: 3 model calls, about 70,600 input tokens, cost about $0.021 booked at paid-tier rates, zero validation issues.
-2. The keyword patch is applied and committed. `npm test` runs core (196 tests, 21 files) and the API (14 tests).
+2. `npm test` runs core (208 tests, 23 files) and the API (23 tests).
 3. Milestone 1 (research quality) is closed, 21 Nov 2026. What the diagnosis found:
    - The dominant cause of dropped facts was never paraphrasing or `htmlToText`. It was the `MAX_QUOTE` 300-character cap. The model quoted real filing text and ran past 300 characters, usually to finish a sentence or a list of examples, and `quoteInText` rejected it on length while the drop message said "no verbatim quote found". A read-only spike confirmed the Alphabet quote was present verbatim in the filing; `htmlToText` is exonerated.
    - Fixed by `quoteCheck` in `src/pipeline.ts`, which returns `ok`, `too_short`, `too_long`, `not_found`, plus an `uncited_source` case in `assembleTheme`. Drop messages now name the reason and the character count. `quoteInText` is a boolean wrapper over it, so callers are unchanged.
@@ -42,9 +42,11 @@ How it is built, and what it deliberately does not touch:
 
 Still to do when real execution is built (milestone 5): the executor should swap once per `SwapOrder` while the ledger keeps posting one `PURCHASE_SETTLED` per leg, so theme attribution survives in the ledger. Today's fills are simulated, so the plan is printed and asserted but not yet the thing that moves money.
 
-## x402 endpoint, started 21 Nov 2026
+## x402 endpoint, working end to end 21 Nov 2026
 
-`apps/api` (`@surplus/api`) serves the paid brief. It runs and returns a correct 402 challenge against the live free facilitator. What is left is an actual paid request, which needs a funded test wallet.
+`apps/api` (`@surplus/api`) sells the brief for real USDC on Base Sepolia. First real sale settled 21 Nov 2026.
+
+Proof of the first sale: price `$0.01` -> amount `10000`, payer `0x8Ab8b5d0b8806868B636B9251e2e1d2753356384`, transaction `0x606c3a6bb4068f8e3faf2aa288750c4ee5c905841eaff5b7fd7535f107c6c702`, block 61449727. The seller ledger then showed one `PAYMENT_RECEIVED` tagged `testnet` for 0.010000 USDC carrying that hash, and one booked sale. Payment, settlement, booking and the brief handoff all work.
 
 Package choice, verified rather than assumed. The CDP seller quickstart describes `@coinbase/cdp-sdk/x402` with `createX402Server` and `CDP_API_KEY_ID`/`CDP_API_KEY_SECRET`. Web results described the older `x402-express` with `paymentMiddleware(payTo, routes, facilitator)`. Both are real but they are different generations, so the npm registry settled it: `@x402/core`, `@x402/evm` and `@x402/express` are at 2.32.0 published 20 Nov 2026, while `x402-express` has sat at 1.2.0 since April 2026 and `@coinbase/x402` since Dec 2025. We use the 2.x scoped line with the free facilitator, so no CDP account or API keys are needed.
 
@@ -68,18 +70,46 @@ Money rules, in `bookSettlement` and unit tested:
 
 Also moved: `loadLatestBrief` now lives in `src/briefstore.ts` in core, shared by `demo-live.ts` and the API instead of being duplicated. It uses `node:fs`; core already used `node:crypto`, so node builtins in core are not new.
 
+Answered by the first real sale, with onchain evidence: **the buyer needs no testnet ETH**. `eth_getTransactionByHash` on the settlement shows `from` = `0xd407e409e34e0b9afb99ecceb609bdbcd5e7f1bf`, which is the facilitator address x402.org advertises in its own `/supported` response, not the buyer. `to` is the USDC contract with `value` 0, consistent with the facilitator submitting a signed EIP-3009 `transferWithAuthorization` and paying the gas itself. A buyer therefore needs only USDC. Do not assume this holds with a different facilitator.
+
 Verified facts worth keeping:
 
 - `https://x402.org/facilitator/supported` advertises `exact` on `eip155:84532` and no other EVM network. This confirms the earlier note that the free facilitator is testnet only and mainnet needs a different one.
 - USDC on Base Sepolia is `0x036CbD53842c5426634e7929541eC2318f3dCF7e` (Circle's contract address list, read 21 Nov 2026). The same page gives Base mainnet as `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, matching the address already verified here, which is what makes the testnet one credible. The running server's own challenge then resolved `$3.00` to amount `3000000` against that asset with `extra {name: USDC, version: 2}`, confirming it independently.
 - `npm audit --omit=dev` is clean with the new dependencies. The 6 reported vulnerabilities are dev-only.
 
+Price decided 21 Nov 2026: `$0.01` by default, down from `$3.00`, so a demo buyer needs almost no test USDC. This has a consequence worth knowing before wiring real revenue into the investing loop. With the demo mandate (reserve target 2.00, opening reserve 1.50, invest share 5000 bps), a single `$0.01` sale is less than the model cost of the brief, so surplus is zero and nothing is invested. The `$3.00` figure in `demo-live.ts` is what makes that scene work. Before joining the two, either lower `reserveTargetUsdc` for the demo mandate or accumulate enough sales; do not quietly raise the price back.
+
+Buyer client added: `apps/api/src/buy.ts`, run with `npm run buy -w @surplus/api`. It prints the challenge, pays, prints the settlement, then reads `/ledger` to show the booked sale. Verified from the installed packages: `wrapFetchWithPaymentFromConfig` and `decodePaymentResponseHeader` from `@x402/fetch`, client-side `ExactEvmScheme` from `@x402/evm` root (not `/exact/server`, which is the seller side), `privateKeyToAccount` from `viem/accounts`. The buyer key is read from `.env` as `X402_BUYER_PRIVATE_KEY` and never printed or logged.
+
+Fixed 21 Nov 2026, found by Siddhant on the first run: `npm run api` failed with "X402_PAY_TO is not set" even though it was set. npm runs a workspace script with the workspace as its cwd, so `existsSync(".env")` in `apps/api/src/index.ts` was testing `apps/api/.env`, silently skipped loading, and the missing value looked like a config mistake. `BRIEFS_DIR=docs/briefs` had the same latent fault and would have resolved to `apps/api/docs/briefs`. Both now go through `src/paths.ts`, which derives `REPO_ROOT` from `import.meta.url` rather than the cwd; `required()` also names the exact `.env` path it looked in. Four regression tests in `test/paths.test.ts`. The lesson generalises: anything in `apps/*` must not resolve paths against the cwd.
+
 Next on this milestone:
 
-1. Fund a throwaway Base Sepolia wallet and make one real paid request with an x402 client, then confirm `/ledger` shows a `testnet` `PAYMENT_RECEIVED` carrying the transaction hash.
-2. Decide the real price. `$3.00` matches the figure `demo-live.ts` books, but it means a buyer needs 3 test USDC.
-3. Persist the ledger. State is in memory, so a restart loses booked sales.
-4. Feed the endpoint's booked revenue into the investing loop instead of the simulated `$3.00` payment.
+1. Done: the paid request settled and booked correctly (details above).
+2. Done, see below.
+3. Feed the endpoint's booked revenue into the investing loop, keeping the surplus arithmetic above in mind.
+
+## Ledger persistence, closed 21 Nov 2026
+
+The ledger is now append-only JSONL on disk, one entry per line, in `src/ledgerstore.ts`. JSONL fits an append-only ledger: a new entry never rewrites an earlier one, the file is its own audit trail, and a reader replays it in order. Amounts are stored as decimal strings of minor units, never JSON numbers, so money cannot pass through a float.
+
+Two bugs found on the way, both of which persistence would have been built on top of:
+
+1. `Ledger.replay` in core spread `txHash` and `idempotencyKey` into `memo` instead of their own fields, a copy-paste error. So a replayed ledger lost the onchain link and, worse, lost its dedup index: the same settlement arriving again after a restart would have booked a second time. The existing replay test only compared balances, which do not depend on those fields, which is why it survived. Fixed, with tests that fail against the old code (one asserted `expected 2 to be 1` on the duplicate).
+2. `Treasury` records events (`REFUSAL`, `PROPOSAL_CREATED`, `APPROVAL_RECORDED`) as entries with no lines, and the first version of the parser rejected an empty `lines` array. Fixed and covered.
+
+How it hangs together:
+
+- `JsonlLedgerStore.loadLedger()` replays the file into a `Ledger`, which the API hands to `Treasury` through its existing `ledger` option.
+- `flushNewEntries(ledger, store, lastId)` appends only entries newer than the high-water mark and returns the new one. Entry ids run from 1 in order, so the id is the cursor. The settle hook flushes immediately after booking, so a crash can only lose an entry whose onchain payment would then need reconciling by hand.
+- The sales list is derived from the ledger with `salesFromLedger`, not stored twice, so the two cannot disagree after a restart. `receivePayment` gained an optional `memo` and the API passes the brief id, so a persisted entry says what was sold.
+- Reading money back off disk fails loudly: a truncated final line, a float amount, an unknown type or mode, or a gap in the entry ids all throw rather than being guessed at or silently skipped.
+- `LEDGER_PATH` defaults to `data/ledger-<mode>.jsonl` at the repo root, one file per mode so a testnet and a mainnet ledger can never share one. `data/` is gitignored.
+
+Verified live, not just in tests: fresh ledger, real purchase, kill, restart. The restart reported `1 entries restored, 1 sales, cash 0.010000 USDC` and `/ledger` returned the entry with its `txHash` and the brief id. A second purchase appended as id 2 rather than overwriting. Sale transactions `0x137ee4ca...` and `0xaabf0aed...`.
+
+Known limit, worth stating: `Treasury` keeps its per-brief revenue and cost tallies and its `seenPayments`/`seenCosts` sets in memory, and those are not rebuilt by replaying the ledger. Double booking is still prevented, because the ledger's own idempotency index is restored and that is the real guard. But `settleBrief` after a restart would compute a surplus from zero revenue. The API never calls it, so nothing is wrong today; fix this before the API settles briefs or invests.
 
 ## Next milestones, in order
 

@@ -20,7 +20,7 @@ Full history, decisions, verified facts and open questions: read `docs/HANDOFF.m
 
 - `packages/core` (`@surplus/core`): all domain logic, TypeScript strict, ESM, tests in `packages/core/test` (vitest 2.x, pinned; do not upgrade to a newer major). `src/index.ts` re-exports every module.
 - `scripts/`: runnable demos and read-only spikes (`spike-*.mjs`, `survey-*.mjs`, `demo-sim.ts`, `demo-live.ts`, `demo-research.ts`), typechecked by `scripts/tsconfig.json`.
-- `apps/api` (`@surplus/api`): the x402 paid research endpoint, Express 5 plus `@x402/*` 2.x, tests with vitest and supertest. See `apps/api/README.md`. The web UI is still not built.
+- `apps/api` (`@surplus/api`): never resolve paths against the cwd here; npm runs workspace scripts from `apps/api`, so use `src/paths.ts` (`REPO_ROOT`, `loadRootEnv`, `fromRepoRoot`). The x402 paid research endpoint, Express 5 plus `@x402/*` 2.x, tests with vitest and supertest. See `apps/api/README.md`. The web UI is still not built.
 - `docs/briefs/`: research briefs saved by `demo-research.ts`.
 
 ## Commands (from repo root, Node 22)
@@ -32,6 +32,7 @@ npm run test:api            # API only
 npm run typecheck           # core, then API
 npm run typecheck:scripts   # scripts
 X402_PAY_TO=0x... npm run api   # the x402 endpoint on Base Sepolia
+npm run buy -w @surplus/api     # buy one brief from it (needs X402_BUYER_PRIVATE_KEY, testnet only)
 npx tsx scripts/demo-sim.ts             # fully simulated loop
 npx tsx scripts/demo-live.ts            # newest real brief, token list, liquidity, KyberSwap quotes; simulated fills
 npx tsx scripts/demo-research.ts --dry-run   # real SEC filings, no model calls, prints prompt sizes
@@ -39,12 +40,15 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 21 files, 196 tests. API 2 files, 14 tests.
+Last known test count: core 23 files, 208 tests. API 3 files, 23 tests.
+
+The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
 ## Money and ledger rules (do not break)
 
 - Money is `bigint` USDC minor units (6 decimals). Percentages are basis points. Round down when allocating, round up when booking costs (`usdToUsdcMinor`). No floats for money except display and ranking.
 - Ledger is double-entry, append-only, idempotent by key, chronological, and every entry carries a mode tag: `sim`, `testnet` or `mainnet`.
+- Persistence is append-only JSONL (`src/ledgerstore.ts`), amounts as decimal strings of minor units, one file per mode. Replaying must restore `idempotencyKey` and `txHash`, not just balances: the restored dedup index is what stops a settlement booking twice after a restart. Reading money back off disk fails loudly rather than skipping a bad line.
 - Mandates are versioned and hashed; the agent never changes user constraints. Unplaceable money stays uninvested with a stated reason.
 - Approvals bind to proposal hash, mandate version and hash, max spend and expiry. Drift beyond tolerance means REAPPROVAL_REQUIRED.
 - The LLM never computes money, never sets source tiers, and never sets evidence scores.
@@ -55,7 +59,7 @@ Last known test count: core 21 files, 196 tests. API 2 files, 14 tests.
 - Pre-trade gates: trusted, no paused flags (any flag blocks), liquidity score at least 2, quote younger than 25 s, NAV deviation over 300 bps blocks only when NAV is fresh.
 - Quotes come from the KyberSwap aggregator with the router address pinned. NAV is a reference value, never an execution price.
 - Mainnet stays off (`MAINNET_ENABLED=false`) until Siddhant explicitly authorizes it, with a spend cap and a throwaway wallet. The API refuses to start on Base mainnet without that flag.
-- The free x402.org facilitator serves Base Sepolia (`eip155:84532`) only; it advertises no other EVM network. Mainnet needs a different facilitator.
+- The free x402.org facilitator serves Base Sepolia (`eip155:84532`) only; it advertises no other EVM network. Mainnet needs a different facilitator. It submits the buyer's signed EIP-3009 authorization and pays the gas, so a buyer needs USDC but no ETH (verified onchain 21 Nov 2026).
 - Sale revenue is booked only from a confirmed settlement, idempotent on the settlement transaction, and only when the settled asset is the expected USDC.
 
 ## Research pipeline rules

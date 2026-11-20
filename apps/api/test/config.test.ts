@@ -12,6 +12,7 @@ describe("loadConfig", () => {
         expect(c.mode).toBe("testnet");
         expect(c.expectedAsset).toBe(USDC[BASE_SEPOLIA]);
         expect(c.port).toBe(4021);
+        expect(c.priceUsd).toBe("$0.01"); // small on purpose: a demo buyer should not need much test USDC
     });
 
     it("refuses mainnet unless it is explicitly authorized", () => {
