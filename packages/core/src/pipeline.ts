@@ -70,11 +70,23 @@ export function normalizeForMatch(s: string): string {
 export const MIN_QUOTE = 20;
 export const MAX_QUOTE = 300;
 
+/** Why a quote failed verification. `not_found` is the only verdict that means the text is not in the document. */
+export type QuoteVerdict = "ok" | "too_short" | "too_long" | "not_found";
+
+/**
+ * Checks one quote against a document and says why it failed. A quote that is present verbatim but longer
+ * than MAX_QUOTE is `too_long`, never `not_found`: the two have different causes and different fixes.
+ */
+export function quoteCheck(quote: string, text: string): QuoteVerdict {
+    const q = normalizeForMatch(quote);
+    if (q.length < MIN_QUOTE) return "too_short";
+    if (q.length > MAX_QUOTE) return "too_long";
+    return normalizeForMatch(text).includes(q) ? "ok" : "not_found";
+}
+
 /** True only if the quote is a verbatim (after normalization) substring of the document text. */
 export function quoteInText(quote: string, text: string): boolean {
-    const q = normalizeForMatch(quote);
-    if (q.length < MIN_QUOTE || q.length > MAX_QUOTE) return false;
-    return normalizeForMatch(text).includes(q);
+    return quoteCheck(quote, text) === "ok";
 }
 
 /** Numbers in `text` (commas removed) that do not appear in any of the quotes. */
@@ -142,6 +154,12 @@ export const SYSTEM_PROMPT = [
     '{"claims":[{"id":"c1","type":"fact|assumption|opinion","text":"...","sourceIds":["..."],"quotes":[{"sourceId":"...","text":"verbatim excerpt, 20 to 300 characters"}],"confidence":"low|medium|high"}],',
     ' "fits":[{"symbol":"TICKER","fit":0,"claimIds":["c1"]}]}',
     "Rules: a fact must include at least one verbatim quote copied exactly from a cited source. Do not paraphrase inside quotes.",
+    "Every quote must be between 20 and 300 characters. A quote outside that range is discarded even when it is accurate.",
+    "Aim for under 200 characters. Quote the shortest span that proves the fact, and never run a quote across a bulleted list.",
+    "A quote may start and stop mid-sentence: it does not have to begin at a capital letter or end at a period, and you must not",
+    "extend it to finish a sentence or to complete a list of examples. Count the characters of each quote before you answer and",
+    "shorten any that run past 300 by cutting words from the end.",
+    "Only quote text that appears in the <source> passages given to you. Do not quote a company's other filings from memory.",
     "A fact's text must say only what its quotes say. Do not add products, figures, causes or comparisons that are not in the quotes.",
     "Each fit should cite one to three facts, each from that company's own filing. Evidence strength is computed from the verified facts, so do not score it.",
     "fit is an integer from 0 to 5 measuring how directly the company's own revenue depends on the theme:",
@@ -275,13 +293,28 @@ export function assembleTheme(
     for (const c of parsed.claims) {
         const newId = `${theme.id}:${c.id}`;
         if (c.type === "fact") {
-            const verified = c.quotes.filter((q) => {
+            const judged = c.quotes.map((q) => {
                 const d = docById.get(q.sourceId);
-                return d !== undefined && c.sourceIds.includes(q.sourceId) && quoteInText(q.text, d.text);
+                if (d === undefined) return { q, verdict: "uncited_source" as const };
+                if (!c.sourceIds.includes(q.sourceId)) return { q, verdict: "uncited_source" as const };
+                return { q, verdict: quoteCheck(q.text, d.text) };
             });
+            const verified = judged.filter((j) => j.verdict === "ok").map((j) => j.q);
             if (verified.length === 0) {
-                const tried = c.quotes[0]?.text.slice(0, 120) ?? "(no quote given)";
-                dropped.push(`${newId}: fact dropped, no verbatim quote found. Tried: "${tried}"`);
+                const first = judged[0];
+                if (first === undefined) {
+                    dropped.push(`${newId}: fact dropped, no quote given`);
+                } else {
+                    const reason =
+                        first.verdict === "too_long"
+                            ? `quote is ${normalizeForMatch(first.q.text).length} characters, over the ${MAX_QUOTE} limit`
+                            : first.verdict === "too_short"
+                              ? `quote is ${normalizeForMatch(first.q.text).length} characters, under the ${MIN_QUOTE} minimum`
+                              : first.verdict === "uncited_source"
+                                ? `quote points at a source the fact does not cite (${first.q.sourceId})`
+                                : "quote not found in the cited document";
+                    dropped.push(`${newId}: fact dropped, ${reason}. Tried: "${first.q.text.slice(0, 120)}"`);
+                }
                 continue;
             }
             const missing = numbersNotIn(c.text, verified.map((q) => q.text));

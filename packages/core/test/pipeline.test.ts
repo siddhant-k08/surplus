@@ -7,8 +7,10 @@ import {
     normalizeForMatch,
     numbersNotIn,
     parseThemeOutput,
+    quoteCheck,
     quoteInText,
     researchBrief,
+    MAX_QUOTE,
     selectPassages,
     usdToUsdcMinor,
 } from "../src/pipeline";
@@ -59,6 +61,12 @@ describe("text helpers", () => {
         expect(quoteInText("too short", doc.text)).toBe(false);
         expect(quoteInText("x".repeat(301), "x".repeat(400))).toBe(false);
         expect(quoteInText("Data Center revenue fell sharply last year", doc.text)).toBe(false);
+    });
+    it("distinguishes why a quote failed", () => {
+        expect(quoteCheck(QUOTE, doc.text)).toBe("ok");
+        expect(quoteCheck("too short", doc.text)).toBe("too_short");
+        expect(quoteCheck("x".repeat(301), "x".repeat(400))).toBe("too_long");
+        expect(quoteCheck("Data Center revenue fell sharply last year", doc.text)).toBe("not_found");
     });
     it("selects keyword-dense paragraphs in original order within budget", () => {
         const text = "alpha filler\n\nnvidia data center chips\n\nnothing\n\nnvidia chips again";
@@ -119,8 +127,28 @@ describe("assembleTheme", () => {
         bad.claims[0].quotes[0].text = "Data Center revenue tripled according to management";
         const a = assembleTheme(theme, parseThemeOutput(bad), [doc], companies, NOW.toISOString());
         expect(a.theme.gap).toBe(true);
-        expect(a.dropped.join("|")).toContain("no verbatim quote");
+        expect(a.dropped.join("|")).toContain("quote not found in the cited document");
         expect(a.dropped.join("|")).toContain("no surviving fact");
+    });
+    it("reports an over-long quote as too long, not as missing, even when it is verbatim", () => {
+        // a real over-long case: the filing sentence runs past the cap, so the quote is verbatim but unusable
+        const filler = " and the platform serves accelerated computing workloads across cloud providers,".repeat(6);
+        const wide: SourceDoc = { ...doc, text: `${doc.text}${filler}` };
+        const long = wide.text.slice(0, MAX_QUOTE + 40);
+        expect(long.length).toBeGreaterThan(MAX_QUOTE);
+        const bad = JSON.parse(good);
+        bad.claims[0].quotes = [{ sourceId: doc.id, text: long }];
+        const a = assembleTheme(theme, parseThemeOutput(bad), [wide], companies, NOW.toISOString());
+        expect(a.theme.gap).toBe(true);
+        const msg = a.dropped.join("|");
+        expect(msg).toContain(`over the ${MAX_QUOTE} limit`);
+        expect(msg).not.toContain("not found");
+    });
+    it("names the uncited source when a quote points outside the fact's citations", () => {
+        const bad = JSON.parse(good);
+        bad.claims[0].sourceIds = [];
+        const a = assembleTheme(theme, parseThemeOutput(bad), [doc], companies, NOW.toISOString());
+        expect(a.dropped.join("|")).toContain("does not cite");
     });
     it("drops a fact when the quote is real but from a source it did not cite", () => {
         const bad = JSON.parse(good);
