@@ -5,11 +5,13 @@ import {
     isQuoteFresh,
     minOut,
     routesUrl,
+    fetchRoute,
+    quoteLegs,
     KYBER_ROUTER_BASE,
     type Quote,
 } from "../src/quote";
 import { BASE_USDC } from "../src/liquidity";
-import { NVDA } from "./fixtures";
+import { NVDA, MSFT, META } from "./fixtures";
 
 const ROUTER_MIXED = "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5";
 const exp = { tokenIn: BASE_USDC, tokenOut: NVDA, amountIn: 1_000_000n };
@@ -119,5 +121,57 @@ describe("quote helpers", () => {
         expect(u.searchParams.get("amountIn")).toBe("1000000");
         expect(u.searchParams.get("slippageTolerance")).toBe("100");
         expect(u.searchParams.get("tokenOut")).toBe(NVDA);
+    });
+});
+
+describe("fetching routes", () => {
+    // Answers any route request with a well-formed response sized to the request.
+    const routeFetch = (opts: { fail?: Record<string, unknown>; seen?: string[] } = {}) =>
+        (async (url: string) => {
+            opts.seen?.push(url);
+            const u = new URL(url);
+            const tokenOut = u.searchParams.get("tokenOut")!;
+            const amountIn = u.searchParams.get("amountIn")!;
+            const failure = opts.fail?.[tokenOut.toLowerCase()];
+            const body = failure ?? response({ tokenOut, amountIn, amountOut: (BigInt(amountIn) * 5_000_000_000n).toString() });
+            return { ok: failure === undefined, status: failure === undefined ? 200 : 404, json: async () => body };
+        }) as unknown as typeof fetch;
+
+    it("fetchRoute returns a parsed quote and surfaces the API's error message", async () => {
+        const q = await fetchRoute({ tokenOut: NVDA, amountIn: 1_000_000n, slippageBps: 100 }, routeFetch());
+        expect(q.amountOut).toBe(5_000_000_000_000_000n);
+
+        const bad = routeFetch({ fail: { [NVDA]: { code: 4008, message: "route not found" } } });
+        await expect(fetchRoute({ tokenOut: NVDA, amountIn: 1_000_000n, slippageBps: 100 }, bad)).rejects.toThrow(
+            /4008.*route not found/,
+        );
+
+        const notJson = (async () => ({ ok: false, status: 502, json: async () => { throw new Error("x"); } })) as unknown as typeof fetch;
+        await expect(fetchRoute({ tokenOut: NVDA, amountIn: 1_000_000n, slippageBps: 100 }, notJson)).rejects.toThrow(/HTTP 502/);
+    });
+
+    it("quoteLegs sums legs per token, spaces requests, and records failures without stopping", async () => {
+        const seen: string[] = [];
+        let sleeps = 0;
+        const fetchImpl = routeFetch({ seen, fail: { [META]: { code: 4008, message: "route not found" } } });
+        const legs = [
+            { asset: NVDA, usdcIn: 300_000n },
+            { asset: NVDA.toUpperCase().replace("0X", "0x"), usdcIn: 200_000n },
+            { asset: META, usdcIn: 100_000n },
+            { asset: MSFT, usdcIn: 100_000n },
+        ];
+        const decimals = new Map([[NVDA, 18], [META, 18]]); // MSFT deliberately missing
+        const r = await quoteLegs(legs, decimals, {
+            slippageBps: 100,
+            fetchImpl,
+            sleep: async () => { sleeps += 1; },
+        });
+        expect(seen).toHaveLength(2); // NVDA once (summed), META once; MSFT skipped
+        expect(new URL(seen[0]!).searchParams.get("amountIn")).toBe("500000");
+        expect(sleeps).toBe(1);
+        expect(r.prices.get(NVDA)).toBe(200_000_000n);
+        expect(r.errors.get(META)).toMatch(/route not found/);
+        expect(r.errors.get(MSFT)).toBe("missing decimals");
+        expect(r.prices.has(META)).toBe(false);
     });
 });

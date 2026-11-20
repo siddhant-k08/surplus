@@ -1,3 +1,5 @@
+import { BASE_USDC } from "./liquidity";
+
 /** KyberSwap router on Base, as published in Base's agent docs. Anything else is refused. */
 export const KYBER_ROUTER_BASE = "0x6131b5fae19ea4f9d964eac0408e4408b66337b5";
 
@@ -121,4 +123,76 @@ export function minOut(amountOut: bigint, slippageBps: number): bigint {
         throw new Error(`slippageBps must be an integer from 0 to 10000, got ${slippageBps}`);
     }
     return (amountOut * BigInt(10_000 - slippageBps)) / 10_000n;
+}
+
+export async function fetchRoute(
+    i: { tokenOut: string; amountIn: bigint; slippageBps: number; usdc?: string },
+    fetchImpl: typeof fetch = fetch,
+): Promise<Quote> {
+    const usdc = i.usdc ?? BASE_USDC;
+    const res = await fetchImpl(
+        routesUrl({ tokenIn: usdc, tokenOut: i.tokenOut, amountIn: i.amountIn, slippageBps: i.slippageBps }),
+    );
+    const body: unknown = await res.json().catch(() => null);
+    if (body === null) throw new Error(`Route request failed: HTTP ${res.status}`);
+    return parseKyberRoute(body, { tokenIn: usdc, tokenOut: i.tokenOut, amountIn: i.amountIn });
+}
+
+export interface LegRequest {
+    asset: string;
+    usdcIn: bigint;
+}
+
+export interface LegQuotes {
+    prices: Map<string, bigint>; // asset -> USDC minor units per whole token
+    quotes: Map<string, Quote>;
+    errors: Map<string, string>; // asset -> why there is no usable quote
+}
+
+/**
+ * One quote per distinct token, sized to that token's total spend and spaced out.
+ * A failure for one token is recorded in `errors`; it never stops the others.
+ */
+export async function quoteLegs(
+    legs: readonly LegRequest[],
+    decimals: ReadonlyMap<string, number>,
+    opts: {
+        slippageBps: number;
+        fetchImpl?: typeof fetch;
+        delayMs?: number;
+        sleep?: (ms: number) => Promise<void>;
+        usdc?: string;
+    },
+): Promise<LegQuotes> {
+    const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const delay = opts.delayMs ?? 500;
+
+    const totals = new Map<string, bigint>();
+    for (const l of legs) {
+        const key = l.asset.toLowerCase();
+        totals.set(key, (totals.get(key) ?? 0n) + l.usdcIn);
+    }
+
+    const out: LegQuotes = { prices: new Map(), quotes: new Map(), errors: new Map() };
+    let first = true;
+    for (const [asset, amountIn] of totals) {
+        const dec = decimals.get(asset);
+        if (dec === undefined) {
+            out.errors.set(asset, "missing decimals");
+            continue;
+        }
+        if (!first && delay > 0) await sleep(delay);
+        first = false;
+        try {
+            const q = await fetchRoute(
+                { tokenOut: asset, amountIn, slippageBps: opts.slippageBps, ...(opts.usdc !== undefined && { usdc: opts.usdc }) },
+                opts.fetchImpl,
+            );
+            out.quotes.set(asset, q);
+            out.prices.set(asset, priceOf(q, dec));
+        } catch (e) {
+            out.errors.set(asset, e instanceof Error ? e.message : String(e));
+        }
+    }
+    return out;
 }
