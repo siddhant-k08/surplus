@@ -15,11 +15,17 @@ export interface Source {
     excerpt: string;
 }
 
+export interface ClaimQuote {
+    sourceId: string;
+    text: string;
+}
+
 export interface Claim {
     id: string;
     type: ClaimType;
     text: string;
     sourceIds: string[];
+    quotes?: ClaimQuote[];
     confidence?: Confidence;
     asOf?: string;
 }
@@ -66,6 +72,13 @@ function isHttps(url: string): boolean {
     }
 }
 
+/** A fact needs one tier 1 to 3 source, or tier 4 sources from two different publishers. */
+export function isFactSupported(sources: readonly Pick<Source, "tier" | "publisher">[]): boolean {
+    if (sources.some((s) => s.tier <= 3)) return true;
+    const publishers = new Set(sources.filter((s) => s.tier === 4).map((s) => s.publisher));
+    return publishers.size >= 2;
+}
+
 export function validateBrief(b: Brief, ctx: ValidationContext): ValidationIssue[] {
     const issues: ValidationIssue[] = [];
     const add = (path: string, rule: string, message: string) => issues.push({ path, rule, message });
@@ -96,9 +109,7 @@ export function validateBrief(b: Brief, ctx: ValidationContext): ValidationIssue
             }
 
             if (c.type === "fact") {
-                const strong = known.some((s) => s.tier <= 3);
-                const publishers = new Set(known.filter((s) => s.tier === 4).map((s) => s.publisher));
-                if (!strong && publishers.size < 2) {
+                if (!isFactSupported(known)) {
                     add(p, "factEvidence", "a fact needs a tier 1 to 3 source or two independent tier 4 sources");
                 }
             }
