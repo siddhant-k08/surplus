@@ -259,15 +259,21 @@ describe("restoring a treasury from its ledger", () => {
         expect(again.ledger.all().length).toBe(tr.ledger.all().length); // nothing re-booked
     });
 
-    it("knows a brief was already settled and does not re-derive it against the topped-up reserve", () => {
-        const { tr, mandates } = setup();
-        const first = tr.settleBrief("b1");
-        expect(first.reserveTopUp).toBeGreaterThan(0n);
+    it("does not sweep a brief's money twice after a restart", () => {
+        const { tr, mandates } = setup(); // setup already swept b1
+        expect(tr.ledger.balance("reserve")).toBeGreaterThan(0n);
+        expect(tr.ledger.balance("surplus.investable")).toBeGreaterThan(0n);
+        const balancesBefore = [...tr.ledger.balances()];
 
-        // the hazard: after a restart the reserve is already at target, so a recompute would see no gap
-        // and report a larger surplus than was actually booked
+        // the hazard: after a restart the brief's lifetime totals are back, so a naive re-sweep would
+        // move the same money again, now against a reserve that is already at target
         const again = restart(tr, mandates);
-        expect(again.settleBrief("b1")).toEqual(first);
+        const n = again.ledger.all().length;
+        const resweep = again.settleBrief("b1");
+        expect(resweep.reserveTopUp).toBe(0n);
+        expect(resweep.surplus).toBe(0n);
+        expect(again.ledger.all().length).toBe(n);
+        expect([...again.ledger.balances()]).toEqual(balancesBefore);
     });
 
     it("restores the seen-payment and seen-cost ids", () => {
@@ -284,11 +290,13 @@ describe("restoring a treasury from its ledger", () => {
         const { tr, mandates } = setup();
         tr.receivePayment({ id: "p2", briefId: "b2", amount: u("1.00") });
         tr.accrueCost({ id: "c3", briefId: "b2", kind: "llm", amount: u("0.10") });
-
+        // b2 has not been swept yet, so a restored treasury must still sweep its 0.90
         const again = restart(tr, mandates);
         const b2 = again.settleBrief("b2");
         expect(b2.net).toBe(u("0.90"));
-        expect(again.settleBrief("b1").net).toBe(u("3") - u("0.60"));
+        expect(b2.reserveTopUp + b2.surplus).toBe(u("0.90"));
+        // b1 was already swept before the restart, so there is nothing left of it to sweep
+        expect(again.settleBrief("b1").net).toBe(0n);
     });
 
     it("tolerates entries written before briefId existed, without attributing them", () => {
@@ -311,6 +319,64 @@ describe("restoring a treasury from its ledger", () => {
         // the payment id is still restored, so it cannot be booked a second time
         tr.receivePayment({ id: "x402:0xold", briefId: "brief-old", amount: u("0.01") });
         expect(tr.ledger.all().length).toBe(1);
+    });
+
+    it("sweeps revenue that arrives after a brief was already settled", () => {
+        // the bug this replaces: settleBrief cached its first result and returned it forever, so every
+        // later sale of the same brief stayed in operating cash and never became investable
+        const { tr } = setup();
+        const afterFirst = tr.ledger.balance("surplus.investable");
+        expect(afterFirst).toBeGreaterThan(0n);
+
+        tr.receivePayment({ id: "p9", briefId: "b1", amount: u("5.00") });
+        const second = tr.settleBrief("b1");
+        expect(second.net).toBe(u("5.00"));
+        expect(second.surplus).toBe(u("5.00")); // the reserve is already full, so it is all surplus
+        expect(tr.ledger.balance("surplus.investable")).toBe(afterFirst + u("2.50"));
+        expect(reconcileInternal(tr.ledger).ok).toBe(true);
+    });
+
+    it("makes good a brief's deficit before sweeping anything", () => {
+        const mandates = new MandateStore();
+        mandates.create(baseTerms({ reserveTargetUsdc: u("0") }));
+        const tr = new Treasury({ mode: "sim", mandates });
+        tr.ledger.post({
+            type: "OPENING_BALANCE", mode: "sim",
+            lines: [{ account: "cash.operating", amount: u("5") }, { account: "equity.opening", amount: u("-5") }],
+        });
+
+        // a brief that cost more than it earned sweeps nothing and carries the loss
+        tr.receivePayment({ id: "p1", briefId: "bx", amount: u("0.10") });
+        tr.accrueCost({ id: "c1", briefId: "bx", kind: "llm", amount: u("0.40") });
+        const first = tr.settleBrief("bx");
+        expect(first.surplus).toBe(0n);
+        expect(first.shortfall).toBe(u("0.30"));
+        expect(tr.ledger.balance("surplus.investable")).toBe(0n);
+
+        // later revenue covers the 0.30 deficit first; only the remaining 0.70 is swept
+        tr.receivePayment({ id: "p2", briefId: "bx", amount: u("1.00") });
+        const second = tr.settleBrief("bx");
+        expect(second.surplus).toBe(u("0.70"));
+        expect(second.investable).toBe(u("0.35"));
+        expect(reconcileInternal(tr.ledger).ok).toBe(true);
+    });
+
+    it("carries a deficit across a restart", () => {
+        const mandates = new MandateStore();
+        mandates.create(baseTerms({ reserveTargetUsdc: u("0") }));
+        const tr = new Treasury({ mode: "sim", mandates });
+        tr.ledger.post({
+            type: "OPENING_BALANCE", mode: "sim",
+            lines: [{ account: "cash.operating", amount: u("5") }, { account: "equity.opening", amount: u("-5") }],
+        });
+        tr.receivePayment({ id: "p1", briefId: "bx", amount: u("0.10") });
+        tr.accrueCost({ id: "c1", briefId: "bx", kind: "llm", amount: u("0.40") });
+        tr.settleBrief("bx");
+
+        const again = new Treasury({ mode: "sim", mandates, ledger: Ledger.replay(tr.ledger.all()) });
+        again.receivePayment({ id: "p2", briefId: "bx", amount: u("1.00") });
+        const swept = again.settleBrief("bx");
+        expect(swept.surplus).toBe(u("0.70")); // the 0.30 deficit survived the restart
     });
 
     it("starts empty when handed a fresh ledger", () => {

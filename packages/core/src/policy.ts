@@ -12,6 +12,8 @@ export interface Leg {
 export interface Proposal {
     readonly investable: bigint;
     readonly legs: readonly Leg[];
+    /** Already-held exposure per asset, counted toward the company cap. */
+    readonly held?: ReadonlyMap<string, bigint>;
 }
 
 export interface PolicyResult {
@@ -76,11 +78,14 @@ export function checkProposal(p: Proposal, t: MandateTerms): PolicyResult[] {
         ),
     );
 
-    const companyCap = mulBps(p.investable, t.maxCompanyBps);
+    const held = p.held ?? new Map<string, bigint>();
+    const heldTotal = [...held.values()].reduce((a, v) => a + v, 0n);
+    const companyCap = mulBps(p.investable + heldTotal, t.maxCompanyBps);
     results.push(
         result(
             "maxCompany",
             [...totalsBy(p.legs, (l) => l.asset.toLowerCase())]
+                .map(([asset, total]) => [asset, total + (held.get(asset) ?? 0n)] as const)
                 .filter(([, total]) => total > companyCap)
                 .map(
                     ([asset, total]) =>

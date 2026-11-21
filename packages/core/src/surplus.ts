@@ -18,6 +18,39 @@ export interface SurplusResult {
     shortfall: bigint;
 }
 
+export interface SweepInput {
+    /** Net money available to sweep now. Never negative. */
+    available: bigint;
+    reserveBalance: bigint;
+    reserveTarget: bigint;
+    investShareBps: number;
+}
+
+export interface SweepResult {
+    reserveTopUp: bigint;
+    surplus: bigint;
+    investable: bigint;
+    retained: bigint;
+}
+
+/**
+ * Splits available money: the reserve gap first, then the invest share of what is left.
+ *
+ * Separate from `computeSurplus` because settlement happens more than once per brief. A brief can earn
+ * again after it was first settled, and the second sweep has to work from what is newly available rather
+ * than from the brief's lifetime totals.
+ */
+export function sweepAvailable(i: SweepInput): SweepResult {
+    if (i.available < 0n) throw new Error("available must not be negative");
+    if (i.reserveBalance < 0n) throw new Error("reserveBalance must not be negative");
+    if (i.reserveTarget < 0n) throw new Error("reserveTarget must not be negative");
+    const gap = i.reserveTarget > i.reserveBalance ? i.reserveTarget - i.reserveBalance : 0n;
+    const reserveTopUp = i.available < gap ? i.available : gap;
+    const surplus = i.available - reserveTopUp;
+    const investable = mulBps(surplus, i.investShareBps);
+    return { reserveTopUp, surplus, investable, retained: surplus - investable };
+}
+
 export function computeSurplus(i: SurplusInput): SurplusResult {
     for (const [name, v] of Object.entries({
         revenue: i.revenue,
@@ -30,12 +63,13 @@ export function computeSurplus(i: SurplusInput): SurplusResult {
     const net = i.revenue - i.costs;
     const shortfall = net < 0n ? -net : 0n;
     const available = net > 0n ? net : 0n;
-    const gap = i.reserveTarget > i.reserveBalance ? i.reserveTarget - i.reserveBalance : 0n;
-    const reserveTopUp = available < gap ? available : gap;
-    const surplus = available - reserveTopUp;
-    const investable = mulBps(surplus, i.investShareBps);
-    const retained = surplus - investable;
-    return { net, reserveTopUp, surplus, investable, retained, shortfall };
+    const swept = sweepAvailable({
+        available,
+        reserveBalance: i.reserveBalance,
+        reserveTarget: i.reserveTarget,
+        investShareBps: i.investShareBps,
+    });
+    return { net, shortfall, ...swept };
 }
 
 /** Book the reserve top-up and the surplus split. Assumes revenue and costs are already booked.*/

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Brief } from "./research";
 
@@ -46,10 +46,37 @@ export function sortSavedBriefs(briefs: readonly SavedBrief[]): SavedBrief[] {
     return [...briefs].sort((a, b) => Date.parse(b.brief.createdAt) - Date.parse(a.brief.createdAt));
 }
 
-/** Reads every brief in a directory, newest first. */
+export interface BriefScan {
+    briefs: SavedBrief[];
+    /** Files that could not be read, with why. A brief skipped here has its cost missing from the books. */
+    problems: { file: string; error: string }[];
+}
+
+/**
+ * Reads every brief in a directory, newest first, skipping files that cannot be parsed.
+ *
+ * One truncated file used to take down everything that reads briefs: the paid route, the research cache
+ * and the investing loop. An interrupted write produces exactly that, so a bad file is reported instead of
+ * thrown. Callers that account for money must surface `problems`, because a skipped brief means its model
+ * cost is missing from the ledger.
+ */
+export function scanBriefs(dir: string): BriefScan {
+    if (!existsSync(dir)) return { briefs: [], problems: [] };
+    const briefs: SavedBrief[] = [];
+    const problems: { file: string; error: string }[] = [];
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
+        try {
+            briefs.push(parseSavedBrief(file, readFileSync(join(dir, file), "utf8")));
+        } catch (e) {
+            problems.push({ file, error: e instanceof Error ? e.message : String(e) });
+        }
+    }
+    return { briefs: sortSavedBriefs(briefs), problems };
+}
+
+/** Readable briefs in a directory, newest first. Unreadable files are skipped; see `scanBriefs`. */
 export function loadBriefs(dir: string): SavedBrief[] {
-    const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
-    return sortSavedBriefs(files.map((f) => parseSavedBrief(f, readFileSync(join(dir, f), "utf8"))));
+    return scanBriefs(dir).briefs;
 }
 
 /** The newest brief in a directory. Throws when the directory holds none. */

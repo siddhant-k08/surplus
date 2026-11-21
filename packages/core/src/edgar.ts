@@ -1,3 +1,4 @@
+import { HTTP_TIMEOUT_MS } from "./quote";
 import type { CandidateCompany, DocProvider, SourceDoc, ThemeSpec } from "./pipeline";
 
 export const SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json";
@@ -96,6 +97,7 @@ export interface EdgarClientOptions {
     userAgent: string;
     fetchImpl?: typeof fetch;
     minIntervalMs?: number; // SEC allows 10 per second; default 150 ms keeps us well under
+    timeoutMs?: number;
     sleep?: (ms: number) => Promise<void>;
     nowMs?: () => number;
 }
@@ -125,7 +127,10 @@ export class EdgarClient {
         if (wait > 0) await this.sleep(wait);
         this.last = this.nowMs();
         this.requests += 1;
-        const res = await this.fetchImpl(url, { headers: { "User-Agent": this.opts.userAgent, "Accept-Encoding": "gzip, deflate" } });
+        const res = await this.fetchImpl(url, {
+            headers: { "User-Agent": this.opts.userAgent, "Accept-Encoding": "gzip, deflate" },
+            signal: AbortSignal.timeout(this.opts.timeoutMs ?? HTTP_TIMEOUT_MS),
+        });
         if (!res.ok) throw new Error(`SEC returned HTTP ${res.status} for ${url}`);
         return res;
     }

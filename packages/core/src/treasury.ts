@@ -1,7 +1,7 @@
 import { Ledger, type AccountId, type EntryType, type Mode } from "./ledger";
 import type { MandateStore } from "./mandate";
 import { formatUsdc } from "./money";
-import { bookSurplus, computeSurplus, type SurplusResult } from "./surplus";
+import { bookSurplus, sweepAvailable, type SurplusResult } from "./surplus";
 import { checkProposal, failures, type Leg, type Proposal } from "./policy";
 import {
     ProposalMachine,
@@ -46,6 +46,12 @@ export type ExecuteResult =
 interface BriefAccount {
     revenue: bigint;
     costs: bigint;
+    /** Revenue and costs already folded into a sweep, so a later sweep only sees what is new. */
+    sweptRevenue: bigint;
+    sweptCosts: bigint;
+    /** Net that has been accounted for but not yet swept. Negative while a brief is behind. */
+    carried: bigint;
+    /** The most recent sweep, for reporting. */
     result?: SurplusResult;
 }
 
@@ -100,6 +106,7 @@ export class Treasury {
                 }
                 case "RESERVE_TOPUP": {
                     if (tx.briefId === undefined) break;
+                    this.brief(tx.briefId);
                     const b = booked.get(tx.briefId) ?? { reserveTopUp: 0n, surplus: 0n, investable: 0n, retained: 0n };
                     b.reserveTopUp += line("reserve");
                     booked.set(tx.briefId, b);
@@ -107,6 +114,7 @@ export class Treasury {
                 }
                 case "SURPLUS_ALLOCATED": {
                     if (tx.briefId === undefined) break;
+                    this.brief(tx.briefId);
                     const b = booked.get(tx.briefId) ?? { reserveTopUp: 0n, surplus: 0n, investable: 0n, retained: 0n };
                     b.surplus += -line("cash.operating");
                     b.investable += line("surplus.investable");
@@ -119,14 +127,19 @@ export class Treasury {
             }
         }
 
-        // A brief that was settled and booked something is settled; one that booked nothing (net <= 0)
-        // leaves no trace, and re-settling it books nothing again, so treating it as unsettled is safe.
-        for (const [briefId, b] of booked) {
-            const acct = this.brief(briefId);
-            const net = acct.revenue - acct.costs;
+        // Restore the sweep counters for every brief the ledger knows about, not only the ones that booked
+        // a sweep. Everything in the ledger has been accounted for, so what is left to carry is the brief's
+        // net minus what was actually swept out of it. Without this a restored treasury would try to sweep
+        // the brief's whole lifetime again and collide with its own idempotency key.
+        const ZERO = { reserveTopUp: 0n, surplus: 0n, investable: 0n, retained: 0n };
+        for (const [briefId, acct] of this.briefs) {
+            const b = booked.get(briefId) ?? ZERO;
+            acct.sweptRevenue = acct.revenue;
+            acct.sweptCosts = acct.costs;
+            acct.carried = acct.revenue - acct.costs - (b.reserveTopUp + b.surplus);
             acct.result = {
-                net,
-                shortfall: net < 0n ? -net : 0n,
+                net: acct.revenue - acct.costs,
+                shortfall: acct.carried < 0n ? -acct.carried : 0n,
                 reserveTopUp: b.reserveTopUp,
                 surplus: b.surplus,
                 investable: b.investable,
@@ -138,7 +151,7 @@ export class Treasury {
     private brief(id: string): BriefAccount {
         let b = this.briefs.get(id);
         if (!b) {
-            b = { revenue: 0n, costs: 0n };
+            b = { revenue: 0n, costs: 0n, sweptRevenue: 0n, sweptCosts: 0n, carried: 0n };
             this.briefs.set(id, b);
         }
         return b;
@@ -193,24 +206,62 @@ export class Treasury {
         this.brief(i.briefId).costs += i.amount;
     }
 
-    /** Reserve first, then surplus. Safe to call twice for the same brief. */
+    /**
+     * Sweeps whatever a brief has newly earned into the reserve and the surplus split.
+     *
+     * Settlement is incremental, not once per brief. A brief can be bought again after it was first
+     * settled, and that revenue has to reach the surplus too; an earlier version cached the first result
+     * and returned it forever, so every later sale sat in operating cash and never became investable.
+     *
+     * Only the change since the last sweep is considered. A brief that is behind carries the deficit
+     * forward in `carried`, so later revenue first makes good the loss and only the remainder is swept.
+     * The idempotency key covers the cumulative revenue and costs, so calling this twice with nothing new
+     * books nothing rather than booking twice.
+     */
     settleBrief(briefId: string): SurplusResult {
         const b = this.brief(briefId);
-        if (b.result) return b.result;
         const terms = this.opts.mandates.current().terms;
-        const result = computeSurplus({
-            revenue: b.revenue,
-            costs: b.costs,
+
+        const newRevenue = b.revenue - b.sweptRevenue;
+        const newCosts = b.costs - b.sweptCosts;
+        b.sweptRevenue = b.revenue;
+        b.sweptCosts = b.costs;
+        // what this sweep decides on: whatever is new, plus any deficit still carried from before
+        const considered = newRevenue - newCosts + b.carried;
+        b.carried = considered;
+
+        const available = considered > 0n ? considered : 0n;
+        const swept = sweepAvailable({
+            available,
             reserveBalance: this.ledger.balance("reserve"),
             reserveTarget: terms.reserveTargetUsdc,
             investShareBps: terms.investShareBps,
         });
-        bookSurplus(this.ledger, result, { mode: this.opts.mode, at: this.now(), key: `brief-${briefId}`, briefId });
+        // everything available is either moved to the reserve or split as surplus, so only a deficit carries
+        b.carried -= swept.reserveTopUp + swept.surplus;
+
+        const result: SurplusResult = {
+            net: considered,
+            shortfall: b.carried < 0n ? -b.carried : 0n,
+            ...swept,
+        };
+        bookSurplus(this.ledger, result, {
+            mode: this.opts.mode,
+            at: this.now(),
+            key: `brief-${briefId}:r${b.revenue.toString()}:c${b.costs.toString()}`,
+            briefId,
+        });
         b.result = result;
         return result;
     }
 
-    createProposal(i: { id: string; legs: readonly Leg[]; quotedPrices: PriceMap }): ProposeResult {
+    createProposal(i: {
+        id: string;
+        legs: readonly Leg[];
+        quotedPrices: PriceMap;
+        /** Already-held exposure per asset, so the company cap covers the whole portfolio. */
+        held?: ReadonlyMap<string, bigint>;
+    }): ProposeResult {
         if (i.legs.length === 0) throw new Error("a proposal needs at least one leg");
         if (this.records.has(i.id)) throw new Error(`Proposal ${i.id} already exists`);
 
@@ -218,6 +269,7 @@ export class Treasury {
         const proposal: Proposal = {
             investable: this.ledger.balance("surplus.investable"),
             legs: i.legs,
+            ...(i.held !== undefined && { held: i.held }),
         };
         const rec: ProposalRecord = {
             id: i.id,
@@ -256,7 +308,11 @@ export class Treasury {
      * `expiresAt` may be supplied so it can match a signature the owner already made, but it is clamped to
      * the mandate's `approvalExpirySeconds`: a signature cannot widen the window the user set.
      */
-    approve(id: string, by: string, opts: { expiresAt?: string; signature?: string } = {}): ApproveResult {
+    approve(
+        id: string,
+        by: string,
+        opts: { expiresAt?: string; signature?: string; expect?: Approval } = {},
+    ): ApproveResult {
         const rec = this.get(id);
         if (rec.machine.state !== "PROPOSED") {
             throw new Error(`Proposal ${id} is ${rec.machine.state}, expected PROPOSED`);
@@ -289,6 +345,26 @@ export class Treasury {
             maxUsdcIn: sumLegs(rec.proposal.legs),
             expiresAt,
         };
+        // When the caller says what was authorized, every field has to match what the agent computed.
+        // The owner's signature covers the mandate version and hash, so if the mandate moved between the
+        // offer and this call the approval being recorded is not the one that was authorized.
+        if (opts.expect !== undefined) {
+            const e = opts.expect;
+            const mismatch: string[] = [];
+            if (e.proposalHash !== approval.proposalHash) mismatch.push("proposalHash");
+            if (e.mandateVersion !== approval.mandateVersion) {
+                mismatch.push(`mandateVersion (authorized v${e.mandateVersion}, current v${approval.mandateVersion})`);
+            }
+            if (e.mandateHash !== approval.mandateHash) mismatch.push("mandateHash");
+            if (e.maxUsdcIn !== approval.maxUsdcIn) mismatch.push("maxUsdcIn");
+            if (Date.parse(e.expiresAt) !== Date.parse(approval.expiresAt)) mismatch.push("expiresAt");
+            if (mismatch.length > 0) {
+                const reason = `authorization does not match the current proposal: ${mismatch.join(", ")}`;
+                this.event("REFUSAL", `proposal ${id} not approved: ${reason}`);
+                return { ok: false, reasons: [reason] };
+            }
+        }
+
         rec.approval = approval;
         rec.machine.transition("APPROVED", this.now());
         this.event(

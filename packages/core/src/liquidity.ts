@@ -1,3 +1,4 @@
+import { HTTP_TIMEOUT_MS } from "./quote";
 /** Native USDC on Base mainnet, per Circle's published address. */
 export const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 
@@ -120,8 +121,11 @@ export const DEXSCREENER_TOKEN_PAIRS_URL = "https://api.dexscreener.com/token-pa
 export async function fetchTokenPairs(
     token: string,
     fetchImpl: typeof fetch = fetch,
+    timeoutMs = HTTP_TIMEOUT_MS,
 ): Promise<unknown> {
-    const res = await fetchImpl(`${DEXSCREENER_TOKEN_PAIRS_URL}/${token.toLowerCase()}`);
+    const res = await fetchImpl(`${DEXSCREENER_TOKEN_PAIRS_URL}/${token.toLowerCase()}`, {
+        signal: AbortSignal.timeout(timeoutMs),
+    });
     if (!res.ok) throw new Error(`DexScreener returned HTTP ${res.status} for ${token}`);
     return res.json();
 }

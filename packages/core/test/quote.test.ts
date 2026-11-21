@@ -175,3 +175,26 @@ describe("fetching routes", () => {
         expect(r.prices.has(META)).toBe(false);
     });
 });
+describe("M6 regression: outbound requests carry a deadline", () => {
+    it("passes an abort signal to the route request", async () => {
+        let sawSignal = false;
+        const fetchImpl = (async (_url: string, init?: RequestInit) => {
+            sawSignal = init?.signal instanceof AbortSignal;
+            return new Response(JSON.stringify({ code: 1, message: "nope" }), { status: 200 });
+        }) as unknown as typeof fetch;
+        await fetchRoute({ tokenOut: "0x" + "b".repeat(40), amountIn: 1_000_000n, slippageBps: 100 }, fetchImpl)
+            .catch(() => undefined);
+        expect(sawSignal).toBe(true);
+    });
+
+    it("gives up instead of hanging when an upstream never answers", async () => {
+        // a server that accepts and never responds used to hold the caller forever
+        const fetchImpl = ((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new Error("TimeoutError")));
+        })) as unknown as typeof fetch;
+        await expect(fetchRoute(
+            { tokenOut: "0x" + "b".repeat(40), amountIn: 1_000_000n, slippageBps: 100, timeoutMs: 20 },
+            fetchImpl,
+        )).rejects.toThrow();
+    });
+});

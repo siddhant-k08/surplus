@@ -17,6 +17,14 @@ export interface AllocationInput {
     investable: bigint;
     themes: readonly ThemeInput[];
     terms: MandateTerms;
+    /**
+     * What is already held per asset, in the USDC that bought it.
+     *
+     * The company cap is a limit on exposure to one company, so it has to count what the agent already
+     * holds. Without this each allocation respected the cap on its own and successive proposals could
+     * build a position far beyond it.
+     */
+    held?: ReadonlyMap<string, bigint>;
 }
 
 export type UninvestedReason =
@@ -93,8 +101,15 @@ export function allocate(input: AllocationInput): AllocationResult {
         if (!targeted.has(th.id)) throw new Error(`Theme "${th.id}" has no target in the mandate`);
     }
 
-    const companyCap = mulBps(investable, terms.maxCompanyBps);
+    // The cap is measured against everything the agent would then hold, not just this allocation.
+    const held = input.held ?? new Map<string, bigint>();
+    const heldTotal = [...held.values()].reduce((a, v) => a + v, 0n);
+    const companyCap = mulBps(investable + heldTotal, terms.maxCompanyBps);
     const used = new Map<string, bigint>();
+    for (const [asset, amount] of held) {
+        if (amount < 0n) throw new Error(`held amount for ${asset} must not be negative`);
+        used.set(asset.toLowerCase(), amount);
+    }
     const legs: Leg[] = [];
     const uninvested: Uninvested[] = [];
     let budgetTotal = 0n;
@@ -134,7 +149,9 @@ export function allocate(input: AllocationInput): AllocationResult {
 
         const remaining = waterFill(budget, slots);
         if (remaining > 0n) {
-            const reason = slots.some((s) => s.capReason === "company_cap") ? "company_cap" : "max_trade";
+            // name the constraint that actually bound: only slots sitting at their cap held money back
+            const atCap = slots.filter((s) => s.amount >= s.cap);
+            const reason = atCap.some((s) => s.capReason === "company_cap") ? "company_cap" : "max_trade";
             uninvested.push({ theme: target.id, amount: remaining, reason });
         }
 

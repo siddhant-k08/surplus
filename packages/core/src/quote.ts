@@ -125,13 +125,22 @@ export function minOut(amountOut: bigint, slippageBps: number): bigint {
     return (amountOut * BigInt(10_000 - slippageBps)) / 10_000n;
 }
 
+/**
+ * Deadline for one outbound request.
+ *
+ * Without it an upstream that accepts a connection and never answers holds the caller forever: an owner
+ * route, or worse a paid request that is holding a verified payment.
+ */
+export const HTTP_TIMEOUT_MS = 15_000;
+
 export async function fetchRoute(
-    i: { tokenOut: string; amountIn: bigint; slippageBps: number; usdc?: string },
+    i: { tokenOut: string; amountIn: bigint; slippageBps: number; usdc?: string; timeoutMs?: number },
     fetchImpl: typeof fetch = fetch,
 ): Promise<Quote> {
     const usdc = i.usdc ?? BASE_USDC;
     const res = await fetchImpl(
         routesUrl({ tokenIn: usdc, tokenOut: i.tokenOut, amountIn: i.amountIn, slippageBps: i.slippageBps }),
+        { signal: AbortSignal.timeout(i.timeoutMs ?? HTTP_TIMEOUT_MS) },
     );
     const body: unknown = await res.json().catch(() => null);
     if (body === null) throw new Error(`Route request failed: HTTP ${res.status}`);
@@ -162,6 +171,7 @@ export async function quoteLegs(
         delayMs?: number;
         sleep?: (ms: number) => Promise<void>;
         usdc?: string;
+        timeoutMs?: number;
     },
 ): Promise<LegQuotes> {
     const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -185,7 +195,13 @@ export async function quoteLegs(
         first = false;
         try {
             const q = await fetchRoute(
-                { tokenOut: asset, amountIn, slippageBps: opts.slippageBps, ...(opts.usdc !== undefined && { usdc: opts.usdc }) },
+                {
+                    tokenOut: asset,
+                    amountIn,
+                    slippageBps: opts.slippageBps,
+                    ...(opts.usdc !== undefined && { usdc: opts.usdc }),
+                    ...(opts.timeoutMs !== undefined && { timeoutMs: opts.timeoutMs }),
+                },
                 opts.fetchImpl,
             );
             out.quotes.set(asset, q);

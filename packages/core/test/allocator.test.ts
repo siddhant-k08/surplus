@@ -120,3 +120,43 @@ describe("allocator", () => {
         );
     });
 });
+describe("M5 regression: the company cap covers what is already held", () => {
+    const cands = [{ asset: NVDA, symbol: "NVDAc", weight: 100 }];
+    const t = baseTerms({ maxCompanyBps: 5000, minTradeUsdc: u("0.01") });
+
+    it("counts existing exposure against the cap", () => {
+        const first = allocate({ investable: u("1.00"), themes: [{ id: "ai-compute", candidates: cands }], terms: t });
+        const placed = first.legs[0]!.usdcIn;
+        expect(placed).toBe(u("0.50"));
+
+        // a second allocation, now aware of what the first bought
+        const second = allocate({
+            investable: u("1.00"),
+            themes: [{ id: "ai-compute", candidates: cands }],
+            terms: t,
+            held: new Map([[NVDA, placed]]),
+        });
+        const total = placed + (second.legs[0]?.usdcIn ?? 0n);
+        // cap is 50% of (1.00 investable + 0.50 held) = 0.75, so only 0.25 more may be placed
+        expect(total).toBe(u("0.75"));
+        expect(second.uninvested.some((x) => x.reason === "company_cap")).toBe(true);
+    });
+
+    it("places nothing more when the held position already fills the cap", () => {
+        const second = allocate({
+            investable: u("1.00"),
+            themes: [{ id: "ai-compute", candidates: cands }],
+            terms: t,
+            held: new Map([[NVDA, u("1.00")]]),
+        });
+        expect(second.legs).toEqual([]);
+        expect(second.uninvested.some((x) => x.reason === "company_cap")).toBe(true);
+    });
+
+    it("refuses a negative held amount", () => {
+        expect(() => allocate({
+            investable: u("1.00"), themes: [{ id: "ai-compute", candidates: cands }], terms: t,
+            held: new Map([[NVDA, -1n]]),
+        })).toThrow(/must not be negative/);
+    });
+});

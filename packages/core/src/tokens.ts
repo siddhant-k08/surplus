@@ -1,3 +1,4 @@
+import { HTTP_TIMEOUT_MS } from "./quote";
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 
 export const TOKENS_URL = "https://api.coinbase.com/v1/tokenized-stocks";
@@ -95,11 +96,12 @@ export function parseTokenPage(json: unknown): TokenPage {
 export async function fetchTokenPage(
     pageToken?: string,
     fetchImpl: typeof fetch = fetch,
+    timeoutMs = HTTP_TIMEOUT_MS,
 ): Promise<unknown> {
     const url = new URL(TOKENS_URL);
     url.searchParams.set("page_size", "500");
     if (pageToken !== undefined) url.searchParams.set("page_token", pageToken);
-    const res = await fetchImpl(url.toString());
+    const res = await fetchImpl(url.toString(), { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) {
         const text = await res.text().catch(() => "");
         throw new Error(`Token API returned HTTP ${res.status}: ${text.slice(0, 200)}`);
@@ -146,7 +148,9 @@ export type NavStatus = "fresh" | "stale" | "missing";
 
 /** Reference-price freshness. NAV is a reference value, never an execution price. */
 export function navStatus(t: TokenRecord, now: Date, maxAgeSeconds: number): NavStatus {
-    if (t.navPrice === null || t.navUpdatedAt === null) return "missing";
+    // a zero or negative NAV is not a usable reference; treating it as one made the deviation check
+    // divide by zero and report an Infinity spread
+    if (t.navPrice === null || t.navPrice <= 0 || t.navUpdatedAt === null) return "missing";
     const ageSeconds = (now.getTime() - Date.parse(t.navUpdatedAt)) / 1000;
     return ageSeconds > maxAgeSeconds ? "stale" : "fresh";
 }
