@@ -10,6 +10,8 @@ import {
 import { buildServer, BRIEF_ROUTE } from "../src/server";
 import { loadConfig } from "../src/config";
 import { JsonlReceiptStore, newReceiptId, parseReceiptLine } from "../src/receipts";
+import { RECOVERY_TYPES } from "../src/recovery";
+import { privateKeyToAccount } from "viem/accounts";
 
 const dirs: string[] = [];
 function freshDir(): string {
@@ -172,5 +174,123 @@ describe("the public catalogue", () => {
         // the teaser must never carry a claim or a quote
         expect(JSON.stringify(res.body)).not.toContain("quotes");
         expect(JSON.stringify(res.body)).not.toContain("claims");
+    });
+});
+
+
+describe("getting a lost receipt link back", () => {
+    const BUYER = privateKeyToAccount(("0x" + "55".repeat(32)) as `0x${string}`);
+    const STRANGER = privateKeyToAccount(("0x" + "66".repeat(32)) as `0x${string}`);
+
+    /** A server with two buyers' purchases already recorded. */
+    const build = async () => {
+        const receipts = new JsonlReceiptStore(join(freshDir(), "receipts.jsonl"));
+        const mine = receipt({ payer: BUYER.address, briefId: "brief-mine", at: "2026-11-21T00:00:00.000Z" });
+        const older = receipt({
+            payer: BUYER.address.toLowerCase(), briefId: "brief-older",
+            transaction: "0x" + "11".repeat(32), at: "2026-11-20T00:00:00.000Z",
+        });
+        const theirs = receipt({
+            payer: STRANGER.address, briefId: "brief-theirs", transaction: "0x" + "22".repeat(32),
+        });
+        for (const r of [mine, older, theirs]) await receipts.issue(r);
+        const built = buildServer({ config, mandates: mandateFor(), readBrief: () => saved, receipts });
+        return { ...built, receipts, mine, older, theirs };
+    };
+
+    /** The handshake a wallet performs: ask for a nonce, sign exactly what was offered. */
+    const prove = async (app: Parameters<typeof request>[0], account: typeof BUYER, claimed = account.address) => {
+        const offer = await request(app).post("/receipt/nonce").send({ address: claimed });
+        const signature = await account.signTypedData({
+            domain: offer.body.domain,
+            types: RECOVERY_TYPES,
+            primaryType: "Recover",
+            message: {
+                statement: offer.body.message.statement,
+                address: offer.body.message.address,
+                nonce: offer.body.message.nonce,
+                issuedAt: BigInt(offer.body.message.issuedAt),
+            },
+        });
+        return { nonce: offer.body.message.nonce as string, signature, offer };
+    };
+
+    it("gives a buyer back every link they paid for, and nobody else's", async () => {
+        const { app, mine, older } = await build();
+        const { nonce, signature } = await prove(app, BUYER);
+
+        const res = await request(app).post("/receipt/recover").send({ address: BUYER.address, nonce, signature });
+        expect(res.status).toBe(200);
+        expect(res.body.address).toBe(BUYER.address);
+        // newest first, and matched whatever case the payer was recorded in
+        expect(res.body.receipts.map((r: { id: string }) => r.id)).toEqual([mine.id, older.id]);
+        expect(res.body.receipts.map((r: { briefId: string }) => r.briefId)).not.toContain("brief-theirs");
+        expect(res.body.receipts[0].url).toBe(`/r/${mine.id}`);
+    });
+
+    it("refuses a signature from a different wallet than the address claimed", async () => {
+        // the attack this stops: payers are public on Base, so an address alone must prove nothing
+        const { app } = await build();
+        const offer = await request(app).post("/receipt/nonce").send({ address: BUYER.address });
+        const signature = await STRANGER.signTypedData({
+            domain: offer.body.domain,
+            types: RECOVERY_TYPES,
+            primaryType: "Recover",
+            message: {
+                statement: offer.body.message.statement,
+                address: offer.body.message.address,
+                nonce: offer.body.message.nonce,
+                issuedAt: BigInt(offer.body.message.issuedAt),
+            },
+        });
+        const res = await request(app)
+            .post("/receipt/recover")
+            .send({ address: BUYER.address, nonce: offer.body.message.nonce, signature });
+        expect(res.status).toBe(401);
+        expect(res.body.receipts).toBeUndefined();
+    });
+
+    it("spends the nonce, so a captured signature cannot be replayed", async () => {
+        const { app } = await build();
+        const { nonce, signature } = await prove(app, BUYER);
+        const first = await request(app).post("/receipt/recover").send({ address: BUYER.address, nonce, signature });
+        expect(first.status).toBe(200);
+
+        const replay = await request(app).post("/receipt/recover").send({ address: BUYER.address, nonce, signature });
+        expect(replay.status).toBe(400);
+        expect(replay.body.receipts).toBeUndefined();
+    });
+
+    it("refuses a nonce this server never issued", async () => {
+        const { app } = await build();
+        const { signature } = await prove(app, BUYER);
+        const res = await request(app)
+            .post("/receipt/recover")
+            .send({ address: BUYER.address, nonce: "a".repeat(32), signature });
+        expect(res.status).toBe(400);
+    });
+
+    it("answers an address with no purchases with an empty list, not an error", async () => {
+        const { app } = await build();
+        const nobody = privateKeyToAccount(("0x" + "77".repeat(32)) as `0x${string}`);
+        const { nonce, signature } = await prove(app, nobody);
+        const res = await request(app).post("/receipt/recover").send({ address: nobody.address, nonce, signature });
+        expect(res.status).toBe(200);
+        expect(res.body.receipts).toEqual([]);
+    });
+
+    it("records the payer when a settlement reports one", async () => {
+        const store = new JsonlReceiptStore(join(freshDir(), "receipts.jsonl"));
+        const r = receipt({ payer: BUYER.address });
+        await store.issue(r);
+        const back = await store.find(r.id);
+        expect(back?.payer).toBe(BUYER.address);
+        expect((await store.forPayer(BUYER.address)).length).toBe(1);
+
+        // a receipt written before the payer was recorded is simply not recoverable, never a crash
+        const legacy = receipt({ transaction: "0x" + "33".repeat(32) });
+        delete (legacy as { payer?: string }).payer;
+        await store.issue(legacy);
+        expect((await store.forPayer(BUYER.address)).length).toBe(1);
     });
 });

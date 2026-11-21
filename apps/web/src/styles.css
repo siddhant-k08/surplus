@@ -221,3 +221,11 @@
 }
 .field textarea::placeholder{color:#6B7489}
 .field textarea:focus-visible{outline:2px solid var(--coral);outline-offset:2px}
+
+/* A quiet aside under an action: what to do when it cannot run, or why it failed. Not a panel, because
+   this sits in the flat working area rather than on the lit stage. */
+.note{max-width:44rem;color:var(--cream-dim);font-size:.875rem;margin:.75rem 0 0}
+.note.error{color:var(--coral)}
+.recover .legs{margin-top:1.25rem}
+.recover .sym{color:var(--cream);border-bottom:1px solid rgba(244,237,224,.35)}
+.recover .sym:hover{border-bottom-color:var(--coral)}

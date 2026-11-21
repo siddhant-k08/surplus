@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Recover } from "./Recover";
 import { formatUsdc } from "./api";
 import { connect, hasWallet, describeWalletError } from "./wallet";
 
@@ -235,6 +236,7 @@ export function Store() {
                             <span aria-hidden="true">↗</span>
                         </button>
                     </div>
+                    <Recover />
                 </div>
             </main>
 

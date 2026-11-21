@@ -24,6 +24,15 @@ export interface Receipt {
     transaction: string;
     amountUsdcMinor: string;
     at: string;
+    /**
+     * The address that paid, when the facilitator reported one.
+     *
+     * Only ever used to give a buyer their own purchases back. The receipt id travels once, in the paid
+     * response, and a response that is lost leaves someone charged with no way to what they bought; the
+     * paying wallet is the one thing they can still prove. It is never a way in on its own: an address
+     * is public, so recovery takes a signature from it.
+     */
+    payer?: string | undefined;
 }
 
 /**
@@ -39,6 +48,8 @@ export interface ReceiptStore {
     find(id: string): Promise<Receipt | null>;
     /** A receipt already written for a settlement, so one payment never issues two. */
     forTransaction(transaction: string): Promise<Receipt | null>;
+    /** Every receipt a given address paid for, newest first. Guarded by a signature at the route. */
+    forPayer(address: string): Promise<Receipt[]>;
     /** How many have been issued. For the startup banner, not for the buyer's path. */
     count(): Promise<number>;
 }
@@ -69,6 +80,8 @@ export function parseReceiptLine(line: string, where: string): Receipt {
         transaction: str("transaction"),
         amountUsdcMinor: str("amountUsdcMinor"),
         at: str("at"),
+        // absent on receipts written before the payer was recorded, and on a settlement that reported none
+        ...(typeof r.payer === "string" && r.payer !== "" && { payer: r.payer }),
     };
 }
 
@@ -111,6 +124,13 @@ export class JsonlReceiptStore implements ReceiptStore {
             if (r.transaction.toLowerCase() === transaction.toLowerCase()) return r;
         }
         return null;
+    }
+
+    async forPayer(address: string): Promise<Receipt[]> {
+        const wanted = address.toLowerCase();
+        return [...this.load().values()]
+            .filter((r) => r.payer !== undefined && r.payer.toLowerCase() === wanted)
+            .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
     }
 
     async count(): Promise<number> {

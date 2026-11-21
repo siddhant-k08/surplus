@@ -56,6 +56,33 @@ export interface LoginOffer {
     message: { statement: string; address: string; nonce: string; issuedAt: string };
 }
 
+/** What a buyer signs to prove the wallet that paid. Same shape the owner's sign-in offers. */
+export interface RecoveryOffer {
+    domain: { name: string; version: string; chainId: number };
+    types: Record<string, { name: string; type: string }[]>;
+    primaryType: string;
+    message: { statement: string; address: string; nonce: string; issuedAt: string };
+}
+
+export interface RecoveredReceipt {
+    id: string;
+    url: string;
+    briefId: string;
+    transaction: string;
+    amountUsdcMinor: string;
+    at: string;
+}
+
+/** Offers the payload the buyer's wallet should sign. */
+export const recoveryOffer = (address: string): Promise<RecoveryOffer> =>
+    post<RecoveryOffer>("/receipt/nonce", { address });
+
+/** Exchanges a signature for the links that wallet paid for. */
+export const recoverReceipts = (body: { address: string; nonce: string; signature: string }): Promise<{
+    address: string;
+    receipts: RecoveredReceipt[];
+}> => post("/receipt/recover", body);
+
 export interface Me {
     signedIn: boolean;
     address: string | null;
