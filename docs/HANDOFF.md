@@ -5,7 +5,7 @@ Written 21 Nov 2026 when the project moved from a Claude chat to Claude Code. Th
 ## Where we stopped
 
 1. The research pipeline works end to end against real SEC filings and Gemini (`gemini-3.1-flash-lite`). Latest real run: 3 model calls, about 70,600 input tokens, cost about $0.021 booked at paid-tier rates, zero validation issues.
-2. `npm test` runs core (234 tests, 25 files) and the API (85 tests, 6 files).
+2. `npm test` runs core (244 tests, 26 files) and the API (100 tests, 6 files).
 3. Milestone 1 (research quality) is closed, 21 Nov 2026. What the diagnosis found:
    - The dominant cause of dropped facts was never paraphrasing or `htmlToText`. It was the `MAX_QUOTE` 300-character cap. The model quoted real filing text and ran past 300 characters, usually to finish a sentence or a list of examples, and `quoteInText` rejected it on length while the drop message said "no verbatim quote found". A read-only spike confirmed the Alphabet quote was present verbatim in the filing; `htmlToText` is exonerated.
    - Fixed by `quoteCheck` in `src/pipeline.ts`, which returns `ok`, `too_short`, `too_long`, `not_found`, plus an `uncited_source` case in `assembleTheme`. Drop messages now name the reason and the character count. `quoteInText` is a boolean wrapper over it, so callers are unchanged.
@@ -265,6 +265,131 @@ Live after the change: `briefsCosted: 5`, `revenueUsdcMinor: 20000`, `costsUsdcM
 ### One design question this surfaced, for Siddhant
 
 Per-brief settlement means a brief that sold well can produce investable surplus while other briefs lost money, because each brief is settled against its own revenue and costs. The whole-book position is still visible (`cash.operating` covers everything and reconciliation refuses to let it go negative), and the reserve target absorbs some of it, but there is no rule today that says "do not invest while total costs exceed total revenue". Right now that is moot because investable is zero, and it is a mandate question rather than a bug, so nothing was changed. Worth deciding before mainnet.
+
+## Review fixes, 21 Nov 2026
+
+A full-project review found nine real defects. All are fixed, each with a regression test that fails against the old code. Tests went from 234+85 to 244+100.
+
+**H1, the worst one.** `settleBrief` cached its first result and returned it forever, so every sale of a brief after the first sat in operating cash and never became investable. Reproduced: a 1.00 sale then a 5.00 sale left investable unchanged at 0.24 with only two sweep entries. Settlement is now incremental: `sweepAvailable` in `src/surplus.ts` splits whatever is newly available, `settleBrief` tracks `sweptRevenue`/`sweptCosts`/`carried` per brief, and the idempotency key covers the cumulative totals so a repeat call books nothing. A brief that is behind carries the deficit so later revenue makes good the loss before anything is swept, and the carry survives a restart.
+
+**H2.** A signature made under one mandate was accepted under another. The engine verified against the payload it offered, then `Treasury.approve` rebuilt the recorded approval from the *current* mandate, so the `mandateVersion` and `mandateHash` in the signed message were never enforced. Reproduced: signed under v1, recorded as v2. Note the first attempt appeared safe because changing `maxSlippageBps` happens to trip `checkProposal`; any field the policy engine does not inspect went straight through. Now the engine refuses when the mandate has moved and drops the stale offer, and `Treasury.approve` takes an `expect` approval and refuses on any field mismatch, so the domain layer enforces it too.
+
+**H3 and H4, one root cause.** Buyer-commissioned briefs and the owner's catalogue shared `docs/briefs` with newest-wins semantics. That meant the 0.01 cached route served whatever a buyer had just paid 2.00 to commission, including their own thesis, and the investing loop fed the allocator a buyer's themes and threw `Theme "x" has no target in the mandate`. Buyer work now lives in `CUSTOM_BRIEFS_DIR` (default `data/briefs-custom`), served to nobody else; `propose` filters to themes the mandate funds and reports the skipped ones instead of throwing; cost accounting still covers both directories, because a buyer's brief cost the agent real money.
+
+**M1.** The settle hook asked for the newest brief rather than the one served, so every cached research sale was attributed to the wrong brief. An `AsyncLocalStorage` context now carries the served brief id from handler to hook, and with none it records `unattributed` rather than guessing.
+
+**M2.** The opening float was keyed on its amount, so changing `OPENING_FLOAT_USDC` added a second capital entry (1.00 then 2.00 gave equity of 3.00). Working capital is now a running total: only the increase is booked, and a reduction is refused rather than rewriting history.
+
+**M3.** One truncated brief file took down the paid route, the research cache and the investing loop. `scanBriefs` skips unreadable files and returns `problems`; `/invest/sync` reports them as `unreadableBriefs`, because a skipped brief is a model cost missing from the books.
+
+**M4.** Two identical simultaneous research requests both missed the cache and both generated, and the spend cap was per call so N concurrent requests could spend N times it. Identical requests now share one in-flight promise, and `RESEARCH_TOTAL_MAX_USD` (default 10.00) caps spend for the life of the process.
+
+**M5.** `maxCompanyBps` was enforced per allocation, so successive proposals could build a position far past it (two 1.00 allocations at a 50 percent cap put 100 percent into one token). `allocate` and `checkProposal` now take `held`, and the engine passes the `positions.*` balances, so the cap limits total exposure.
+
+**M6.** Only the LLM clients had request deadlines. EDGAR, the Coinbase token API, DexScreener and KyberSwap could hang forever, which on `/research` means hanging while holding a verified payment. All outbound calls now use `AbortSignal.timeout` with a 15 s default (`HTTP_TIMEOUT_MS`).
+
+Also fixed: uninvested money now names the constraint that actually bound rather than any slot's reason (L1); a zero or negative NAV counts as missing instead of producing an Infinity deviation (L2); `GET /ledger` needs the owner token unless `PUBLIC_LEDGER=true`, because it is the operator's whole financial history (L4); proposal ids are bounded to 64 safe characters since they land in persisted memos (L5); and `demo-live.ts` resolves its paths from the repo root rather than the cwd (L6).
+
+### Still open after the review
+
+- `swapPlan` is computed and asserted but `Treasury.execute` still fills per leg, so the gas saving it exists for is not realized. Unchanged, and no test claims otherwise.
+- `reconcileInternal` validates by replaying through the same `Ledger.replay` it is checking, so it is partly circular. It catches serialization and restore faults, not a systematic fault in `post`.
+- Whether a non-2xx from `/research` cancels or settles the payment is still unverified. It was inferred from the SDK's `authorization` flow and `handler_threw` cancellation reason, never exercised with a real failing paid request. If a 400 settles, buyers are charged for rejected theme input.
+- There is no lint configuration and no build step; `tsc --noEmit` is the only static gate.
+- Quotes are fetched sequentially with a 500 ms gap and all judged against one `now` against a 25 s freshness limit, so a large token set on a slow network could age the first quote out. Not reproduced, worth watching.
+
+## The frontend plan, agreed 21 Nov 2026
+
+Siddhant's instruction: "I don't want a project that is just made well-enough to be presented to the judges. I want a full working application that completes the process end-to-end." Two earlier recommendations were retracted as demo reasoning: the public page now transacts rather than explains, and owner auth is wallet sign-in rather than a bearer token typed into a browser.
+
+### The fact that dominates the plan
+
+The two halves of Surplus are on different chains. Checked 21 Nov 2026 with `eth_getCode`:
+
+```
+NVDAc on Base mainnet  (8453):  0xef   deployed
+NVDAc on Base Sepolia (84532):  0x     nothing there
+KyberSwap endpoint in the code: /base/ mainnet
+```
+
+Selling runs on Base Sepolia because that is the only EVM network the free x402 facilitator serves. The tokenized stocks exist only on Base mainnet. Testnet USDC cannot fund a mainnet swap and cannot be bridged, so the loop cannot close with real money until both halves are on mainnet. That needs a paid facilitator, real USDC, and eligibility advice that has been flagged unverified since day one. Decision: build every path mainnet-capable behind `MAINNET_ENABLED`, keep running Sepolia plus simulated fills, and treat real swaps as a gated release rather than a milestone.
+
+### Settled decisions
+
+- Audience: the owner's desk **and** a public face that really sells.
+- Real and wired to the live API, not fixtures.
+- Visual direction: a lit navy stage with a coral bloom and fluted glass for the hero and the decision, calm flat navy for the working detail. Palette is Siddhant's 60/30/10: navy `#14213D`, cream `#F4EDE0`, coral `#FF6B5B` on the one action meant to be pressed. Mock in `apps/web/mock/approval.html`.
+- Stack: Vite, React and TypeScript in `apps/web`, built to static files the Express app serves.
+- Signing: the owner's browser wallet signs the EIP-712 payload. A server-side key would make the signature decoration rather than authority.
+- Owner auth: wallet sign-in. `OWNER_TOKEN` stays for machine and CLI use and never reaches a browser.
+- Buyer keeps their brief through a receipt page keyed by the settlement transaction hash. No accounts.
+- `PUBLIC_LEDGER=true`: the book is the pitch. Revisit before mainnet, where it becomes a real disclosure.
+- Close the swap-plan gap: execute one swap per `SwapOrder` while the ledger keeps one entry per leg.
+- New mandate term: do not invest while lifetime costs exceed lifetime revenue.
+
+### Dates
+
+Today is Sat 21 Nov 2026. Submissions close Sat 5 Dec 2026 (UTC). Target submit Fri 4 Dec (note: 4 Dec is a Friday, not a Thursday). Thirteen days, four of them weekend. The agreed scope is roughly 18 to 20 solo days, so the plan is sequenced for every checkpoint to be a whole working product and for the most likely casualties to be last and severable.
+
+| Dates | Phase | What ships |
+|---|---|---|
+| Sat 21 to Sun 22 Nov | Foundations and de-risk | Done 21 Nov: Vite, React and TS in `apps/web`, design tokens lifted from the mock, spike passed. Remaining: Express serves `dist` |
+| Mon 23 to Wed 25 Nov | The owner desk, real | Done 21 Nov: wallet sign-in (`src/session.ts`), Express serves `apps/web/dist`. Remaining: desk wired to `/invest/*`, browser EIP-712 signing, every state |
+| Thu 26 to Sat 28 Nov | The storefront, real | Public page with live price, sales and book. In-browser x402 purchase. Receipt page keyed by the settlement transaction, plus its route |
+| Sun 29 Nov to Tue 1 Dec | Running for real | VPS with a persistent volume, TLS, domain, secrets, process manager, ledger backups. Underwater mandate term. Real swap execution per `SwapOrder`, built and tested, flag off |
+| Wed 2 to Thu 3 Dec | Hardening and the real run | Errors, retries, empty states, mobile, accessibility. Re-check the Quest rules and base.org/stocks. Raise the price, make real purchases, let the loop run. Record |
+| Fri 4 Dec | Submit | Target |
+| Sat 5 Dec | Buffer | Hard close. Nothing planned into it |
+
+Checkpoints, each a complete product:
+
+- Wed 25 Nov: the whole investing loop runs from a browser, signed with the owner's wallet.
+- Sat 28 Nov: a stranger with a funded wallet buys a brief in a browser and keeps a receipt.
+- Tue 1 Dec: it runs continuously at a public URL and has been selling for a day.
+
+### Wallet sign-in, built 21 Nov 2026
+
+`apps/api/src/session.ts`. The owner signs an EIP-712 `Login` message and gets an httpOnly, SameSite=Strict session cookie. `OWNER_TOKEN` stays for machine and CLI callers and never reaches a browser; `requireOwnerAccess` accepts either door. What stops the obvious attacks: the nonce is single use and expires in five minutes, the domain carries the chain id, the recovered address must equal the configured `OWNER_ADDRESS` which never comes from the request, and the cookie cannot be ridden from another origin. Sessions live in memory, so a restart signs the owner out, which is the safe direction. `COOKIE_SECURE=false` is needed only for plain-http local development.
+
+Fourteen tests, signing with a real viem account rather than a stub: an impostor is refused, a nonce cannot be replayed, sign-out revokes, and the cookie never contains the token.
+
+A bug worth recording, because the type checker was no help. Moving the auth block cut the `/auth/me` handler before its closing brace, so `app.use(paymentMiddleware(...))` and every route after it were nested inside that handler. It compiled, the owner routes still answered, and only the public routes vanished: `/health`, `/brief` and `/ledger` returned 404 while `/mandate` worked, which is the opposite of what a missing-route bug usually looks like. There is now a test that asserts the shape of the whole server, checking that no route answers 404, rather than testing one handler at a time.
+
+### Decision gate, Friday 27 Nov
+
+Mainnet go or no-go. Without eligibility advice and a CDP account in hand by then, mainnet is off for the submission and real swaps stay built but gated.
+
+### What only Siddhant can do
+
+- Mon 23 Nov: decide whether to pursue eligibility advice at all; it has lead time.
+- Fri 27 Nov: CDP account and a funded throwaway wallet, if mainnet is happening.
+- Wed 2 Dec: about 3 test USDC and the time to make the real purchases.
+- Throughout: the commits.
+
+### Phase 0 spike result, 21 Nov 2026: in-browser x402 works
+
+Risk 1 is retired on day one. `apps/web/src/Spike.tsx` ran in a real browser against the live API:
+
+```
+bundle     @x402/fetch, @x402/core and @x402/evm loaded in the browser
+signer     empty throwaway account
+client     x402 client built for eip155:84532
+challenge  402 received, wants 10000 of 0x036CbD53...
+payment    signed in the browser and submitted; server answered 402
+           {"error":"invalid_exact_evm_insufficient_balance"}
+```
+
+The account was generated fresh in the page and holds nothing, so a balance error is the pass: the bundle loaded, the challenge was parsed, the EIP-3009 authorization was signed in the browser and the facilitator evaluated it. Only funding separates that from a real purchase, and the Node client already proved the funded path.
+
+Two supporting facts. None of `@x402/fetch`, `@x402/core` or `@x402/evm` imports a node builtin in its ESM build, and `vite build` produces a browser bundle with no polyfills. The client signer interface is `address` plus `signTypedData` and nothing else (`ClientEvmSigner` in `@x402/evm`), which an injected wallet satisfies directly, so moving from the spike's local account to a real wallet is a shim rather than a rewrite.
+
+Conclusion: the storefront transacts in-page as planned. The bundle is 657 kB raw and 203 kB gzipped, mostly viem; worth code-splitting in the hardening phase, not now.
+
+### The two risks still being watched
+
+1. The bundle is heavier than it should be and the storefront is the page a stranger loads first. Split it in Phase 4.
+2. Real swap execution is about three days and shares a phase with deployment. It is the piece to drop if anything slips; the application is still complete end-to-end without it provided simulated fills stay labelled everywhere, which they are.
+3. Mainnet may never be lawful for Siddhant to enable. The plan does not pretend to resolve that.
 
 ## Next milestones, in order
 

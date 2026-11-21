@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { isAbsolute, resolve } from "node:path";
 import {
     loadLatestBrief,
     loadAllTokens,
@@ -27,8 +29,12 @@ import {
 } from "../packages/core/src/index";
 
 const SLIPPAGE_BPS = 100;
-const BRIEFS_DIR = "docs/briefs";
-const LEDGER_PATH = process.env.LEDGER_PATH ?? "data/ledger-testnet.jsonl";
+// Resolved from this file, not the working directory: a relative default silently reads nothing when the
+// script is run from anywhere but the repo root.
+const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
+const fromRoot = (p: string) => (isAbsolute(p) ? p : resolve(REPO_ROOT, p));
+const BRIEFS_DIR = fromRoot(process.env.BRIEFS_DIR ?? "docs/briefs");
+const LEDGER_PATH = fromRoot(process.env.LEDGER_PATH ?? "data/ledger-testnet.jsonl");
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function main(): Promise<void> {

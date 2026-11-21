@@ -2,7 +2,7 @@
 
 An agent that sells on-demand, cited, multi-theme stock research briefs for USDC (x402), books operating costs and a protected reserve, and invests only a user-configured share of the remaining surplus into Coinbase tokenized stocks on Base, within a versioned user mandate. Every trade needs the owner's approval; material price movement forces re-approval; everything lands in a chronological, reconcilable ledger.
 
-Built solo by Siddhant for Base's Stocks Maxxing Season, Agentic Stock Finance track. Submissions close Sat 5 Dec 2026 (UTC). Target: submit Thu 4 Dec.
+Built solo by Siddhant for Base's Stocks Maxxing Season, Agentic Stock Finance track. Submissions close Sat 5 Dec 2026 (UTC). Target: submit Fri 4 Dec. The frontend plan with dates is in `docs/HANDOFF.md`.
 
 Full history, decisions, verified facts and open questions: read `docs/HANDOFF.md` before planning any new milestone.
 
@@ -41,12 +41,16 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 25 files, 234 tests. API 6 files, 85 tests.
+Last known test count: core 26 files, 244 tests. API 6 files, 100 tests.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
 ## Money and ledger rules (do not break)
 
+- Settlement is incremental, not once per brief: `settleBrief` sweeps only what is new since the last sweep and carries a deficit forward. A brief can earn again, and that revenue has to reach the surplus too.
+- `maxCompanyBps` counts what is already held (`allocate`/`checkProposal` take `held`), so the cap limits total exposure rather than one allocation.
+- The owner's catalogue (`BRIEFS_DIR`) and buyer-commissioned briefs (`CUSTOM_BRIEFS_DIR`) are separate. One directory would let the cheap route serve a premium custom brief and would feed unfunded themes to the allocator.
+- A sale is attributed to the brief the request actually served, never to "the newest brief"; with no served brief it is recorded as `unattributed`.
 - Money is `bigint` USDC minor units (6 decimals). Percentages are basis points. Round down when allocating, round up when booking costs (`usdToUsdcMinor`). No floats for money except display and ranking.
 - Ledger is double-entry, append-only, idempotent by key, chronological, and every entry carries a mode tag: `sim`, `testnet` or `mainnet`.
 - Money entries carry a structured `briefId` saying what the movement was for; `Treasury` rebuilds its per-brief tallies, seen-id sets and settled results from it on construction. Never attribute money by parsing a memo.
@@ -55,6 +59,7 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - The mandate persists to `MANDATE_PATH` as a hash-chained JSONL history, verified on load: an altered or truncated file makes the server refuse to start. A stored mandate is authoritative; the terms in code only create version 1 on a first run.
 - One `MandateStore` is shared by the server and the investing engine. Two stores would drift apart the moment the owner changed a term.
 - Approvals bind to proposal hash, mandate version and hash, max spend and expiry. Drift beyond tolerance means REAPPROVAL_REQUIRED.
+- An approval is refused if the mandate moved since the payload was offered: the signature covers a mandate version and hash, and `Treasury.approve` takes an `expect` approval so the domain layer enforces the match too.
 - An approval over HTTP needs the owner's EIP-712 signature (`src/eip712.ts` builds the payload, `apps/api/src/signature.ts` verifies it). The bearer token only decides who reaches the route. `OWNER_ADDRESS` is required and comes from config, never from the request. Core's `Treasury.approve` still allows an unsigned approval for the sim demos, so the requirement is enforced in the API layer.
 - The LLM never computes money, never sets source tiers, and never sets evidence scores.
 - `realizedSales`/`realizedRevenue` are the only answer to what was earned; a payment with no settlement transaction is not revenue.
