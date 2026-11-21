@@ -755,6 +755,39 @@ minutes, because a budget permanently consumed by a crash would be worse than th
 
 Core 261, API 194.
 
+## Execution made crash-safe, 22 Nov 2026
+
+Siddhant said eligibility for India looks fine to him. That is his call and it is recorded as his; it is
+not verified here, and routing money from India into tokenized US equities touches FEMA and the LRS as
+well as the RBI's treatment of crypto rails, so it stays flagged for a professional. `MAINNET_ENABLED`
+stays off until he separately authorises live execution. What changed is that the code is no longer the
+reason to wait.
+
+The executor was the least production-ready thing in the project: it had never run, its spend cap lived
+in a field (so on a host that runs several instances it was a cap each, on real money), and a crash
+between broadcasting a swap and recording it would have left money moved with nothing remembering.
+
+- `src/journal.ts` is the record of what the agent has tried to do onchain, written before it tries,
+  shared through Postgres. The spend cap is counted from it, and anything not known to have failed
+  counts, because a transaction whose outcome is unknown may well have spent the money.
+- The order around the send is inverted. The transaction is **simulated**, then **signed** (which fixes
+  its hash without putting it on the chain), then the hash and the raw bytes are **recorded**, and only
+  then is it **broadcast**. A process that dies anywhere after signing can ask the chain what became of
+  a transaction it knows it signed, and rebroadcast the same bytes rather than build a second one.
+- A key is claimed once. A second call for the same order resumes it rather than sending again: filled
+  returns what was filled, failed refuses and says to propose again, sent asks the chain.
+- `recover()` runs at start-up, before anything is served, because every number in the books is wrong
+  until the unresolved transactions have been resolved.
+- A simulation that reverts costs nothing and releases the claim, so a refusal before signing does not
+  eat the cap.
+
+Ten tests cover the ordering with a fake chain that records what it was asked to do and can be told to
+fail at a chosen step, because the failure this is built around is a crash between two calls, which a
+real node will not reproduce on request. `buildSwap` is injectable for the same reason: a test about
+what happens around a send should not depend on an aggregator's endpoint being up.
+
+Core 261, API 204.
+
 ### Still open on this
 
 - A real purchase against the deployed endpoint has not been made.

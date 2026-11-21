@@ -182,6 +182,7 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
 
     // Real fills are off unless mainnet is deliberately enabled, a cap is set and a key is present.
     const execution = openExecutor({
+        journal: backends.executions,
         mainnetEnabled: process.env.MAINNET_ENABLED === "true",
         rpcUrl: process.env.BASE_RPC_URL ?? "",
         privateKey: process.env.EXECUTION_PRIVATE_KEY ?? "",
@@ -212,6 +213,16 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
                 ownerAddress: config.ownerAddress,
             }),
     });
+
+    // Before serving anything: a swap this instance's predecessor signed may have landed on the chain
+    // while nothing was left to notice. Resolving those against the chain is the first thing that must
+    // happen, because every number below is wrong until it has.
+    if (execution.executor !== null) {
+        const resolved = await execution.executor.recover();
+        for (const r of resolved) {
+            console.log(`recovered execution ${r.key}: ${r.outcome}`);
+        }
+    }
 
     const receipts = backends.receipts;
     const receiptCount = await receipts.count();

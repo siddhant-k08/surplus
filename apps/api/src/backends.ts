@@ -10,6 +10,7 @@ import { JsonlReceiptStore, type ReceiptStore } from "./receipts";
 import { MemorySessionStore, type SessionStore } from "./session";
 import { MemoryThrottle, PgThrottle, type Throttle } from "./throttle";
 import { MemoryReservations, PgReservations, type Reservations } from "./reservations";
+import { MemoryJournal, PgJournal, type ExecutionJournal } from "./journal";
 import {
     migrate, openSql,
     PgBriefBackend, PgLedgerStore, PgMandateBackend, PgReceiptStore, PgSessionStore,
@@ -44,6 +45,13 @@ export interface Backends {
     throttle: Throttle;
     /** Money committed to a brief being generated right now, so the spend cap holds across instances. */
     reservations: Reservations;
+    /**
+     * What the agent has tried to do onchain, written before it tries.
+     *
+     * The one record that must outlive the process that made it: a swap this does not remember is
+     * money moved with nothing to reconcile it against.
+     */
+    executions: ExecutionJournal;
     /** Where each kind of record lives, for the banner. */
     lines: string[];
     /**
@@ -69,6 +77,7 @@ export function fileBackends(config: ApiConfig): Backends {
         sessions: new MemorySessionStore(),
         throttle: new MemoryThrottle(),
         reservations: new MemoryReservations(),
+        executions: new MemoryJournal(),
         lines: [
             `                mandate   ${config.mandatePath}`,
             `                receipts  ${config.receiptsPath}`,
@@ -110,6 +119,7 @@ export function pgBackends(config: ApiConfig, sql: Sql): Backends {
         sessions: new PgSessionStore(sql),
         throttle: new PgThrottle(sql),
         reservations: new PgReservations(sql),
+        executions: new PgJournal(sql),
         lines: [
             `                mandate   table mandate_versions`,
             `                receipts  table receipts`,
@@ -117,6 +127,7 @@ export function pgBackends(config: ApiConfig, sql: Sql): Backends {
             `                sessions  tables sessions and login_nonces`,
             `                limits    table rate_limits, shared by every instance`,
             `                research  table research_reservations, so the spend cap is one cap`,
+            `                onchain   table executions, written before a swap is broadcast`,
         ],
         check: async () => {
             try {

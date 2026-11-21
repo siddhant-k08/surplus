@@ -47,7 +47,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 27 files, 261 tests. API 12 files, 194 tests. The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 27 files, 261 tests. API 12 files, 204 tests. The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -78,6 +78,7 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - Pre-trade gates: trusted, no paused flags (any flag blocks), liquidity score at least 2, quote younger than 25 s, NAV deviation over 300 bps blocks only when NAV is fresh.
 - Quotes come from the KyberSwap aggregator with the router address pinned. NAV is a reference value, never an execution price.
 - Real swaps live in `apps/api/src/executor.ts` and refuse to exist without `MAINNET_ENABLED`, a positive spend cap and a key. A fill is booked only from a confirmed receipt with status success; `parseBuiltSwap` refuses calldata that would spend more than was quoted. Deployment notes are in `docs/DEPLOY.md`.
+- A swap is simulated, then signed, then written to the execution journal (`apps/api/src/journal.ts`), and only then broadcast. Signing fixes the hash without putting it on the chain, so a crash after that point can always be resolved against the chain, and the raw bytes are kept so recovery rebroadcasts the same transaction rather than building a second one. `recover()` runs before the server serves anything. The onchain spend cap is counted from the journal, never from a field: anything not known to have failed counts.
 - Mainnet stays off (`MAINNET_ENABLED=false`) until Siddhant explicitly authorizes it, with a spend cap and a throwaway wallet. The API refuses to start on Base mainnet without that flag, and `INVEST_MODE=mainnet` needs it too.
 - The four routes that are neither paid for nor signed (the nonce routes and the two that spend a nonce) are capped per caller in the database, so the limit is one limit across every instance. A limiter that cannot answer lets the request through and logs it; it stops abuse, it is not a dependency of the API.
 - `GET /health` checks its dependencies and answers 503 when storage is unreachable or the books do not reconcile. An empty catalogue is reported, never a fault.

@@ -15,6 +15,7 @@ import {
 } from "../src/pg";
 import { PgThrottle } from "../src/throttle";
 import { PgReservations } from "../src/reservations";
+import { PgJournal } from "../src/journal";
 import { newReceiptId, type Receipt } from "../src/receipts";
 import type { BriefDocument } from "../src/briefs";
 import { scratchSchema, hasDatabase, type Scratch } from "./pghelp";
@@ -489,6 +490,67 @@ describeDb("research reservations in Postgres", () => {
             expect(await r.outstanding()).toBe(0n);
             const [row] = await only.sql<{ n: string }[]>`select count(*)::text as n from research_reservations`;
             expect(row!.n).toBe("0"); // swept, not merely ignored
+        } finally {
+            await only.drop();
+        }
+    }, 60_000);
+});
+
+describeDb("the execution journal in Postgres", () => {
+    it("remembers a signed transaction across a restart, and claims a key exactly once", async () => {
+        // the record that must outlive the process that made it: a swap nothing remembers is money
+        // moved with nothing to reconcile it against
+        const only = await scratchSchema();
+        try {
+            const first = new PgJournal(only.sql);
+            const claim = { key: "p1:0", symbol: "NVDAc", asset: "0x" + "11".repeat(20), usdcInMinor: 1_000_000n };
+            expect((await first.reserve(claim)).status).toBe("pending");
+            await first.recordSigned("p1:0", "0x" + "ab".repeat(32), "0x" + "cd".repeat(60));
+
+            // a different instance, with nothing in memory
+            const second = new PgJournal(only.sql);
+            const seen = await second.find("p1:0");
+            expect(seen?.status).toBe("sent");
+            expect(seen?.rawTx).toBe("0x" + "cd".repeat(60));
+            expect((await second.unresolved()).map((r) => r.key)).toEqual(["p1:0"]);
+
+            // and it cannot be claimed a second time, whichever instance asks
+            const again = await second.reserve({ ...claim, usdcInMinor: 9_000_000n });
+            expect(again.status).toBe("sent");
+            expect(again.usdcInMinor).toBe(1_000_000n); // the original claim, not the new amount
+
+            await second.settle("p1:0", { status: "filled", amountOutMinor: 42n, gasUsed: 21_000n });
+            expect(await first.unresolved()).toEqual([]);
+            expect((await first.find("p1:0"))?.amountOutMinor).toBe(42n);
+        } finally {
+            await only.drop();
+        }
+    }, 60_000);
+
+    it("counts the spend cap across instances, and forgets only what failed", async () => {
+        const only = await scratchSchema();
+        try {
+            const j = new PgJournal(only.sql);
+            const asset = "0x" + "11".repeat(20);
+            await j.reserve({ key: "a", symbol: "NVDAc", asset, usdcInMinor: 1_000_000n });
+            await j.reserve({ key: "b", symbol: "AAPLc", asset, usdcInMinor: 2_000_000n });
+            expect(await j.committedUsdcMinor()).toBe(3_000_000n);
+
+            // an unknown outcome still counts: it may well have spent the money
+            await j.recordSigned("b", "0x" + "ef".repeat(32), "0x" + "ff".repeat(60));
+            expect(await j.committedUsdcMinor()).toBe(3_000_000n);
+
+            await j.settle("a", { status: "failed", detail: "reverted" });
+            expect(await j.committedUsdcMinor()).toBe(2_000_000n);
+
+            // a claim that never became a signature can be released
+            await j.reserve({ key: "c", symbol: "MSFTc", asset, usdcInMinor: 500_000n });
+            await j.release("c");
+            expect(await j.committedUsdcMinor()).toBe(2_000_000n);
+            // but one that was signed cannot
+            await j.release("b");
+            expect(await j.committedUsdcMinor()).toBe(2_000_000n);
+            expect((await j.find("b"))?.status).toBe("sent");
         } finally {
             await only.drop();
         }
