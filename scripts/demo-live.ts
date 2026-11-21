@@ -1,6 +1,8 @@
 import {
     loadLatestBrief,
     loadAllTokens,
+    JsonlLedgerStore,
+    realizedSales,
     crossCheck,
     loadLiquidityScores,
     toCandidates,
@@ -26,6 +28,7 @@ import {
 
 const SLIPPAGE_BPS = 100;
 const BRIEFS_DIR = "docs/briefs";
+const LEDGER_PATH = process.env.LEDGER_PATH ?? "data/ledger-testnet.jsonl";
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function main(): Promise<void> {
@@ -93,13 +96,37 @@ async function main(): Promise<void> {
         approvalExpirySeconds: 600,
     });
 
+    // Revenue comes from the paid endpoint's own ledger when it has sales. The investing loop runs in its
+    // own `sim` book so simulated fills can never be written into the real testnet book; the mirrored
+    // revenue entry names the transactions it stands for, so the provenance is checkable.
+    const realSales = realizedSales(new JsonlLedgerStore(LEDGER_PATH).load());
+    const realRevenue = realSales.reduce((a, x) => a + x.amountUsdcMinor, 0n);
+    const useReal = realRevenue > 0n && !process.argv.includes("--simulate-revenue");
+
     const tr = new Treasury({ mode: "sim", mandates });
     tr.ledger.post({
         type: "OPENING_BALANCE", mode: "sim", memo: "opening reserve (simulated)",
         lines: [{ account: "reserve", amount: u("1.50") }, { account: "equity.opening", amount: u("-1.50") }],
     });
-    // The sale price is simulated; the model cost is the real metered cost of the brief above.
-    tr.receivePayment({ id: `pay-${brief.id}`, briefId: brief.id, amount: u("3.00") });
+
+    if (useReal) {
+        console.log(`\nRevenue from the paid endpoint: ${realSales.length} real sale(s) in ${LEDGER_PATH}`);
+        for (const x of realSales) {
+            console.log(`  ${formatUsdc(x.amountUsdcMinor)} USDC [${x.mode}] tx ${x.transaction}`);
+        }
+        tr.receivePayment({
+            id: `mirror-${brief.id}`,
+            briefId: brief.id,
+            amount: realRevenue,
+            memo: `mirrors ${realSales.length} real sale(s): ${realSales.map((x) => x.transaction.slice(0, 10)).join(", ")}`,
+        });
+    } else {
+        const why = realRevenue > 0n ? "forced by --simulate-revenue" : `no sales found in ${LEDGER_PATH}`;
+        console.log(`\nRevenue: SIMULATED sale of ${formatUsdc(u("3.00"))} (${why})`);
+        tr.receivePayment({ id: `pay-${brief.id}`, briefId: brief.id, amount: u("3.00"), memo: "SIMULATED sale" });
+    }
+
+    // the model cost is the real metered cost of the brief above, whichever revenue was used
     tr.accrueCost({
         id: `llm-${brief.id}`,
         briefId: brief.id,
@@ -109,9 +136,26 @@ async function main(): Promise<void> {
     });
     const s = tr.settleBrief(brief.id);
     console.log(
-        `\nRevenue ${formatUsdc(u("3.00"))} (SIMULATED sale), real model cost ${formatUsdc(saved.costUsdcMinor)}, ` +
-        `surplus ${formatUsdc(s.surplus)}, investable ${formatUsdc(s.investable)}`,
+        `Revenue ${formatUsdc(useReal ? realRevenue : u("3.00"))}${useReal ? " (REAL)" : " (SIMULATED)"}, ` +
+        `real model cost ${formatUsdc(saved.costUsdcMinor)}, net ${formatUsdc(s.net)}, ` +
+        `reserve top-up ${formatUsdc(s.reserveTopUp)}, surplus ${formatUsdc(s.surplus)}, ` +
+        `investable ${formatUsdc(s.investable)}`,
     );
+
+    if (s.investable === 0n) {
+        // this is the designed behaviour, not a failure: the agent does not invest what it has not earned
+        console.log("\nNothing to invest, and that is correct. Why:");
+        if (s.shortfall > 0n) {
+            console.log(`  the brief cost ${formatUsdc(saved.costUsdcMinor)} and earned ${formatUsdc(useReal ? realRevenue : u("3.00"))}, a shortfall of ${formatUsdc(s.shortfall)}`);
+        } else if (s.reserveTopUp > 0n && s.surplus === 0n) {
+            console.log(`  all ${formatUsdc(s.reserveTopUp)} of the net went to the protected reserve, which is still below its target of ${formatUsdc(mandates.current().terms.reserveTargetUsdc)}`);
+        } else {
+            console.log(`  the surplus of ${formatUsdc(s.surplus)} leaves nothing once the invest share is applied`);
+        }
+        console.log("  sell more briefs, raise BRIEF_PRICE_USD, or lower reserveTargetUsdc for a demo run.");
+        console.log("  To rehearse the investing path on simulated revenue: npx tsx scripts/demo-live.ts --simulate-revenue");
+        return;
+    }
 
     const alloc = allocate({ investable: tr.ledger.balance("surplus.investable"), themes, terms: mandates.current().terms });
     console.log("\nProposed legs, each with the verified claim and quote behind it:");

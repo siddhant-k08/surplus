@@ -5,7 +5,7 @@ Written 21 Nov 2026 when the project moved from a Claude chat to Claude Code. Th
 ## Where we stopped
 
 1. The research pipeline works end to end against real SEC filings and Gemini (`gemini-3.1-flash-lite`). Latest real run: 3 model calls, about 70,600 input tokens, cost about $0.021 booked at paid-tier rates, zero validation issues.
-2. `npm test` runs core (214 tests, 23 files) and the API (23 tests).
+2. `npm test` runs core (234 tests, 25 files) and the API (85 tests, 6 files).
 3. Milestone 1 (research quality) is closed, 21 Nov 2026. What the diagnosis found:
    - The dominant cause of dropped facts was never paraphrasing or `htmlToText`. It was the `MAX_QUOTE` 300-character cap. The model quoted real filing text and ran past 300 characters, usually to finish a sentence or a list of examples, and `quoteInText` rejected it on length while the drop message said "no verbatim quote found". A read-only spike confirmed the Alphabet quote was present verbatim in the filing; `htmlToText` is exonerated.
    - Fixed by `quoteCheck` in `src/pipeline.ts`, which returns `ok`, `too_short`, `too_long`, `not_found`, plus an `uncited_source` case in `assembleTheme`. Drop messages now name the reason and the character count. `quoteInText` is a boolean wrapper over it, so callers are unchanged.
@@ -88,7 +88,7 @@ Next on this milestone:
 
 1. Done: the paid request settled and booked correctly (details above).
 2. Done, see below.
-3. Feed the endpoint's booked revenue into the investing loop, keeping the surplus arithmetic above in mind.
+3. Done, see below.
 
 ## Ledger persistence, closed 21 Nov 2026
 
@@ -128,6 +128,143 @@ A brief that settled with net at or below zero books nothing and leaves no trace
 Backward compatibility: entries written before `briefId` existed still load, and their payment ids are still restored so they cannot be booked twice, but their money is not attributed to any brief. The two demo sales already in `data/ledger-testnet.jsonl` are in that state. Deleting that file gives a clean start; the onchain record is permanent either way. Pinned by a test.
 
 Still in memory and not restored: `records`, the proposal and approval state machines. That is correct for now because an approval is bound to a quote and expires in minutes, so a proposal should not survive a restart. Revisit it with the EIP-712 signature milestone.
+
+## Real revenue wired into the investing loop, closed 21 Nov 2026
+
+`demo-live.ts` now takes its revenue from the paid endpoint's own ledger instead of a made-up `$3.00`.
+
+`realizedSales` and `realizedRevenue` in `src/ledgerstore.ts` are the single answer to what the agent actually earned, and both the endpoint's `/ledger` and the investing loop read it, so the two cannot disagree. Only `PAYMENT_RECEIVED` entries carrying a settlement transaction count: a payment with no transaction never landed onchain and is not proven revenue. The API's `salesFromLedger` now delegates to it.
+
+Deliberate separation of books. The investing loop still runs in its own `sim` ledger and reads the testnet ledger read-only, because a simulated fill must never be written into the book that records real money. The mirrored revenue entry names the transactions it stands for, so the provenance is checkable rather than asserted. `LEDGER_PATH` points the loop at the endpoint's ledger and defaults to `data/ledger-testnet.jsonl`.
+
+What the real run shows right now, and it is the correct answer rather than a bug:
+
+```
+Revenue from the paid endpoint: 2 real sale(s) in data/ledger-testnet.jsonl
+  0.010000 USDC [testnet] tx 0x137ee4ca...
+  0.010000 USDC [testnet] tx 0xaabf0aed...
+Revenue 0.020000 (REAL), real model cost 0.021188, net -0.001188, surplus 0.000000, investable 0.000000
+
+Nothing to invest, and that is correct. Why:
+  the brief cost 0.021188 and earned 0.020000, a shortfall of 0.001188
+```
+
+Two sales at `$0.01` do not cover a `$0.021188` brief, so the agent invests nothing. The script explains which rule stopped it (shortfall, reserve still below target, or nothing left after the invest share) instead of printing an empty allocation. `--simulate-revenue` rehearses the investing path on a labelled simulated `$3.00` sale; that path still produces 12 legs merged into 8 swaps and reconciles clean.
+
+Arithmetic for a demo where the whole chain is real, worth getting right before recording. With the demo mandate (opening reserve 1.50, reserve target 2.00, invest share 5000 bps, `minTradeUsdc` 0.05) the reserve takes the first 0.50 of net, half of what is left is investable, and legs below 0.05 are dropped as `below_minimum`. Investable needs to be about 1.05 for all 12 legs to place, which needs roughly 2.63 of revenue. So:
+
+- at `$1.00` a brief, 3 real sales give investable about 1.24, which is the known-good 12-leg run
+- at `$0.01` a brief it would take about 150 sales, so the current price cannot demonstrate the investing path
+- lowering `minTradeUsdc` would be the wrong fix: it exists because gas is 2 to 4 percent of a 0.10 leg
+
+Recommendation: set `BRIEF_PRICE_USD=$1.00` for the recorded demo and make three real purchases, keeping `$0.01` for cheap functional testing. Do not lower `minTradeUsdc`.
+
+## Investing endpoints, 21 Nov 2026
+
+The investing loop now has an HTTP surface in `apps/api`, so it is no longer script-only. Engine in `src/investing.ts`, auth in `src/owner.ts`, routes in `src/server.ts`. The UI is deliberately not started.
+
+Routes, all gated: `GET /mandate`, `POST /invest/sync|propose|approve|execute`, `GET /invest/proposals|ledger`.
+
+Decisions worth keeping:
+
+- Propose, approve and execute are three separate calls. Nothing approves on the owner's behalf, and `execute` on an unapproved proposal throws rather than proceeding.
+- `OWNER_TOKEN` has no default and no open mode: under 16 characters and the server refuses to start. Comparison is constant time. It is a shared secret, NOT the owner's signature on a trade, and `src/owner.ts` says so at the top so nobody mistakes it for the EIP-712 milestone being done.
+- Market data is fetched per call rather than cached, because a quote older than 25 s is refused by the gates and the trusted set can change.
+- `MarketData` is injected, so the 44 API tests exercise propose, approve, execute and the gates with no network.
+- Proposals are deliberately not persisted. An approval binds to a quote and expires in minutes, so a proposal must not outlive the process. `ids()` tracks them in a set rather than parsing them back out of ledger memos.
+
+Two bugs of mine that the work surfaced:
+
+1. The first test double for quotes was wrong, not the code: it invented `at` and `price` fields, while the real `Quote` carries `timestamp` in unix seconds and the price is derived by `priceOf` as `amountIn * 10^decimals / amountOut`. The gates correctly blocked with "quote is NaNs old" and a 65734999999999990000 bps NAV deviation. The double now builds quotes from the real relation, so the gates do real work in tests.
+2. Live `/invest/ledger` returned `reconcile: {ok: false, issues: ["negative balance on cash.operating"]}`, and it was right. A brief's model cost is spent before any revenue arrives, so with revenue of 0.02 against a cost of 0.021188 the operating cash went negative: the books were reporting money that was never there. The missing piece was the owner's working capital. `OPENING_FLOAT_USDC` (default 1.00) is now booked once against `equity.opening`, idempotent on the amount so a restart cannot fund the agent twice. Tested both ways: with the float reconciliation passes, without it the negative balance is reported rather than hidden.
+
+Verified live against the running server: unauthenticated and wrong-token calls both 401; `/invest/sync` mirrored the 2 real sales (20000 minor units); `/invest/propose` correctly refused with "nothing investable" because real revenue is still below the brief cost; `/mandate` served version 1 with its hash; `/invest/ledger` reconciles clean with the float in place. The full propose, approve and execute path over HTTP is covered by tests with a faithful market double rather than live, because real revenue cannot yet fund an allocation.
+
+The backend items from this list are all closed. What remains is the UI and the submission work in "Next milestones".
+
+## On-demand research, 21 Nov 2026
+
+`POST /research` generates a brief for the buyer's own themes. Service in `apps/api/src/research.ts`, priced separately from the cached `GET /brief`.
+
+The economics, which drove the design: generating costs real money per request, and the old `$0.01` price was below the `$0.021` cost of a brief. So `RESEARCH_PRICE_USD` defaults to `$2.00`, `RESEARCH_MAX_USD` caps what one brief may cost, and `loadConfig` refuses to start when the cap exceeds the price. That check is the only place the mistake can be caught before a buyer has already paid for a brief sold at a loss. Verified live: the 402 challenge quotes amount `2000000`.
+
+The cache is what makes this viable at all. Requests are keyed by a hash of the normalized theme spec (ids sorted, text lowercased, keywords sorted), so two buyers asking the same question inside `BRIEF_MAX_AGE_SECONDS` share one generation and the second costs nothing. The response says which happened.
+
+Payment timing, verified from the SDK types rather than assumed: the `exact` scheme's flow is `authorization`, with phase flags `verifyBeforeHandler` and `settleAfterHandler`, and `handler_threw` is a listed verified-payment cancellation reason. So payment is verified before the handler and settled after it returns, and a handler that throws cancels the payment. The handler therefore lets generation failures propagate instead of swallowing them: the buyer is not charged for a brief they never received. Invalid themes are refused with 400 before any model call.
+
+Buyer themes are untrusted input, because they land in the prompt next to the filings. `normalizeThemes` rejects angle brackets (so a description cannot forge a `</source>` tag and escape the untrusted block), newlines and control characters, and oversized or numerous themes. That is hardening, not the defence: the defence is verification, which a buyer cannot talk their way past because a quote has to exist verbatim in a real filing.
+
+`budgeted` moved out of `demo-research.ts` into core as `budgetedLlm`, so the script and the API share one spend guard.
+
+### A real bug this found, worth remembering
+
+An intermittent test failure turned out to be a production bug, not a flake. The failing assertion reported `calls: 2, files: 1`: both briefs generated, but only one file on disk. `briefId` was `brief-<ISO timestamp>`, which has millisecond resolution, so two requests landing in the same millisecond produced the same id and the second `writeFileSync` overwrote the first. Two consequences, the second worse than the first: a buyer's brief and its audit trail are destroyed, and because the investing book keys model costs as `llm-<briefId>`, the two briefs share a cost key and `accrueCost` silently drops the second brief's cost as a duplicate. Ids now carry a random suffix alongside the timestamp. Pinned by asserting two distinct files and two distinct brief ids.
+
+Two of my own test mistakes along the way, both worth avoiding: running `npx vitest run test/research.test.ts` from the repo root matches that path in *both* workspaces and runs `packages/core`'s file too, which made the results incoherent; and module-level mutable state in a test file (a call counter, a temp directory) is visible to any test running alongside it. Both the counter and the directory are now per-test.
+
+Known limit: the investing book books the model cost of `readBrief()`, which is the newest brief. With many generated briefs, costs for the others are not booked, so total costs understate real spending. Fixing it properly means per-brief surplus accounting rather than a single settled brief; it is not wired yet.
+
+## Mandate versioning, 21 Nov 2026
+
+The mandate is now really the owner's and really versioned: persisted in `packages/core/src/mandatestore.ts`, changed through `POST /mandate`, with the hash chain verified on every load.
+
+- `MandateStore.adopt` takes stored versions only after re-validating the terms and recomputing the chain. `restoreMandateStore` and `JsonlMandateStore.loadStore` build on it.
+- `openMandate` creates version 1 from the code's terms **only when nothing is stored**. After that the stored mandate is authoritative and the code's terms are never applied again, so a deployment cannot quietly reset the owner's constraints to the defaults. That is the rule "the agent never changes user constraints" applied to deployment, and it has a test.
+- `POST /mandate` takes a partial update: unsent fields carry over. An unknown field name is refused rather than ignored, because a silently ignored typo is a limit the owner thinks they changed. Amounts are decimal strings, never floats. The response lists what changed and notes that outstanding approvals are bound to the previous version.
+- `buildServer` cannot change the mandate by itself: `index.ts` passes an `updateMandate` function, and without it the route returns 409. The agent has no path to loosening its own constraints.
+- One `MandateStore` is now shared by the server and the investing engine. Before this each built its own, so both sat at version 1 and would have diverged the moment the owner changed a term. Harmless then because the terms were identical, wrong as soon as updates existed.
+- The mandate routes were moved out of the investing-engine block: the mandate is the owner's constraint set, not an investing feature, so it is served whether or not an engine is wired in.
+
+Verified live: v1 created from the initial terms; `POST /mandate` with `{maxSlippageBps: 50, reserveTargetUsdc: "0.50"}` produced v2 chained to v1 and reported `reserveTargetUsdc: 2000000 -> 500000, maxSlippageBps: 100 -> 50`; a misspelled `maxSlipageBps` was refused with 400; `/mandate/history` reported `chainVerified true` across both versions; a restart loaded v2 and kept the owner's terms rather than the code's.
+
+Tamper check, run against the real file: raising `maxTradeUsdc` from 1.00 to 500.00 on disk while leaving the hash alone makes the server refuse to start with "mandate version 1 hash does not match its terms; the stored mandate was altered". The file was restored afterwards.
+
+Also fixed on the way: `packages/core/src/mandate.ts` imported `check` from `fast-check`, which is unused and a devDependency, so production domain code depended on a dev-only package. esbuild elides it today, so it was latent rather than breaking, but it would fail a production install or any tool that resolves imports without eliding. Removed.
+
+Lesson for whoever drives this next: `pkill -f` repeatedly killed my own shell mid-command (exit 144), which silently skipped the steps after it, including a tamper test I thought had run and passed. Kill a dev server by port or recorded PID, not by a pattern that can match the command doing the killing.
+
+## EIP-712 owner signature on approvals, 21 Nov 2026
+
+Approving a trade over HTTP now requires the owner's EIP-712 signature. The bearer token only decides who may reach the route; it no longer authorizes anything.
+
+- `packages/core/src/eip712.ts` builds the typed data and is deliberately free of crypto dependencies, so the agent, a wallet and a reviewer can all derive the same bytes. Signing and recovery live in the app layer.
+- `apps/api/src/signature.ts` verifies with viem's `verifyTypedData`. viem moved from devDependencies to dependencies; `npm audit --omit=dev` is still clean.
+- `OWNER_ADDRESS` is required and the server refuses to start without it. There is no unsigned approval path and no half-secured mode.
+
+The flow avoids a clock-skew trap. `/invest/propose` returns `toSign`: the exact payload including an expiry the server chose, which it remembers. Recomputing the payload at approval time would drift by the round trip and no signature would ever match. `/invest/approve {id, signature}` verifies against that stored payload.
+
+What the signature binds: `proposalHash` (cannot be moved to other legs), `mandateVersion` and `mandateHash` (cannot survive a mandate change), `maxUsdcIn` (cannot authorize more spend), `expiresAt` (cannot be replayed later), and `chainId` in the domain (a testnet signature is not valid on mainnet). The owner address comes from config, never the request: a caller supplying the address it signed with would be authorizing itself. `maxUsdcIn` and both hashes are always computed by the agent, never taken from the caller, and a supplied `expiresAt` is clamped to the mandate's `approvalExpirySeconds` so a signature cannot widen the owner's own window.
+
+`apps/api/src/sign-approval.ts` (`npm run approve -w @surplus/api -- <proposalId>`) signs from the command line as a stand-in for a wallet UI. The key is read from `.env` as `OWNER_PRIVATE_KEY` and never printed. A throwaway owner wallet was generated for the demo and its address is in `.env`.
+
+Where it is enforced, stated plainly: `Treasury.approve` in core still accepts an unsigned approval, because `demo-sim.ts` and `demo-live.ts` use it. The requirement lives in `InvestingEngine.approve`, which refuses without a verifier and a valid signature. Do not assume core enforces it.
+
+Verified live against the running server: the server reports the owner address and chain on boot; the token alone is refused with 400 "signature is required"; a junk signature for an unoffered proposal is refused; and `npm run approve` loads the owner wallet and reports the real blocker. The signed happy path and every rejection are covered by tests that sign with a real viem account rather than a stub: an impostor's signature, a signature made for chain 8453 instead of 84532, a signature over a tampered `maxUsdcIn`, an unsigned approval, and a server with no verifier are each refused, and the accepted path returns the recovered signer.
+
+A live signed propose, approve and execute still waits on real revenue above the brief cost, which is the pricing decision in the integration section, not a code gap.
+
+Also fixed: `packages/core/src/mandate.ts` imported `check` from `fast-check`, unused and a devDependency, so production domain code depended on a dev-only package.
+
+## Per-brief cost and revenue attribution, closed 21 Nov 2026
+
+`syncRevenue` used to book only `readBrief()`'s cost, which is the newest brief, and mirror all revenue as one lump attributed to that same brief. Both are now per brief.
+
+- Every saved brief's model cost is booked exactly once, keyed `llm-<briefId>`. A brief costs real money whether or not anyone buys it, so leaving the others out understated spending.
+- Each sale is mirrored on its own, keyed `mirror:<txHash>`, tagged with that transaction, and attributed to the brief the sale actually bought, which the sales ledger records in its `briefId` field.
+- Every brief that earned something is then settled in turn. Each sees the reserve as it stands, so the first fills the reserve gap and later ones go to surplus, which is the right order of priority. A test pins that ordering.
+- Already-mirrored sales are recognised from the transaction on each stored entry, so a restart picks up only new sales. Tested.
+
+How much it mattered, measured on the real data: the old code booked 0.021188 USDC of model cost. The new code books 0.105683 across the five saved briefs, so spending had been understated roughly fivefold. Against 0.020000 of revenue, the agent is clearly underwater, which is the truth the books should show.
+
+Legacy data needed a decision rather than a guess. The old lumped entry carried no transaction, so which sales it covered cannot be recovered, and mapping it onto per-sale ids would either double count or lose revenue. The engine now refuses to start on such a book, with a message naming the file and saying it is simulated and regenerable from the sales ledger and the saved briefs. The stale `data/ledger-invest-sim.jsonl` was backed up to the scratchpad, deleted and regenerated; the real sales book was not touched.
+
+Sales written before attribution existed carry no brief id. Their revenue is kept under the brief id `unattributed` and `/invest/sync` reports the count, so the gap is visible instead of being silently assigned to the newest brief. The two real sales are in that state: `unattributedSales: 2`.
+
+Live after the change: `briefsCosted: 5`, `revenueUsdcMinor: 20000`, `costsUsdcMinor: 105683`, `investableUsdcMinor: 0`, and `/invest/ledger` reconciles clean with cash 0.894317, reserve 0.020000, expense.llm 0.105683 against the 1.000000 float.
+
+### One design question this surfaced, for Siddhant
+
+Per-brief settlement means a brief that sold well can produce investable surplus while other briefs lost money, because each brief is settled against its own revenue and costs. The whole-book position is still visible (`cash.operating` covers everything and reconciliation refuses to let it go negative), and the reserve target absorbs some of it, but there is no rule today that says "do not invest while total costs exceed total revenue". Right now that is moot because investable is zero, and it is a mandate question rather than a bug, so nothing was changed. Worth deciding before mainnet.
 
 ## Next milestones, in order
 
