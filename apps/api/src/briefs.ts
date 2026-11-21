@@ -35,7 +35,18 @@ export interface BriefBackend {
     problems(): Promise<{ file: string; error: string }[]>;
     /** Stores a brief. Idempotent on the brief id. */
     save(saved: SavedBrief, document: BriefDocument): Promise<void>;
+    /**
+     * What every brief in this collection cost to produce, in USDC minor units.
+     *
+     * The durable answer to "how much has the agent spent generating briefs". Kept on the port rather
+     * than summed by the caller because a database can answer it without reading every document back.
+     */
+    totalCostUsdcMinor(): Promise<bigint>;
 }
+
+/** Sums what a list of briefs cost. The obvious implementation, shared by the backends that have to. */
+export const sumCost = (briefs: readonly SavedBrief[]): bigint =>
+    briefs.reduce((total, b) => total + b.costUsdcMinor, 0n);
 
 /** Briefs as JSON files in a directory. */
 export class DirBriefBackend implements BriefBackend {
@@ -52,6 +63,10 @@ export class DirBriefBackend implements BriefBackend {
     async save(saved: SavedBrief, document: BriefDocument): Promise<void> {
         mkdirSync(this.dir, { recursive: true });
         writeFileSync(join(this.dir, saved.file), JSON.stringify(document, null, 2));
+    }
+
+    async totalCostUsdcMinor(): Promise<bigint> {
+        return sumCost(await this.list());
     }
 }
 
@@ -74,6 +89,10 @@ export class MemoryBriefBackend implements BriefBackend {
     async save(saved: SavedBrief, _document: BriefDocument): Promise<void> {
         if (this.briefs.has(saved.brief.id)) return;
         this.briefs.set(saved.brief.id, saved);
+    }
+
+    async totalCostUsdcMinor(): Promise<bigint> {
+        return sumCost(await this.list());
     }
 }
 

@@ -435,6 +435,24 @@ export interface ResearchResult {
     issues: ValidationIssue[];
     rejected: string[];
     usage: Usage;
+    /**
+     * How long each stage took, per theme, in milliseconds.
+     *
+     * Latency is a product constraint, not a curiosity: the brief is generated inside the request the
+     * buyer paid for, and a host that cuts the request off at a fixed ceiling leaves them charged with
+     * nothing delivered. Measuring where the time goes is what makes that manageable rather than
+     * discovered in production.
+     */
+    timings: StageTiming[];
+}
+
+/** Milliseconds spent on each stage of one theme. */
+export interface StageTiming {
+    themeId: string;
+    /** Fetching filings from the source provider. */
+    docsMs: number;
+    /** The model call, including building the prompt. */
+    modelMs: number;
 }
 
 function keywordsFor(theme: ThemeSpec, companies: readonly CandidateCompany[]): string[] {
@@ -452,6 +470,8 @@ export async function researchBrief(
     const themes: ThemeBrief[] = [];
     const rejected: string[] = [];
     const usage: Usage = { inputTokens: 0, outputTokens: 0, calls: 0 };
+    const timings: StageTiming[] = [];
+    const clock = (): number => Date.now();
 
     const gap = (theme: ThemeSpec, reason: string): ThemeBrief => ({
         themeId: theme.id,
@@ -462,14 +482,20 @@ export async function researchBrief(
     });
 
     for (const theme of input.themes) {
+        const timing: StageTiming = { themeId: theme.id, docsMs: 0, modelMs: 0 };
+        timings.push(timing);
+
         let docs: SourceDoc[];
+        const docsStarted = clock();
         try {
             docs = await deps.docs.fetchDocs(theme, input.companies);
         } catch (e) {
+            timing.docsMs = clock() - docsStarted;
             themes.push(gap(theme, "Source retrieval failed for this theme."));
             rejected.push(`${theme.id}: doc fetch error: ${(e as Error).message}`);
             continue;
         }
+        timing.docsMs = clock() - docsStarted;
         if (docs.length === 0) {
             themes.push(gap(theme, "No usable sources were retrieved for this theme."));
             continue;
@@ -480,8 +506,10 @@ export async function researchBrief(
             input.companies,
             docs.map((d) => ({ id: d.id, title: d.title, publisher: d.publisher, passages: selectPassages(d.text, kws, maxChars) })),
         );
+        const modelStarted = clock();
         try {
             const res = await deps.llm.complete(SYSTEM_PROMPT, prompt);
+            timing.modelMs = clock() - modelStarted;
             usage.calls += 1;
             usage.inputTokens += res.inputTokens;
             usage.outputTokens += res.outputTokens;
@@ -491,6 +519,7 @@ export async function researchBrief(
             for (const s of a.usedSources) if (!sources.has(s.id)) sources.set(s.id, s);
             themes.push(a.theme);
         } catch (e) {
+            timing.modelMs = clock() - modelStarted;
             themes.push(gap(theme, "The research step failed for this theme."));
             rejected.push(`${theme.id}: model step error: ${(e as Error).message}`);
         }
@@ -504,7 +533,7 @@ export async function researchBrief(
         disclaimer: input.disclaimer,
     };
     const issues = validateBrief(brief, { eligible: new Set(input.companies.map((c) => c.asset.toLowerCase())) });
-    return { brief, issues, rejected, usage };
+    return { brief, issues, rejected, usage, timings };
 }
 
 // ---------- Cost ----------

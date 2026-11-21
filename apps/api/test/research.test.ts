@@ -276,9 +276,70 @@ describe("M4 regression: concurrency and a total budget", () => {
             maxAgeSeconds: 0, // never reuse, so every call tries to generate
         });
         await svc.obtain([theme]);               // consumes budget
-        expect(svc.budget().spentUsd).toBeGreaterThan(0);
+        expect((await svc.budget()).spentUsd).toBeGreaterThan(0);
         await expect(svc.obtain([{ ...theme, id: "second", name: "Second", description: "another" }]))
             .rejects.toThrow(/research budget exhausted/);
+    });
+
+    it("counts what earlier instances spent, not just its own", async () => {
+        // The defect this covers: the running total lived in a field, so on a host that replaces the
+        // process between two requests every new instance started from zero and the lifetime ceiling
+        // was really a per-instance one, with nothing bounding the number of instances.
+        const dir = freshDir();
+        const deps = () => ({
+            briefs: new DirBriefBackend(dir),
+            companies: async () => companies,
+            docs,
+            llm: countingLlm().llm,
+            provider: "test", model: "test-model",
+            priceInputPerMTokUsd: 0.25, priceOutputPerMTokUsd: 1.5,
+            maxSpendUsd: 1, totalMaxSpendUsd: 1,
+            maxAgeSeconds: 0,
+        });
+
+        const first = new ResearchService(deps());
+        await first.obtain([theme]);
+        const spent = (await first.budget()).spentUsd;
+        expect(spent).toBeGreaterThan(0);
+
+        // a brand new instance over the same storage, as a cold start would be
+        const second = new ResearchService(deps());
+        expect((await second.budget()).spentUsd).toBe(spent);
+        await expect(second.obtain([{ ...theme, id: "second", name: "Second", description: "another" }]))
+            .rejects.toThrow(/research budget exhausted/);
+    });
+
+    it("holds a reservation while a generation is in flight, so parallel requests cannot both fit", async () => {
+        // the spend is only durable once the brief is stored; until then the money is committed and has
+        // to count, or two requests arriving together each see the same room and both spend it
+        // the model is held open, so the two requests really are in flight at the same time; with an
+        // instant model the first finishes before the second looks and nothing is proven
+        const model = countingLlm();
+        let release = (): void => {};
+        const held = new Promise<void>((r) => { release = r; });
+        const slow = model.llm();
+        const svc = new ResearchService({
+            briefs: new DirBriefBackend(freshDir()),
+            companies: async () => companies,
+            docs,
+            llm: () => ({ complete: async (system: string, user: string) => { await held; return slow.complete(system, user); } }),
+            provider: "test", model: "test-model",
+            priceInputPerMTokUsd: 0.25, priceOutputPerMTokUsd: 1.5,
+            maxSpendUsd: 1, totalMaxSpendUsd: 1.5, // room for one brief's reservation, not two
+            maxAgeSeconds: 0,
+        });
+
+        setTimeout(release, 20);
+        const results = await Promise.allSettled([
+            svc.obtain([theme]),
+            svc.obtain([{ ...theme, id: "parallel", name: "Parallel", description: "at the same time" }]),
+        ]);
+        const refused = results.filter((r) => r.status === "rejected");
+        expect(refused.length).toBe(1);
+        expect(String((refused[0] as PromiseRejectedResult).reason)).toMatch(/research budget exhausted/);
+
+        // and the refusal did not leave the budget consumed by a reservation that was never released
+        expect((await svc.budget()).spentUsd).toBeLessThan(1);
     });
 
     it("refuses a configuration whose total is below one brief's cap", () => {

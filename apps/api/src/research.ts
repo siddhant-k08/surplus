@@ -143,7 +143,7 @@ export interface ResearchDeps {
     /** A cached brief for the same themes younger than this is served instead of generating again. */
     maxAgeSeconds: number;
     /**
-     * Ceiling on what this process may spend generating briefs in total.
+     * Ceiling on what the agent may spend generating briefs, over the life of the deployment.
      *
      * `maxSpendUsd` caps one brief; without a total, N concurrent requests could spend N times that.
      */
@@ -157,6 +157,8 @@ export interface ResearchOutcome {
     costUsdcMinor: bigint;
     issues: number;
     rejected: string[];
+    /** How long generating it took. Absent when the brief was served from the cache. */
+    timings?: { totalMs: number; docsMs: number; modelMs: number };
 }
 
 /**
@@ -171,7 +173,14 @@ export class ResearchService {
     private readonly now: () => Date;
     /** Generations in flight, keyed by theme request, so identical requests share one. */
     private readonly inFlight = new Map<string, Promise<ResearchOutcome>>();
-    private spentUsd = 0;
+    /**
+     * What this instance has committed to spend on generations that have not been stored yet.
+     *
+     * Spending is counted from the stored briefs, which is the durable record, but a generation in
+     * flight has cost money and is not stored yet. Without this, two requests arriving together would
+     * each see the same spent total and each believe there was room.
+     */
+    private reservedUsdcMinor = 0n;
 
     constructor(private readonly deps: ResearchDeps) {
         this.now = deps.now ?? (() => new Date());
@@ -182,9 +191,25 @@ export class ResearchService {
         }
     }
 
-    /** What this process has spent generating briefs, and what it may still spend. */
-    budget(): { spentUsd: number; remainingUsd: number } {
-        return { spentUsd: this.spentUsd, remainingUsd: Math.max(0, this.deps.totalMaxSpendUsd - this.spentUsd) };
+    /**
+     * What the agent has spent generating briefs, and what it may still spend.
+     *
+     * Counted from the briefs that were actually stored, plus what this instance has in flight. It used
+     * to be a running total in a field, which is wrong wherever the process can be replaced between two
+     * requests: every new instance started from zero, so a lifetime ceiling was really a per-instance
+     * one with no bound on the number of instances. The briefs are the durable record of the spending,
+     * and every instance reads the same ones.
+     */
+    async budget(): Promise<{ spentUsd: number; remainingUsd: number; spentUsdcMinor: bigint }> {
+        const stored = await this.deps.briefs.totalCostUsdcMinor();
+        const spentUsdcMinor = stored + this.reservedUsdcMinor;
+        // display only; the comparison below is done in exact minor units
+        const spentUsd = Number(spentUsdcMinor) / 1e6;
+        return {
+            spentUsd,
+            spentUsdcMinor,
+            remainingUsd: Math.max(0, this.deps.totalMaxSpendUsd - spentUsd),
+        };
     }
 
     /** A brief for these themes that is young enough to serve, if one exists. */
@@ -223,14 +248,33 @@ export class ResearchService {
     }
 
     private async generate(themes: readonly ThemeSpec[]): Promise<ResearchOutcome> {
-        const { remainingUsd } = this.budget();
-        if (remainingUsd < this.deps.maxSpendUsd) {
+        const stored = await this.deps.briefs.totalCostUsdcMinor();
+
+        // From here to the reservation there is deliberately no `await`. Reading the reservations and
+        // taking one has to be a single step: with a hop in between, two requests arriving together
+        // both read the same total, both decide there is room, and both spend it. Calling `budget()`
+        // here would reintroduce exactly that hop, which is why the stored total is read directly.
+        const reservation = usdToUsdcMinor(this.deps.maxSpendUsd);
+        const spentUsdcMinor = stored + this.reservedUsdcMinor;
+        const spentUsd = Number(spentUsdcMinor) / 1e6;
+        if (this.deps.totalMaxSpendUsd - spentUsd < this.deps.maxSpendUsd) {
             throw new Error(
-                `research budget exhausted: $${this.spentUsd.toFixed(4)} of $${this.deps.totalMaxSpendUsd} spent, ` +
+                `research budget exhausted: $${spentUsd.toFixed(4)} of $${this.deps.totalMaxSpendUsd} spent, ` +
                 `which leaves less than the $${this.deps.maxSpendUsd} a brief may cost`,
             );
         }
+        this.reservedUsdcMinor += reservation;
 
+        // Released whatever happens: a generation that threw must not hold the budget for ever. Once the
+        // brief is stored, its real cost takes the reservation's place in the total.
+        try {
+            return await this.generateReserved(themes);
+        } finally {
+            this.reservedUsdcMinor -= reservation;
+        }
+    }
+
+    private async generateReserved(themes: readonly ThemeSpec[]): Promise<ResearchOutcome> {
         const companies = await this.deps.companies();
         const llm = budgetedLlm(
             this.deps.llm(),
@@ -239,6 +283,7 @@ export class ResearchService {
             this.deps.priceOutputPerMTokUsd,
         );
 
+        const startedAt = Date.now();
         const now = this.now();
         // A millisecond timestamp alone collides when two requests land in the same millisecond. That would
         // overwrite the earlier brief's file, destroying a buyer's brief and its audit trail, and would make
@@ -254,7 +299,6 @@ export class ResearchService {
             inputPerMTokUsd: this.deps.priceInputPerMTokUsd,
             outputPerMTokUsd: this.deps.priceOutputPerMTokUsd,
         });
-        this.spentUsd += costUsd;
         const costUsdcMinor = usdToUsdcMinor(costUsd);
 
         const saved: SavedBrief = {
@@ -281,6 +325,21 @@ export class ResearchService {
             costUsdcMinor: costUsdcMinor.toString(),
         });
 
-        return { saved, cached: false, costUsdcMinor, issues: result.issues.length, rejected: result.rejected };
+        // Logged on every generation, because this is the number that decides whether a buyer gets what
+        // they paid for: the brief is produced inside their request, and a host that cuts the request off
+        // at a fixed ceiling leaves them charged with nothing delivered.
+        const docsMs = result.timings.reduce((t, x) => t + x.docsMs, 0);
+        const modelMs = result.timings.reduce((t, x) => t + x.modelMs, 0);
+        const totalMs = Date.now() - startedAt;
+        console.log(
+            `generated ${briefId} in ${totalMs} ms (filings ${docsMs} ms, model ${modelMs} ms, ` +
+            `other ${totalMs - docsMs - modelMs} ms) across ${result.timings.length} theme(s), ` +
+            `cost $${costUsd.toFixed(4)}`,
+        );
+
+        return {
+            saved, cached: false, costUsdcMinor, issues: result.issues.length, rejected: result.rejected,
+            timings: { totalMs, docsMs, modelMs },
+        };
     }
 }

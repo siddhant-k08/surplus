@@ -271,6 +271,29 @@ describeDb("receipts in Postgres", () => {
         expect(await store.count()).toBe(2); // the one above plus this one, not three
     });
 
+    it("finds a payer's own receipts, whatever case the address was recorded in", async () => {
+        // the durability story: the receipt id travels once, in the paid response, so a buyer whose
+        // response was lost gets back in by proving the wallet that paid
+        const only = await scratchSchema();
+        try {
+            const store = new PgReceiptStore(only.sql);
+            const payer = "0x" + "AB".repeat(20);
+            const mine = receipt({ payer, transaction: "0x" + "a1".repeat(32), at: "2026-11-21T00:00:00.000Z" });
+            const older = receipt({ payer: payer.toLowerCase(), transaction: "0x" + "a2".repeat(32), at: "2026-11-20T00:00:00.000Z" });
+            const theirs = receipt({ payer: "0x" + "cd".repeat(20), transaction: "0x" + "a3".repeat(32) });
+            const anonymous = receipt({ transaction: "0x" + "a4".repeat(32) });
+            delete (anonymous as { payer?: string }).payer;
+            for (const r of [mine, older, theirs, anonymous]) await store.issue(r);
+
+            const found = await store.forPayer(payer);
+            expect(found.map((r) => r.id)).toEqual([mine.id, older.id]); // newest first
+            expect(found[0]!.payer?.toLowerCase()).toBe(payer.toLowerCase());
+            expect(await store.forPayer("0x" + "ff".repeat(20))).toEqual([]);
+        } finally {
+            await only.drop();
+        }
+    }, 60_000);
+
     it("matches a settlement transaction whatever its case", async () => {
         const store = new PgReceiptStore(scratch.sql);
         const tx = "0x" + "ef".repeat(32);
@@ -347,6 +370,33 @@ describeDb("briefs in Postgres", () => {
         expect(found.length).toBe(1);
         expect(found[0]!.costUsdcMinor).toBe(21_200n);
     });
+
+    it("sums what a collection cost, which is how the spend cap survives a cold start", async () => {
+        // The research budget is counted from the stored briefs rather than from a field on the running
+        // process, so every instance sees the same total. Summed in the database because it is read on
+        // the path of every paid request.
+        // its own schema: this asserts an absolute total, which anything else writing briefs would move
+        const only = await scratchSchema();
+        try {
+            const custom = new PgBriefBackend(only.sql, "custom");
+            const catalogue = new PgBriefBackend(only.sql, "catalogue");
+            expect(await custom.totalCostUsdcMinor()).toBe(0n);
+
+            const a = savedBrief("brief-cost-a", "2026-11-21T00:00:00.000Z");
+            const b = savedBrief("brief-cost-b", "2026-11-21T00:00:01.000Z");
+            await custom.save(a.saved, a.doc);
+            await custom.save(b.saved, b.doc);
+            expect(await custom.totalCostUsdcMinor()).toBe(21_200n * 2n);
+
+            // the owner's catalogue was not generated out of this budget and must not count against it
+            const owned = savedBrief("brief-cost-catalogue", "2026-11-21T00:00:02.000Z");
+            await catalogue.save(owned.saved, owned.doc);
+            expect(await custom.totalCostUsdcMinor()).toBe(21_200n * 2n);
+            expect(await catalogue.totalCostUsdcMinor()).toBe(21_200n);
+        } finally {
+            await only.drop();
+        }
+    }, 60_000);
 
     it("reports a brief it cannot read instead of throwing, because that is a missing model cost", async () => {
         const custom = new PgBriefBackend(scratch.sql, "custom");

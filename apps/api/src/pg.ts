@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { getDefaultAutoSelectFamilyAttemptTimeout, setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import {
     serializeTx,
     parseTxLine,
@@ -37,8 +38,23 @@ import {
 
 export type Sql = postgres.Sql;
 
+/**
+ * Gives each address a fair chance to answer before Node moves on to the next one.
+ *
+ * Node tries the resolved addresses in parallel and allows each 250 ms, which is fine next to the
+ * database and wrong from far away: a round trip to another continent takes longer than that, so every
+ * attempt "times out" and the whole connection fails with `ETIMEDOUT` even though a plain socket would
+ * have connected. It shows up as a database that is unreachable from a developer's machine while the
+ * deployment, which sits beside it, is fine. Widened rather than set, so a deliberately larger value
+ * configured elsewhere in the process is left alone.
+ */
+export function widenConnectWindow(ms = 1500): void {
+    if (getDefaultAutoSelectFamilyAttemptTimeout() < ms) setDefaultAutoSelectFamilyAttemptTimeout(ms);
+}
+
 /** Opens a connection pool. `max` is small on purpose: this is one process, not a web farm. */
 export function openSql(url: string, opts: { max?: number } = {}): Sql {
+    widenConnectWindow();
     return postgres(url, {
         max: opts.max ?? 5,
         // a stored money row must never be guessed at, so types are read back as text and parsed here
@@ -85,19 +101,27 @@ export async function migrate(sql: Sql): Promise<void> {
             source             text not null,
             transaction        text not null,
             amount_usdc_minor  text not null,
-            at                 timestamptz not null
+            at                 timestamptz not null,
+            payer              text
         )
     `;
     await sql`create index if not exists receipts_transaction_idx on receipts (lower(transaction))`;
+    // added after the table existed, so an already-deployed database gets it too
+    await sql`alter table receipts add column if not exists payer text`;
+    await sql`create index if not exists receipts_payer_idx on receipts (lower(payer))`;
     await sql`
         create table if not exists briefs (
-            id           text primary key,
-            collection   text not null,
-            file         text not null,
-            created_at   timestamptz not null,
-            document     jsonb not null
+            id                text primary key,
+            collection        text not null,
+            file              text not null,
+            created_at        timestamptz not null,
+            cost_usdc_minor   text not null default '0',
+            document          jsonb not null
         )
     `;
+    // Added after the table existed, so an already-deployed database gets it too. Its own column rather
+    // than a field read out of the document, because it is summed on the path of every paid request.
+    await sql`alter table briefs add column if not exists cost_usdc_minor text not null default '0'`;
     await sql`create index if not exists briefs_collection_idx on briefs (collection, created_at desc)`;
     await sql`
         create table if not exists sessions (
@@ -233,6 +257,7 @@ export class PgReceiptStore implements ReceiptStore {
                 transaction: receipt.transaction,
                 amount_usdc_minor: receipt.amountUsdcMinor,
                 at: new Date(receipt.at),
+                payer: receipt.payer ?? null,
             }])}
             on conflict (id) do nothing
         `;
@@ -250,6 +275,13 @@ export class PgReceiptStore implements ReceiptStore {
         return rows[0] === undefined ? null : fromRow(rows[0]);
     }
 
+    async forPayer(address: string): Promise<Receipt[]> {
+        const rows = await this.sql<Row[]>`
+            select * from receipts where lower(payer) = ${address.toLowerCase()} order by at desc
+        `;
+        return rows.map(fromRow);
+    }
+
     async count(): Promise<number> {
         const [row] = await this.sql<{ n: string }[]>`select count(*)::text as n from receipts`;
         return Number(row?.n ?? 0);
@@ -263,6 +295,7 @@ interface Row {
     transaction: string;
     amount_usdc_minor: string;
     at: Date;
+    payer: string | null;
 }
 
 /** Reads a receipt row through the same validator the file lines go through. */
@@ -275,6 +308,7 @@ const fromRow = (r: Row): Receipt =>
             transaction: r.transaction,
             amountUsdcMinor: r.amount_usdc_minor,
             at: r.at.toISOString(),
+            ...(r.payer !== null && { payer: r.payer }),
         }),
         `receipt ${r.id}`,
     );
@@ -329,10 +363,25 @@ export class PgBriefBackend implements BriefBackend {
                 collection: this.collection,
                 file: saved.file,
                 created_at: new Date(saved.brief.createdAt),
+                cost_usdc_minor: saved.costUsdcMinor.toString(),
                 document: this.sql.json(document as postgres.JSONValue),
             }])}
             on conflict (id) do nothing
         `;
+    }
+
+    /**
+     * What this collection has cost, summed in the database.
+     *
+     * `numeric` rather than a float, and returned as a decimal string of minor units, so the total goes
+     * through the same exact-integer path every other amount does.
+     */
+    async totalCostUsdcMinor(): Promise<bigint> {
+        const [row] = await this.sql<{ total: string }[]>`
+            select coalesce(sum(cost_usdc_minor::numeric), 0)::text as total
+            from briefs where collection = ${this.collection}
+        `;
+        return BigInt(row?.total ?? "0");
     }
 }
 

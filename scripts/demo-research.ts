@@ -118,6 +118,13 @@ async function main(): Promise<void> {
         { docs, llm },
     );
 
+    const docsMs = r.timings.reduce((t, x) => t + x.docsMs, 0);
+    const modelMs = r.timings.reduce((t, x) => t + x.modelMs, 0);
+    console.log(`\nTiming, which decides whether this fits inside a paid request:`);
+    for (const t of r.timings) {
+        console.log(`  ${t.themeId.padEnd(20)} filings ${String(t.docsMs).padStart(6)} ms, model ${String(t.modelMs).padStart(6)} ms`);
+    }
+    console.log(`  ${"total".padEnd(20)} filings ${String(docsMs).padStart(6)} ms, model ${String(modelMs).padStart(6)} ms`);
     console.log(`\nSEC requests made: ${edgar.requests}`);
     if (docs.warnings.length > 0) {
         console.log("SEC warnings:");
