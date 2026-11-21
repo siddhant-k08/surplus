@@ -20,6 +20,7 @@ Full history, decisions, verified facts and open questions: read `docs/HANDOFF.m
 
 - `packages/core` (`@surplus/core`): all domain logic, TypeScript strict, ESM, tests in `packages/core/test` (vitest 2.x, pinned; do not upgrade to a newer major). `src/index.ts` re-exports every module.
 - `scripts/`: runnable demos and read-only spikes (`spike-*.mjs`, `survey-*.mjs`, `demo-sim.ts`, `demo-live.ts`, `demo-research.ts`), typechecked by `scripts/tsconfig.json`.
+- `apps/web` (`@surplus/web`): Vite, React and TS. Never import `@surplus/core` as a value here; it reaches for `node:fs` and `node:crypto` and will break the browser build. Use `import type` and keep small helpers local. Built with `npm run build:web`; the API serves `apps/web/dist`.
 - `apps/api` (`@surplus/api`): never resolve paths against the cwd here; npm runs workspace scripts from `apps/api`, so use `src/paths.ts` (`REPO_ROOT`, `loadRootEnv`, `fromRepoRoot`). The x402 paid research endpoint, Express 5 plus `@x402/*` 2.x, tests with vitest and supertest. See `apps/api/README.md`. The web UI is still not built.
 - `docs/briefs/`: research briefs saved by `demo-research.ts`.
 
@@ -33,6 +34,8 @@ npm run typecheck           # core, then API
 npm run typecheck:scripts   # scripts
 X402_PAY_TO=0x... npm run api   # the x402 endpoint on Base Sepolia
 npm run buy -w @surplus/api     # buy one brief from it (needs X402_BUYER_PRIVATE_KEY, testnet only)
+npm run web                     # the owner desk on :5173, proxying the API
+npm run build:web               # build it; the API then serves apps/web/dist
 npx tsx scripts/demo-sim.ts             # fully simulated loop
 npx tsx scripts/demo-live.ts            # newest brief + REAL revenue from the endpoint ledger; simulated fills
 npx tsx scripts/demo-live.ts --simulate-revenue   # same, on a labelled simulated sale
@@ -41,7 +44,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 26 files, 244 tests. API 6 files, 100 tests.
+Last known test count: core 27 files, 255 tests. API 10 files, 138 tests.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -70,11 +73,13 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - Tradable set = Base's official registry (`src/registry.ts`, read from base.org/stocks on 19 Nov 2026) intersected with the Coinbase Tokenized Stocks API. Tokens only in the API are excluded.
 - Pre-trade gates: trusted, no paused flags (any flag blocks), liquidity score at least 2, quote younger than 25 s, NAV deviation over 300 bps blocks only when NAV is fresh.
 - Quotes come from the KyberSwap aggregator with the router address pinned. NAV is a reference value, never an execution price.
+- Real swaps live in `apps/api/src/executor.ts` and refuse to exist without `MAINNET_ENABLED`, a positive spend cap and a key. A fill is booked only from a confirmed receipt with status success; `parseBuiltSwap` refuses calldata that would spend more than was quoted. Deployment notes are in `docs/DEPLOY.md`.
 - Mainnet stays off (`MAINNET_ENABLED=false`) until Siddhant explicitly authorizes it, with a spend cap and a throwaway wallet. The API refuses to start on Base mainnet without that flag, and `INVEST_MODE=mainnet` needs it too.
 - Owner routes (`/invest/*`, `/mandate`) are gated by `OWNER_TOKEN`, with no default and no open mode. That token is a shared secret, not the owner's signature on a trade; EIP-712 replaces it.
 - Two books: the sales book is real money tagged `testnet`; the investing book is tagged `sim` while fills are simulated. Simulated activity never enters the real book.
 - The free x402.org facilitator serves Base Sepolia (`eip155:84532`) only; it advertises no other EVM network. Mainnet needs a different facilitator. It submits the buyer's signed EIP-3009 authorization and pays the gas, so a buyer needs USDC but no ETH (verified onchain 21 Nov 2026).
 - Sale revenue is booked only from a confirmed settlement, idempotent on the settlement transaction, and only when the settled asset is the expected USDC.
+- A receipt is keyed on a secret id issued at purchase, never on the settlement transaction: settlements are public on Base, so a transaction-keyed receipt would give briefs away to anyone watching the seller's address.
 
 ## Research pipeline rules
 

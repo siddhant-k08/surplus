@@ -1,0 +1,63 @@
+import { useState } from "react";
+import { api } from "./api";
+import { connect, hasWallet, signTypedData, describeWalletError } from "./wallet";
+
+/**
+ * Sign in by signing, not by typing a secret.
+ *
+ * The statement in the payload says what the signature authorises, because a wallet prompt that only
+ * shows hex teaches people to approve without reading. Signing in grants reading and proposing; a trade
+ * still needs its own signature.
+ */
+export function SignIn({ onSignedIn }: { onSignedIn: (address: string) => void }) {
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    async function run() {
+        setBusy(true);
+        setError(null);
+        try {
+            const address = await connect();
+            const offer = await api.nonce();
+            const signature = await signTypedData(address, offer);
+            const { address: confirmed } = await api.verify(offer.message.nonce, signature);
+            onSignedIn(confirmed);
+        } catch (e) {
+            setError(describeWalletError(e));
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <header className="stage" style={{ minHeight: "100vh", display: "grid", alignItems: "center" }}>
+            <div className="wrap">
+                <div style={{ maxWidth: "34rem" }}>
+                    <h1>The owner desk.</h1>
+                    <p className="lede">
+                        Sign in with the wallet that approves trades. Signing in lets you read the books and
+                        ask for a proposal. It does not authorise a trade: each one is signed on its own.
+                    </p>
+
+                    <div className="cta">
+                        <button className="btn" onClick={run} disabled={busy || !hasWallet()}>
+                            {busy ? "Waiting for your wallet…" : "Sign in with wallet"}
+                        </button>
+                    </div>
+
+                    {!hasWallet() && (
+                        <p className="lede" style={{ color: "var(--coral)" }}>
+                            No browser wallet found. Install one to sign in, or drive the owner routes from a
+                            script with the owner token.
+                        </p>
+                    )}
+                    {error !== null && (
+                        <p className="lede" style={{ color: "var(--coral)" }}>
+                            {error}
+                        </p>
+                    )}
+                </div>
+            </div>
+        </header>
+    );
+}

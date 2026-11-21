@@ -334,9 +334,9 @@ Today is Sat 21 Nov 2026. Submissions close Sat 5 Dec 2026 (UTC). Target submit 
 | Dates | Phase | What ships |
 |---|---|---|
 | Sat 21 to Sun 22 Nov | Foundations and de-risk | Done 21 Nov: Vite, React and TS in `apps/web`, design tokens lifted from the mock, spike passed. Remaining: Express serves `dist` |
-| Mon 23 to Wed 25 Nov | The owner desk, real | Done 21 Nov: wallet sign-in (`src/session.ts`), Express serves `apps/web/dist`. Remaining: desk wired to `/invest/*`, browser EIP-712 signing, every state |
-| Thu 26 to Sat 28 Nov | The storefront, real | Public page with live price, sales and book. In-browser x402 purchase. Receipt page keyed by the settlement transaction, plus its route |
-| Sun 29 Nov to Tue 1 Dec | Running for real | VPS with a persistent volume, TLS, domain, secrets, process manager, ledger backups. Underwater mandate term. Real swap execution per `SwapOrder`, built and tested, flag off |
+| Mon 23 to Wed 25 Nov | The owner desk, real | Done 21 Nov: wallet sign-in, Express serves `apps/web/dist`, desk wired to `/invest/*` with browser EIP-712 signing. Remaining: see the proposal path in a browser once there is surplus |
+| Thu 26 to Sat 28 Nov | The storefront, real | Done 21 Nov: storefront, in-browser purchase, receipts. Remaining: a real browser purchase with a funded wallet |
+| Sun 29 Nov to Tue 1 Dec | Running for real | Done 21 Nov: underwater term, real swap execution built and gated, graceful shutdown, `docs/DEPLOY.md`. Remaining: the VPS itself, which needs Siddhant's accounts |
 | Wed 2 to Thu 3 Dec | Hardening and the real run | Errors, retries, empty states, mobile, accessibility. Re-check the Quest rules and base.org/stocks. Raise the price, make real purchases, let the loop run. Record |
 | Fri 4 Dec | Submit | Target |
 | Sat 5 Dec | Buffer | Hard close. Nothing planned into it |
@@ -354,6 +354,69 @@ Checkpoints, each a complete product:
 Fourteen tests, signing with a real viem account rather than a stub: an impostor is refused, a nonce cannot be replayed, sign-out revokes, and the cookie never contains the token.
 
 A bug worth recording, because the type checker was no help. Moving the auth block cut the `/auth/me` handler before its closing brace, so `app.use(paymentMiddleware(...))` and every route after it were nested inside that handler. It compiled, the owner routes still answered, and only the public routes vanished: `/health`, `/brief` and `/ledger` returned 404 while `/mandate` worked, which is the opposite of what a missing-route bug usually looks like. There is now a test that asserts the shape of the whole server, checking that no route answers 404, rather than testing one handler at a time.
+
+### The owner desk, built 21 Nov 2026
+
+`apps/web/src`: `api.ts` (typed calls), `wallet.ts` (injected provider), `SignIn.tsx`, `Desk.tsx`, `App.tsx`. Verified in a real browser against the live API, signed in with the owner wallet.
+
+What it does. Sign in by signature, then sync revenue, ask for a proposal, sign it and execute, with the filing quote under every leg and the book underneath. The panel carries the mandate version and hash, the investable balance, the reserve, and a flag if the books stop reconciling. The clock counts the approval down because the approval really is expiring.
+
+Decisions worth keeping:
+
+- Nothing in the web app imports `@surplus/core` at runtime. Core reaches for `node:fs` and `node:crypto`, so a value import would break the browser build. Types come through `import type`, which is erased, and the money formatter is local. Keeping the desk off the x402 packages also dropped the bundle from 657 kB to 239 kB (75 kB gzipped).
+- `wallet.ts` passes the server's typed-data payload to the wallet untouched. Rebuilding it client side would be a second implementation of the thing the signature pins down, and any drift would look like a signature the server rejects for no reason.
+- A refusal is not an error. `POST /invest/*` answers with its reasons, and the desk shows them as a titled note rather than a toast that disappears. "Nothing to invest, and that is correct" is a first-class state with its own copy, because an agent declining to invest money it has not earned is the design working.
+- New route `GET /invest/brief`, owner gated. The desk needs the claims and quotes behind each leg, and the owner must not have to pay their own paid route to see their own catalogue.
+
+Seen working in a browser: the sign-in screen including the no-wallet state, the signed-in desk with live balances and the real book, and the "nothing to invest" refusal carrying the real figures (earned 0.020000 across 2 sales, spent 0.105683 on 5 briefs). A disabled primary action looked pressable in the first screenshot and now reads as inert.
+
+Not yet seen in a browser: propose, approve and execute, because investable is zero until the price rises and real purchases are made. The engine paths behind them are covered by the API tests with a faithful market double. This is the one thing to exercise first on Wed 2 Dec.
+
+### The storefront and receipts, built 21 Nov 2026
+
+`apps/web/src/Store.tsx`, `Receipt.tsx`, `buy.ts`; `apps/api/src/receipts.ts` and the `/catalogue`, `/receipt/:id` routes.
+
+**A correction to the plan.** During the grilling I said a settlement transaction is self-authenticating, because "only the person who made that payment knows it". That is wrong: settlements are public on Base, so anyone watching the seller's address could harvest hashes and read briefs they never bought. Receipts are therefore keyed on a random 24-byte id issued at purchase and returned only in the paid response. The transaction is stored beside it as proof the buyer can check, never as the way in. A test asserts that the transaction itself opens nothing.
+
+How a receipt survives the payment flow. The id is minted in the handler, because settlement happens after the handler returns and the response has to carry the link before the transaction exists. The settle hook binds id, transaction and brief once the payment lands, using the same request context that already carries the served brief. If settlement never happens, the id was never stored and the link simply finds nothing, which is the right outcome for a payment that was cancelled.
+
+Other decisions:
+
+- The payment stack is a dynamic import. Reading the storefront costs 250 kB; the 421 kB of x402 and viem arrives only when someone decides to buy.
+- `/catalogue` is the public teaser: price, network, themes, how many filings and facts, how much has sold. A test asserts it never contains a claim or a quote.
+- An unknown receipt id and a malformed one get the same 404, so the route cannot be probed.
+- A valid receipt whose brief is gone answers 410 and still shows the transaction, rather than pretending the purchase never happened.
+
+Seen working in a browser against the live API: the storefront with real figures (3 themes, 13 facts, 10 filings, 2 sold, 0.020000 USDC earned) and the correct no-wallet state, and a receipt page rendering the real brief with its verbatim quotes and filing citations.
+
+Two things found while verifying. The receipt data route and the receipt page both wanted `/r/:id`, so the browser got JSON instead of the page; the data route is now `/receipt/:id` and `/r/:id` belongs to the app. And `JsonlReceiptStore` reads its file once and caches, so a receipt written by another process is invisible until restart. That is correct for one process and worth remembering if it is ever run with more than one.
+
+Not yet done: a real browser purchase with a funded wallet. The spike proved signing and submission work from a page, and the failure was only insufficient funds, so what remains is funding rather than code.
+
+### Phase 3, built 21 Nov 2026
+
+**The underwater term.** `MandateTerms.investOnlyWhenAhead` refuses a proposal while lifetime costs exceed lifetime revenue. Optional on purpose: `canonicalJson` drops undefined keys, so a mandate written before this term hashes exactly as it did and its stored chain still verifies. A test pins that, because adding a hashed field carelessly would make every stored mandate fail verification and the server refuse to start. The existing v2 mandate is untouched; new deployments start with it on.
+
+Worth recording about the test: a single brief cannot be both profitable and leave the agent behind, so the first version of the test could never reach the check. The real shape needs a brief that sold well beside briefs that cost money and never sold, which is exactly the case the term exists for.
+
+**Real swap execution.** `packages/core/src/swapbuild.ts` encodes a quoted route; `apps/api/src/executor.ts` sends it. One transaction per `SwapOrder`, which is what the merge in `swapPlan` was always for: gas once per token rather than once per theme. The build endpoint shape was read from KyberSwap's EVM swap API specification on 21 Nov 2026, not guessed: `POST /base/api/v1/route/build` with `routeSummary`, `sender`, `recipient`, `slippageTolerance`, `deadline` and `source`, answering with `data`, `routerAddress`, `amountIn`, `amountOut` and `gas`, and needing an `x-client-id` header.
+
+This is the only code in the project that can lose money irreversibly, so it is built to refuse:
+
+- it will not construct without `MAINNET_ENABLED`, a positive spend cap and a key
+- `parseBuiltSwap` refuses calldata whose `amountIn` is not exactly what was quoted, whose router is not the pinned one, or whose expected output is below the agreed floor. That first check is the important one: calldata that moves more money than the owner approved
+- balance and allowance are read before sending rather than discovered in a revert
+- the approval is for exactly the order amount, never unlimited
+- a fill is booked only from a receipt with status success; a submitted hash is not a fill
+- the spend cap is enforced across the run and only charged once the chain confirms, so a failed send cannot eat it
+
+`openExecutor` returns its reason rather than throwing, so the server starts and says plainly what it is doing. Verified live: `execution   simulated (no BASE_RPC_URL is set)`.
+
+**Running as a service.** `SIGTERM` closes the listener, finishes requests in flight and exits, with a ten second ceiling. Cutting a paid request in half could leave a buyer charged by the facilitator with nothing written on this side. Verified by signalling a running process.
+
+`docs/DEPLOY.md` covers the rest: why the disk is not optional, the systemd unit, TLS and why `COOKIE_SECURE` defaults on, what is in `data/` and what is lost without each file, backing up append-only files safely while the process runs, and the health and reconciliation checks worth polling.
+
+**Not done, and it needs Siddhant.** The VPS, the domain and the certificate. Nothing was provisioned or bought.
 
 ### Decision gate, Friday 27 Nov
 

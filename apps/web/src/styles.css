@@ -195,5 +195,29 @@
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
-/* spike-only: the leg row outside a <details> */
+
+/* A disabled control has to look disabled. Without this the primary action reads as pressable
+   while it is inert, which is the worst of both: it invites a click and then ignores it. */
+.btn:disabled,
+.textlink:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+  filter:none;
+}
+.btn:disabled{box-shadow:none;transform:none}
+.btn:disabled:hover{transform:none;box-shadow:none;filter:none}
+.textlink:disabled:hover{border-bottom-color:transparent}
+
+/* Ledger rows outside a <details>. */
 .leg-row{display:flex;align-items:baseline;gap:1rem;padding-block:1rem}
+
+/* A labelled field, used where a buyer types their own themes. */
+.field{display:block;max-width:44rem;margin:1.25rem 0}
+.field span{display:block;font-size:.8125rem;color:var(--cream-dim);margin-bottom:.5rem}
+.field textarea{
+  width:100%;background:var(--navy-deep);color:var(--cream);
+  border:1px solid var(--glass-line);border-radius:8px;padding:.75rem .9rem;
+  font:400 .9375rem/1.5 var(--ui);resize:vertical;
+}
+.field textarea::placeholder{color:#6B7489}
+.field textarea:focus-visible{outline:2px solid var(--coral);outline-offset:2px}
