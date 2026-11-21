@@ -26,6 +26,7 @@ import {
 } from "./session";
 import { UNATTRIBUTED, type InvestingEngine } from "./investing";
 import { normalizeThemes, type ResearchService } from "./research";
+import { recoveryPayload, verifyRecovery } from "./recovery";
 import { parseTermsUpdate, changedTerms } from "./terms";
 import { newReceiptId, type ReceiptStore } from "./receipts";
 
@@ -291,6 +292,8 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                         transaction: result.transaction,
                         amountUsdcMinor: amount.toString(),
                         at: new Date().toISOString(),
+                        // the buyer's only way back if this response never reaches them
+                        ...(result.payer !== undefined && { payer: result.payer }),
                     });
                 }
                 if (deps.sink !== undefined) {
@@ -530,6 +533,64 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 brief: found.brief,
                 provider: found.provider,
                 model: found.model,
+            });
+        });
+
+        // ---- getting a lost receipt link back ----
+        //
+        // The id travels once, in the paid response. A buyer whose response was lost has paid and has
+        // nothing; the wallet that paid is the one thing they can still prove. The nonce is single use
+        // and short lived, so a captured signature cannot be replayed by whoever captured it.
+        app.post("/receipt/nonce", async (req: Request, res: Response) => {
+            const body = req.body as { address?: unknown } | undefined;
+            if (typeof body?.address !== "string") {
+                return void res.status(400).json({ error: "an address is required" });
+            }
+            const { nonce, issuedAt } = await sessions.issueNonce();
+            let payload;
+            try {
+                payload = recoveryPayload({
+                    address: body.address, nonce, issuedAt, chainId: config.approvalChainId,
+                });
+            } catch {
+                return void res.status(400).json({ error: "that is not a valid address" });
+            }
+            res.json({
+                ...payload,
+                // issuedAt is a uint256 in the typed data, so it crosses the wire as a decimal string
+                message: { ...payload.message, issuedAt: payload.message.issuedAt.toString() },
+            });
+        });
+
+        app.post("/receipt/recover", async (req: Request, res: Response) => {
+            const body = req.body as { address?: unknown; nonce?: unknown; signature?: unknown } | undefined;
+            if (typeof body?.address !== "string" || typeof body.nonce !== "string" || typeof body.signature !== "string") {
+                return void res.status(400).json({ error: "address, nonce and signature are required" });
+            }
+            const issuedAt = await sessions.consumeNonce(body.nonce);
+            if (issuedAt === null) {
+                return void res.status(400).json({ error: "that request expired or was already used" });
+            }
+            const verdict = await verifyRecovery({
+                address: body.address,
+                signature: body.signature,
+                nonce: body.nonce,
+                issuedAt,
+                chainId: config.approvalChainId,
+            });
+            if (!verdict.ok) return void res.status(401).json({ error: verdict.reason });
+
+            const found = await receipts.forPayer(verdict.address);
+            res.json({
+                address: verdict.address,
+                receipts: found.map((r) => ({
+                    id: r.id,
+                    url: `/r/${r.id}`,
+                    briefId: r.briefId,
+                    transaction: r.transaction,
+                    amountUsdcMinor: r.amountUsdcMinor,
+                    at: r.at,
+                })),
             });
         });
     }

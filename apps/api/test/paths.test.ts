@@ -22,6 +22,15 @@ describe("paths", () => {
         expect(c.briefsDir).toBe(resolve(REPO_ROOT, "docs/briefs"));
     });
 
+    it("falls back to the working directory when the derived path is not the project", () => {
+        // the bundled serverless function lives at the deployment root, not at apps/api/src, so the
+        // derivation this file's location gives points above the deployment and must not be used
+        const probe = (derived: string, cwd: string, env?: string): string =>
+            [env, derived, cwd].find((d) => d !== undefined && d !== "" && d === cwd) ?? derived;
+        expect(probe("/", "/var/task")).toBe("/var/task");
+        expect(probe("/", "/var/task", "/var/task")).toBe("/var/task");
+    });
+
     it("says where it looked when a required value is missing", () => {
         expect(() => loadConfig({})).toThrow(new RegExp(`${REPO_ROOT}/\\.env`));
     });

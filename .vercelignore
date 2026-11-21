@@ -1,0 +1,7 @@
+# The books and the local environment never leave this machine. On the host the records live in
+# Postgres (DATABASE_URL) and the configuration comes from the project's environment variables.
+.env
+.env.*
+data/
+node_modules
+*.log

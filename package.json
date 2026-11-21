@@ -9,10 +9,15 @@
         "test": "npm test -w @surplus/core && npm test -w @surplus/api",
         "test:core": "npm test -w @surplus/core",
         "test:api": "npm test -w @surplus/api",
-        "typecheck": "npm run typecheck -w @surplus/core && npm run typecheck -w @surplus/api && npm run typecheck -w @surplus/web && tsc -p api",
+        "typecheck": "npm run typecheck -w @surplus/core && npm run typecheck -w @surplus/api && npm run typecheck -w @surplus/web",
         "typecheck:scripts": "tsc -p scripts",
         "api": "npm start -w @surplus/api",
         "web": "npm run dev -w @surplus/web",
-        "build:web": "npm run build -w @surplus/web"
+        "build:web": "npm run build -w @surplus/web",
+        "build:serverless": "esbuild apps/api/src/serverless.ts --bundle --platform=node --target=node22 --format=esm --outfile=api/index.mjs --log-level=warning --banner:js='import{createRequire as __surplusCreateRequire}from \"node:module\";const require=__surplusCreateRequire(import.meta.url);'",
+        "build": "npm run build:web && npm run build:serverless"
+    },
+    "devDependencies": {
+        "esbuild": "^0.28.2"
     }
 }
