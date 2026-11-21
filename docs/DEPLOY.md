@@ -61,7 +61,21 @@ imported.
 
 Live at https://surplus-eosin-seven.vercel.app (project `surplus`, deployed 21 Nov 2026).
 
-`vercel.json` and the bundled `api/index.mjs` are the whole deployment. The function assembles the agent once per
+`vercel.json` names one build command and nothing else; `scripts/build-vercel.mjs` produces the whole
+deployment through the platform's Build Output API:
+
+```
+.vercel/output/config.json                     routing: the API paths to the function, the rest to the app
+.vercel/output/static/                         the web app, served as files
+.vercel/output/functions/api.func/index.mjs    the bundled server
+.vercel/output/functions/api.func/docs/briefs  the owner's catalogue, read at runtime
+```
+
+The simpler `functions` glob was tried first and is the wrong tool here: it matches patterns against the
+files in the repository, and the function is a bundle this build produces rather than a file anyone
+commits. A deploy from a laptop worked because the bundle was already there and got uploaded with the
+source; the same commit pushed to git failed with `unused_function`, because in a fresh clone the
+pattern matched nothing. Writing the output directly means both paths run the same script. The function assembles the agent once per
 instance and serves every API route; `apps/web/dist` is served as static files by the platform, with
 anything unmatched falling back to `index.html` for the single-page app.
 
@@ -76,8 +90,8 @@ What it needs, and why:
 - `maxDuration` is 60 seconds because generating a brief calls SEC EDGAR and then a model. A paid request
   that is cut off mid-generation is the one failure mode worth paying attention to after the first
   deploy: the buyer's payment settles and their brief does not arrive.
-- `includeFiles: docs/briefs/**` ships the owner's catalogue with the function. Without it the catalogue
-  is empty on the host, and `GET /brief` has nothing to sell.
+- The build copies `docs/briefs` into the function. Without it the catalogue is empty on the host and
+  `GET /brief` has nothing to sell, with no error anywhere: `GET /health` just reports no brief.
 - Checks worth making on the first deploy, in this order: `GET /health` reports `postgres`; `GET /brief`
   answers 402 rather than 500; the owner desk loads; sign-in sticks across a page reload (this is the one
   that proves sessions really are in the database); a receipt link opens the brief it paid for.

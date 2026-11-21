@@ -15,7 +15,7 @@
         "web": "npm run dev -w @surplus/web",
         "build:web": "npm run build -w @surplus/web",
         "build:serverless": "esbuild apps/api/src/serverless.ts --bundle --platform=node --target=node22 --format=esm --outfile=api/index.mjs --log-level=warning --banner:js='import{createRequire as __surplusCreateRequire}from \"node:module\";const require=__surplusCreateRequire(import.meta.url);'",
-        "build": "npm run build:web && npm run build:serverless"
+        "build": "npm run build:web && npm run build:serverless && node scripts/build-vercel.mjs"
     },
     "devDependencies": {
         "esbuild": "^0.28.2"

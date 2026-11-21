@@ -635,7 +635,42 @@ So a buyer can now prove the wallet that paid and get their links back:
 
 Seven new tests cover it, including a signature from the wrong wallet, a replayed nonce, a nonce the
 server never issued, an address with no purchases, and a receipt written before payers were recorded.
-Core 256, API 175.
+
+### Where the money is actually at risk, checked in the SDK
+
+Read rather than assumed: `@x402/express` buffers `writeHead`, `write` and `end` until settlement
+finishes, and `@x402/core` awaits each `afterSettle` hook. So the order on any host is: settle onchain,
+run our hook (book revenue, issue the receipt, flush to Postgres), then release the buyer's response.
+The brief is never delivered before the sale is durable, and a function killed mid-handler settles
+nothing, so the buyer is not charged. That is the safe direction.
+
+The hole that leaves: a hook that throws is logged by the SDK as a warning and the response goes out
+anyway, so a failed database write would mean money received and nothing recorded. `persistSale` is now
+a separate exported function that never throws. On failure it logs
+`MONEY RECEIVED BUT NOT RECORDED` with the transaction, amount, brief, payer and receipt id, which is
+everything needed to reconcile against Base by hand. It deliberately does not abort the settlement: the
+money has already moved, so failing closed would tell the buyer their payment failed while they have
+been charged, and they would not get the brief either.
+
+Core 256, API 178.
+
+### Deploys from git, fixed 22 Nov 2026
+
+Every push to GitHub had been failing while deploys from the laptop succeeded, which is the worst shape
+for this to be in: the deployment that works is the one nobody can reproduce. The cause was
+`functions: { "api/index.mjs": ... }` in `vercel.json`. That glob is matched against the files in the
+repository, and `api/index.mjs` is a bundle produced by the build, not something anyone commits. The
+upload from a laptop carried it; a fresh clone did not, and the build stopped at `unused_function`
+before `npm install` had even run.
+
+Replaced with the Build Output API: `scripts/build-vercel.mjs` writes `.vercel/output` (routing,
+static site, and the function with the catalogue inside it), and `vercel.json` is now one line naming
+the build command. Both paths run the same script.
+
+Checked by building a fresh copy of the tree with the generated files removed, exactly as a clone
+would be, then running the built function the way the host does: it assembled on Postgres with 7
+briefs and answered 200 and 402 on the right routes. The deployment from the CLI then did the same
+thing in production.
 
 ### Still open on this
 

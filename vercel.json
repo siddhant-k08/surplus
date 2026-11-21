@@ -1,22 +1,4 @@
 {
     "$schema": "https://openapi.vercel.sh/vercel.json",
-    "buildCommand": "npm run build",
-    "outputDirectory": "apps/web/dist",
-    "functions": {
-        "api/index.mjs": {
-            "maxDuration": 60,
-            "memory": 1024,
-            "includeFiles": "docs/briefs/**"
-        }
-    },
-    "rewrites": [
-        {
-            "source": "/(health|brief|research|ledger|catalogue|mandate|invest|auth|receipt)(/.*)?",
-            "destination": "/api"
-        },
-        {
-            "source": "/((?!api/).*)",
-            "destination": "/index.html"
-        }
-    ]
+    "buildCommand": "npm run build"
 }
