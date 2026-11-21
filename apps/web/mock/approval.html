@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surplus Approval Desk</title>
+<meta name="description" content="Approve or refuse what the agent proposes, with the filing quote behind every amount.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#14213D;
+    --navy-deep:#0A1023;
+    --cream:#F4EDE0;
+    --cream-dim:#9AA3B8;
+    --coral:#FF6B5B;
+
+    --glass:rgba(244,237,224,.055);
+    --glass-line:rgba(244,237,224,.14);
+
+    --ui:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --doc:"Newsreader",Georgia,"Times New Roman",serif;
+
+    --col:78rem;
+    --gut:clamp(1.25rem,4vw,3rem);
+    --fig:8.5rem;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;color:var(--cream);background:var(--navy-deep);
+    font:400 1rem/1.55 var(--ui);font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased;
+  }
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+  :focus-visible{outline:2px solid var(--coral);outline-offset:3px}
+
+  /* ---------- the lit ground: navy, a coral bloom, fluted glass over it ---------- */
+  .stage{position:relative;isolation:isolate;overflow:hidden;border-bottom:1px solid var(--glass-line)}
+  .stage::before{
+    content:"";position:absolute;inset:0;z-index:-2;
+    background:
+      radial-gradient(120% 90% at 62% 18%, rgba(255,107,91,.60) 0%, rgba(255,107,91,.18) 34%, rgba(255,107,91,0) 62%),
+      radial-gradient(90% 70% at 18% 8%, rgba(94,132,214,.26) 0%, rgba(94,132,214,0) 55%),
+      linear-gradient(168deg, #1A2A4E 0%, var(--navy) 42%, var(--navy-deep) 100%);
+  }
+  /* fluting: vertical ribs, like corrugated glass */
+  .stage::after{
+    content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+    background:repeating-linear-gradient(90deg,
+      rgba(244,237,224,.052) 0 1px,
+      rgba(10,16,35,.055) 1px 3px,
+      rgba(244,237,224,0) 3px 9px);
+    mask-image:linear-gradient(180deg,#000 0%,#000 72%,transparent 100%);
+    -webkit-mask-image:linear-gradient(180deg,#000 0%,#000 72%,transparent 100%);
+  }
+  .wrap{max-width:var(--col);margin:0 auto;padding-inline:var(--gut)}
+
+  /* ---------- top bar ---------- */
+  .bar{display:flex;align-items:center;gap:1rem;padding-block:1.25rem}
+  .mark{display:flex;align-items:center;gap:.55rem;font-weight:700;letter-spacing:-.02em;font-size:1.0625rem}
+  .mark svg{display:block}
+  nav{
+    margin-inline:auto;display:flex;gap:.15rem;padding:.3rem;
+    background:var(--glass);border:1px solid var(--glass-line);border-radius:999px;
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  }
+  nav a{
+    display:flex;align-items:center;gap:.45rem;
+    padding:.5rem 1rem;border-radius:999px;text-decoration:none;
+    color:var(--cream-dim);font-size:.875rem;transition:color .15s,background .15s;
+  }
+  nav a:hover{color:var(--cream)}
+  nav a[aria-current]{background:rgba(244,237,224,.10);color:var(--cream)}
+  nav a[aria-current]::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--coral)}
+  .pillbtn{
+    width:42px;height:42px;border-radius:50%;display:grid;place-items:center;
+    background:var(--glass);border:1px solid var(--glass-line);color:var(--cream);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    font-size:.6875rem;font-weight:600;cursor:pointer;
+  }
+  .pillbtn.live{background:var(--cream);color:var(--navy);border-color:transparent}
+
+  /* ---------- hero ---------- */
+  .hero{display:grid;grid-template-columns:minmax(0,1.05fr) 23rem;gap:2.5rem 3rem;align-items:start;
+        padding-block:clamp(2.5rem,6vw,4.5rem) 0}
+  h1{
+    margin:0;font-size:clamp(2.6rem,6.6vw,5rem);line-height:.98;font-weight:600;
+    letter-spacing:-.045em;text-wrap:balance;max-width:14ch;
+  }
+  .lede{margin:1.5rem 0 0;color:var(--cream-dim);max-width:44ch;font-size:1rem}
+  .cta{display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;margin-top:2rem}
+  .btn{
+    font:600 .9375rem/1 var(--ui);background:var(--coral);color:#2A0C08;
+    border:0;border-radius:999px;padding:.95rem 1.5rem;cursor:pointer;
+    display:inline-flex;align-items:center;gap:.5rem;
+    box-shadow:0 8px 24px rgba(255,107,91,.32);
+    transition:transform .12s,box-shadow .12s,filter .12s;
+  }
+  .btn:hover{transform:translateY(-1px);filter:brightness(1.05);box-shadow:0 12px 30px rgba(255,107,91,.42)}
+  .btn:active{transform:translateY(1px);box-shadow:0 4px 14px rgba(255,107,91,.3)}
+  .textlink{
+    background:none;border:0;cursor:pointer;color:var(--cream);font:400 .9375rem var(--ui);
+    display:inline-flex;align-items:center;gap:.4rem;padding:.4rem 0;
+    border-bottom:1px solid transparent;
+  }
+  .textlink:hover{border-bottom-color:var(--cream)}
+
+  /* ---------- the floating panel ---------- */
+  .panel{
+    background:var(--glass);border:1px solid var(--glass-line);border-radius:var(--r);
+    backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
+    padding:1rem;box-shadow:0 24px 60px rgba(5,9,20,.45);
+  }
+  .grip{width:34px;height:3px;border-radius:2px;background:rgba(244,237,224,.3);margin:.1rem auto .9rem}
+  .panel > .where{display:flex;align-items:center;gap:.4rem;color:var(--cream-dim);font-size:.8125rem;margin:0 0 .75rem}
+  .slab{
+    background:rgba(10,16,35,.42);border:1px solid rgba(244,237,224,.09);border-radius:10px;
+    padding:.85rem .95rem;margin-bottom:.6rem;
+  }
+  .slab:last-of-type{margin-bottom:0}
+  .slab .top{display:flex;justify-content:space-between;align-items:baseline;gap:1rem}
+  .slab .name{font-weight:600;font-size:.9375rem}
+  .slab .rate{color:var(--cream-dim);font-size:.8125rem}
+  .slab .row{display:flex;justify-content:space-between;align-items:flex-end;gap:.75rem;margin-top:.55rem}
+  .slab .k{display:block;color:var(--cream-dim);font-size:.6875rem;margin-bottom:.15rem}
+  .slab .v{font-size:1.375rem;font-weight:600;letter-spacing:-.02em;line-height:1}
+  .chip{
+    font-size:.6875rem;color:var(--cream-dim);background:rgba(244,237,224,.07);
+    border:1px solid var(--glass-line);border-radius:999px;padding:.22rem .55rem;white-space:nowrap;
+  }
+  .flag{
+    display:inline-block;margin-top:.8rem;background:var(--coral);color:#2A0C08;
+    font-size:.75rem;font-weight:600;border-radius:999px;padding:.4rem .8rem;
+  }
+
+  /* ---------- fact rail ---------- */
+  .rail{
+    display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1.25rem;
+    margin-top:clamp(2.5rem,6vw,4rem);padding:1.5rem 0 2rem;
+    border-top:1px solid var(--glass-line);
+  }
+  .fact{display:flex;flex-direction:column;gap:.5rem;font-size:.8125rem;line-height:1.35;color:var(--cream-dim)}
+  .fact svg{color:var(--cream-dim)}
+  .fact.first{color:var(--coral)}
+  .fact.first svg{color:var(--coral)}
+  .fact b{font-weight:400;display:block}
+  .rail .fact.first{position:relative}
+  .rail .fact.first::before{content:"";position:absolute;top:-1.5rem;left:0;width:100%;height:2px;background:var(--coral)}
+
+  /* ---------- legs ---------- */
+  .work{background:var(--navy-deep);padding-block:clamp(3rem,7vw,5rem)}
+  .work h2{margin:0 0 .4rem;font-size:1.5rem;font-weight:600;letter-spacing:-.02em}
+  .work > .wrap > p{margin:0 0 2rem;color:var(--cream-dim);max-width:52ch;font-size:.9375rem}
+  .legs{margin:0;padding:0;list-style:none;border-top:1px solid rgba(244,237,224,.1)}
+  .leg{border-bottom:1px solid rgba(244,237,224,.1)}
+  .leg > summary{display:flex;align-items:baseline;gap:1rem;padding-block:1rem;cursor:pointer;list-style:none}
+  .leg > summary::-webkit-details-marker{display:none}
+  .leg > summary::marker{content:""}
+  .sym{font-weight:600;min-width:5.5rem}
+  .theme{color:var(--cream-dim);font-size:.875rem;flex:1 1 auto}
+  .amt{min-width:var(--fig);text-align:right;font-weight:500}
+  .caret{color:var(--cream-dim);font-size:.6875rem;min-width:1.25rem;text-align:right}
+  .leg > summary:hover .caret{color:var(--coral)}
+  .evidence{padding:0 0 1.4rem;display:grid;grid-template-columns:minmax(0,1fr) var(--fig);gap:.8rem 1rem}
+  .evidence blockquote{
+    grid-column:1;margin:0;padding-left:1.1rem;border-left:2px solid var(--coral);
+    font:400 1.0625rem/1.6 var(--doc);max-width:62ch;
+  }
+  .evidence .claim{grid-column:1;margin:0;font-size:.9375rem;color:var(--cream-dim);max-width:62ch}
+  .cite{grid-column:1;margin:0;font-size:.8125rem;color:var(--cream-dim);display:flex;flex-wrap:wrap;gap:.3rem .9rem}
+  .cite .ok{color:var(--cream)}
+  .scores{grid-column:2;grid-row:1;text-align:right;font-size:.8125rem;color:var(--cream-dim);line-height:1.5}
+  .scores b{color:var(--cream);font-weight:600}
+
+  /* ---------- sign sheet ---------- */
+  .sheet[hidden]{display:none}
+  .sheet{margin-top:2rem;padding:1.5rem;background:var(--glass);border:1px solid var(--glass-line);border-radius:var(--r)}
+  .sheet h3{margin:0 0 .35rem;font-size:1.0625rem;font-weight:600}
+  .sheet > p{margin:0 0 1.1rem;color:var(--cream-dim);font-size:.9375rem;max-width:58ch}
+  .sheet dl{margin:0 0 1.25rem;display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.5rem 1.25rem;font-size:.875rem}
+  .sheet dt{color:var(--cream-dim)}
+  .sheet dd{margin:0;word-break:break-all}
+
+  footer{padding-block:1.75rem;border-top:1px solid rgba(244,237,224,.1);color:var(--cream-dim);font-size:.8125rem}
+
+  @media (max-width:60rem){
+    .hero{grid-template-columns:minmax(0,1fr)}
+    .panel{max-width:26rem}
+    .rail{grid-template-columns:repeat(2,minmax(0,1fr));gap:1.25rem 1.5rem}
+    .rail .fact.first::before{display:none}
+    nav{display:none}
+  }
+  @media (max-width:40rem){
+    :root{--fig:6.5rem}
+    .rail{grid-template-columns:minmax(0,1fr)}
+    .leg > summary{flex-wrap:wrap;gap:.25rem .75rem}
+    .theme{flex-basis:100%;order:3}
+    .evidence{grid-template-columns:minmax(0,1fr)}
+    .scores{grid-column:1;grid-row:auto;text-align:left}
+    .btn{width:100%;justify-content:center}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header class="stage">
+  <div class="wrap">
+
+    <div class="bar">
+      <span class="mark">
+        <svg width="22" height="12" viewBox="0 0 22 12" fill="none" aria-hidden="true">
+          <path d="M1 8c3-7 6.5-7 9.5 0s6.5 7 9.5 0" stroke="#F4EDE0" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        Surplus
+      </span>
+      <nav aria-label="Sections">
+        <a href="#proposal" aria-current="page">Proposal</a>
+        <a href="#evidence">Brief</a>
+        <a href="#ledger">Ledger</a>
+        <a href="#mandate">Mandate</a>
+      </nav>
+      <button class="pillbtn live num" id="clock" title="Time left on this approval">9:41</button>
+      <button class="pillbtn" aria-label="Menu">≡</button>
+    </div>
+
+    <div class="hero" id="proposal">
+      <div>
+        <h1>Nothing moves until you sign.</h1>
+        <p class="lede">
+          The agent sold two briefs, booked its costs, and wants to put the surplus into twelve
+          positions. Every amount below carries the sentence from the filing it came from.
+        </p>
+        <div class="cta">
+          <button class="btn" id="open">Review and sign <span aria-hidden="true">↗</span></button>
+          <button class="textlink" id="refuse">Refuse this proposal <span aria-hidden="true">↗</span></button>
+        </div>
+      </div>
+
+      <aside class="panel" aria-label="Proposal summary">
+        <div class="grip" aria-hidden="true"></div>
+        <p class="where">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <circle cx="6" cy="5" r="2.2" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M6 11c2.5-3 4-4.8 4-6.4A4 4 0 0 0 2 4.6C2 6.2 3.5 8 6 11Z" stroke="currentColor" stroke-width="1.2"/>
+          </svg>
+          Base Sepolia, surplus.investable
+        </p>
+
+        <div class="slab">
+          <div class="top"><span class="name">ai-compute</span><span class="rate">50% target</span></div>
+          <div class="row">
+            <span><span class="k">Legs</span><span class="v num">7</span></span>
+            <span class="chip">5 swaps</span>
+            <span style="text-align:right"><span class="k">USDC</span><span class="v num">0.619705</span></span>
+          </div>
+        </div>
+
+        <div class="slab">
+          <div class="top"><span class="name">platform-giants</span><span class="rate">30% target</span></div>
+          <div class="row">
+            <span><span class="k">Legs</span><span class="v num">5</span></span>
+            <span class="chip">3 swaps</span>
+            <span style="text-align:right"><span class="k">USDC</span><span class="v num">0.371819</span></span>
+          </div>
+        </div>
+
+        <span class="flag">Total 0.991524 USDC</span>
+      </aside>
+    </div>
+
+    <div class="rail">
+      <div class="fact first">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <b>32 pre-trade checks</b>passed, nothing blocked
+      </div>
+      <div class="fact">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.2" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.6V8l2.4 1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <b>Quotes 3s old</b>inside the 25s window
+      </div>
+      <div class="fact">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="7" width="10" height="6.5" rx="1.4" stroke="currentColor" stroke-width="1.4"/><path d="M5.4 7V5.2a2.6 2.6 0 0 1 5.2 0V7" stroke="currentColor" stroke-width="1.4"/></svg>
+        <b>Mandate v2</b>87eb5288, unchanged
+      </div>
+      <div class="fact">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 11.5 6 8l2.5 2.5L13.5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <b>12 legs, 8 swaps</b>gas paid once per token
+      </div>
+      <div class="fact">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.2" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v3.4M8 10.8h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <b>Fills simulated</b>testnet, labelled in the book
+      </div>
+    </div>
+
+  </div>
+</header>
+
+<main class="work" id="evidence">
+  <div class="wrap">
+    <h2>What each amount is standing on</h2>
+    <p>Open a row to read the filing sentence behind it. A fact with no verbatim quote never reached this page.</p>
+
+    <ul class="legs">
+
+      <li><details class="leg" open>
+        <summary><span class="sym">NVDAc</span><span class="theme">ai-compute</span><span class="amt num">0.098083</span><span class="caret" aria-hidden="true">▲</span></summary>
+        <div class="evidence">
+          <p class="claim">NVIDIA provides data center-scale infrastructure and computing platforms used by major cloud service providers.</p>
+          <blockquote>“All major cloud service providers, or CSPs, AI model makers, and enterprises use our data center-scale infrastructure and computing platforms”</blockquote>
+          <p class="cite"><span>NVIDIA 10-K, filed 2026-02-25</span><span class="ok">quote found verbatim</span></p>
+          <p class="scores">fit <b>5</b>/5<br>evidence <b>2</b>/5</p>
+        </div>
+      </details></li>
+
+      <li><details class="leg">
+        <summary><span class="sym">GOOGLc</span><span class="theme">ai-compute</span><span class="amt num">0.098083</span><span class="caret" aria-hidden="true">▼</span></summary>
+        <div class="evidence">
+          <p class="claim">Alphabet generates revenue from cloud-based solutions and products including Tensor Processing Unit systems.</p>
+          <blockquote>“Google Cloud generates product revenues primarily from the sale of TPU systems.”</blockquote>
+          <p class="cite"><span>Alphabet 10-Q, filed 2026-10-29</span><span class="ok">quote found verbatim</span></p>
+          <p class="scores">fit <b>5</b>/5<br>evidence <b>2</b>/5</p>
+        </div>
+      </details></li>
+
+      <li><details class="leg">
+        <summary><span class="sym">SNDKc</span><span class="theme">ai-compute</span><span class="amt num">0.098083</span><span class="caret" aria-hidden="true">▼</span></summary>
+        <div class="evidence">
+          <p class="claim">Sandisk produces flash storage solutions specifically for AI workloads in datacenters.</p>
+          <blockquote>“our broad and ever-expanding portfolio delivers powerful flash storage solutions for artificial intelligence (“AI”) workloads in datacenters”</blockquote>
+          <p class="cite"><span>Sandisk 10-Q, filed 2026-10-30</span><span class="ok">quote found verbatim</span></p>
+          <p class="scores">fit <b>5</b>/5<br>evidence <b>2</b>/5</p>
+        </div>
+      </details></li>
+
+      <li><details class="leg">
+        <summary><span class="sym">AMZNc</span><span class="theme">platform-giants</span><span class="amt num">0.092431</span><span class="caret" aria-hidden="true">▼</span></summary>
+        <div class="evidence">
+          <p class="claim">Amazon generates revenue through e-commerce retail sales, advertising services, and subscription services.</p>
+          <blockquote>“The North America segment primarily consists of amounts earned from retail sales of consumer products (including from sellers) and advertising and subscription services”</blockquote>
+          <p class="cite"><span>Amazon 10-Q, filed 2026-10-30</span><span class="ok">quote found verbatim</span></p>
+          <p class="scores">fit <b>5</b>/5<br>evidence <b>2</b>/5</p>
+        </div>
+      </details></li>
+
+      <li><details class="leg">
+        <summary><span class="sym">TSLAc</span><span class="theme">ai-compute</span><span class="amt num">0.062416</span><span class="caret" aria-hidden="true">▼</span></summary>
+        <div class="evidence">
+          <p class="claim">Tesla is investing in compute hardware and expanding data centers to support its artificial intelligence training capacity.</p>
+          <blockquote>“we currently expect our capital expenditures to be in excess of $20 billion in 2026, driven by our AI initiatives, including investments in compute infrastructure and data centers”</blockquote>
+          <p class="cite"><span>Tesla 10-K, filed 2026-01-29</span><span class="ok">quote found verbatim</span></p>
+          <p class="scores">fit <b>3</b>/5<br>evidence <b>2</b>/5</p>
+        </div>
+      </details></li>
+
+      <li><details class="leg">
+        <summary><span class="sym">longevity-biotech</span><span class="theme">no company met the evidence floor</span><span class="amt num">0.198304</span><span class="caret" aria-hidden="true">▼</span></summary>
+        <div class="evidence">
+          <p class="claim">This theme's share of the surplus stays uninvested. No candidate had a surviving fact from its own filing that mentioned the theme, so nothing cleared the floor.</p>
+          <p class="cite"><span class="ok">left uninvested, reason: gap</span></p>
+          <p class="scores">fit <b>—</b><br>evidence <b>—</b></p>
+        </div>
+      </details></li>
+
+    </ul>
+
+    <section class="sheet" id="sheet" hidden aria-labelledby="sheeth">
+      <h3 id="sheeth">This is what your wallet will sign</h3>
+      <p>An EIP-712 message bound to the proposal, the mandate in force, the ceiling and the expiry. Change any one of them and this signature stops working.</p>
+      <dl>
+        <dt>proposalHash</dt><dd class="num">0x4a7c1e9b…2f08d5</dd>
+        <dt>mandateVersion</dt><dd class="num">2</dd>
+        <dt>mandateHash</dt><dd class="num">0x87eb5288a3bd…9c41</dd>
+        <dt>maxUsdcIn</dt><dd class="num">991524 (0.991524 USDC)</dd>
+        <dt>expiresAt</dt><dd class="num">1795239041 (21 Nov 2026, 08:10 UTC)</dd>
+        <dt>chainId</dt><dd class="num">84532 (Base Sepolia)</dd>
+      </dl>
+      <div class="cta" style="margin-top:0">
+        <button class="btn" id="sign">Sign with wallet <span aria-hidden="true">↗</span></button>
+        <button class="textlink" id="close">Back</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer id="ledger">
+  <div class="wrap">
+    Research is informational and is not investment advice. Filing text is quoted from SEC EDGAR.
+  </div>
+</footer>
+
+<script>
+  // The clock is the only thing that moves on its own, because the approval really is expiring.
+  const clock = document.getElementById("clock");
+  const deadline = Date.now() + (9 * 60 + 41) * 1000;
+  const tick = () => {
+    const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+    clock.textContent = left === 0
+      ? "0:00"
+      : Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");
+  };
+  tick();
+  setInterval(tick, 1000);
+
+  for (const leg of document.querySelectorAll(".leg")) {
+    const caret = leg.querySelector(".caret");
+    const sync = () => { caret.textContent = leg.open ? "▲" : "▼"; };
+    sync();
+    leg.addEventListener("toggle", sync);
+  }
+
+  const sheet = document.getElementById("sheet");
+  document.getElementById("open").addEventListener("click", () => {
+    sheet.hidden = false;
+    sheet.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    document.getElementById("sign").focus();
+  });
+  document.getElementById("close").addEventListener("click", () => {
+    sheet.hidden = true;
+    document.getElementById("open").focus();
+  });
+</script>
+</body>
+</html>
