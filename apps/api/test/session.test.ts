@@ -7,7 +7,7 @@ import {
 } from "@surplus/core";
 import { buildServer } from "../src/server";
 import { loadConfig } from "../src/config";
-import { SessionStore, SESSION_COOKIE, LOGIN_TYPES, readCookie, verifyLogin } from "../src/session";
+import { MemorySessionStore, SESSION_COOKIE, LOGIN_TYPES, readCookie, verifyLogin } from "../src/session";
 
 const OWNER = privateKeyToAccount(("0x" + "33".repeat(32)) as `0x${string}`);
 const IMPOSTOR = privateKeyToAccount(("0x" + "44".repeat(32)) as `0x${string}`);
@@ -150,22 +150,22 @@ describe("the sign-in handshake", () => {
 });
 
 describe("session mechanics", () => {
-    it("expires a nonce that was left too long", () => {
+    it("expires a nonce that was left too long", async () => {
         let now = 1_000_000;
-        const store = new SessionStore(() => now);
-        const { nonce } = store.issueNonce();
+        const store = new MemorySessionStore(() => now);
+        const { nonce } = await store.issueNonce();
         now += 5 * 60_000 + 1;
-        expect(store.consumeNonce(nonce)).toBe(null);
+        expect(await store.consumeNonce(nonce)).toBe(null);
     });
 
-    it("expires a session and stops recognising its token", () => {
+    it("expires a session and stops recognising its token", async () => {
         let now = 1_000_000;
-        const store = new SessionStore(() => now);
-        const { token } = store.open("0xabc");
-        expect(store.whoIs(token)).toBe("0xabc");
+        const store = new MemorySessionStore(() => now);
+        const { token } = await store.open("0xabc");
+        expect(await store.whoIs(token)).toBe("0xabc");
         now += 8 * 60 * 60_000 + 1;
-        expect(store.whoIs(token)).toBe(null);
-        expect(store.size).toBe(0);
+        expect(await store.whoIs(token)).toBe(null);
+        expect(await store.count()).toBe(0);
     });
 
     it("reads one cookie out of a header without a parser", () => {

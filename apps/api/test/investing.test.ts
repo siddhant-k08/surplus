@@ -17,6 +17,7 @@ import {
     type MandateTerms,
     type SavedBrief,
     type TokenRecord,
+    openLedger,
 } from "@surplus/core";
 import { privateKeyToAccount } from "viem/accounts";
 import { approvalTypedData } from "@surplus/core";
@@ -169,7 +170,7 @@ const IMPOSTOR_KEY = ("0x" + "22".repeat(32)) as `0x${string}`;
 const impostor = privateKeyToAccount(IMPOSTOR_KEY);
 const CHAIN_ID = 84532;
 
-const engineFor = (revenue = "3.00", store?: JsonlLedgerStore, openingFloat = u("1.00"), ownerAddress = ownerAccount.address) =>
+const engineFor = async (revenue = "3.00", store?: JsonlLedgerStore, openingFloat = u("1.00"), ownerAddress = ownerAccount.address) =>
     new InvestingEngine({
         mode: "sim",
         openingFloat,
@@ -181,7 +182,7 @@ const engineFor = (revenue = "3.00", store?: JsonlLedgerStore, openingFloat = u(
         chainId: CHAIN_ID,
         verifyApproval: ({ approval, signature }) =>
             verifyApprovalSignature({ approval, signature, chainId: CHAIN_ID, ownerAddress }),
-        ...(store && { store }),
+        ...(store ? { ledger: await openLedger(store), sink: store } : {}),
     });
 
 /** Signs the payload the engine offered, the way an owner's wallet would. */
@@ -215,9 +216,9 @@ async function signOffer(
 }
 
 describe("the investing engine", () => {
-    it("mirrors real revenue, books the brief cost, and settles", () => {
-        const e = engineFor("3.00");
-        const r = e.syncRevenue();
+    it("mirrors real revenue, books the brief cost, and settles", async () => {
+        const e = await engineFor("3.00");
+        const r = await e.syncRevenue();
         expect(r.sales).toBe(1);
         expect(r.revenue).toBe(u("3.00"));
         // 3.00 - 0.02 cost = 2.98 net, 0.50 to reserve, half of 2.48 investable
@@ -225,19 +226,19 @@ describe("the investing engine", () => {
         expect(e.treasury.ledger.balance("surplus.investable")).toBe(u("1.24"));
     });
 
-    it("mirrors only what it has not already seen", () => {
-        const e = engineFor("3.00");
-        e.syncRevenue();
+    it("mirrors only what it has not already seen", async () => {
+        const e = await engineFor("3.00");
+        await e.syncRevenue();
         const n = e.treasury.ledger.all().length;
-        const again = e.syncRevenue();
+        const again = await e.syncRevenue();
         expect(again.revenue).toBe(u("3.00"));
         expect(e.treasury.ledger.all().length).toBe(n); // nothing double booked
         expect(e.treasury.ledger.balance("revenue.research")).toBe(-u("3.00"));
     });
 
-    it("keeps the mirrored entry traceable to the real transaction", () => {
-        const e = engineFor("3.00");
-        e.syncRevenue();
+    it("keeps the mirrored entry traceable to the real transaction", async () => {
+        const e = await engineFor("3.00");
+        await e.syncRevenue();
         const payment = e.treasury.ledger.all().find((x) => x.type === "PAYMENT_RECEIVED")!;
         expect(payment.memo).toContain("mirrors real sale 0xaaa");
         expect(payment.txHash).toBe("0xaaa"); // so a restart knows this sale was already mirrored
@@ -246,16 +247,16 @@ describe("the investing engine", () => {
     });
 
     it("refuses to propose when nothing is investable", async () => {
-        const e = engineFor("0.01"); // less than the 0.02 brief cost
-        e.syncRevenue();
+        const e = await engineFor("0.01"); // less than the 0.02 brief cost
+        await e.syncRevenue();
         const r = await e.propose("p1");
         expect(r.ok).toBe(false);
         if (!r.ok) expect(r.reasons.join(" ")).toMatch(/nothing investable/);
     });
 
     it("proposes without approving, and reports the swap plan and hashes", async () => {
-        const e = engineFor("3.00");
-        e.syncRevenue();
+        const e = await engineFor("3.00");
+        await e.syncRevenue();
         const r = await e.propose("p1");
         expect(r.ok).toBe(true);
         if (!r.ok) return;
@@ -271,15 +272,15 @@ describe("the investing engine", () => {
     });
 
     it("will not execute a proposal that was never approved", async () => {
-        const e = engineFor("3.00");
-        e.syncRevenue();
+        const e = await engineFor("3.00");
+        await e.syncRevenue();
         await e.propose("p1");
         await expect(e.execute("p1")).rejects.toThrow(/expected APPROVED/);
     });
 
     it("refuses to approve without the owner's signature", async () => {
-        const e = engineFor("3.00");
-        e.syncRevenue();
+        const e = await engineFor("3.00");
+        await e.syncRevenue();
         await e.propose("p1");
         const r = await e.approve("p1", "0x" + "00".repeat(65));
         expect(r.ok).toBe(false);
@@ -288,8 +289,8 @@ describe("the investing engine", () => {
     });
 
     it("refuses a signature from anyone but the owner", async () => {
-        const e = engineFor("3.00");
-        e.syncRevenue();
+        const e = await engineFor("3.00");
+        await e.syncRevenue();
         const p = await e.propose("p1");
         expect(p.ok).toBe(true);
         if (!p.ok) return;
@@ -299,8 +300,8 @@ describe("the investing engine", () => {
     });
 
     it("refuses a signature made for a different chain", async () => {
-        const e = engineFor("3.00");
-        e.syncRevenue();
+        const e = await engineFor("3.00");
+        await e.syncRevenue();
         const p = await e.propose("p1");
         if (!p.ok) return;
         // same owner, same payload, wrong chain id: a testnet signature must not work on mainnet
@@ -309,8 +310,8 @@ describe("the investing engine", () => {
     });
 
     it("refuses a signature over a tampered ceiling", async () => {
-        const e = engineFor("3.00");
-        e.syncRevenue();
+        const e = await engineFor("3.00");
+        await e.syncRevenue();
         const p = await e.propose("p1");
         if (!p.ok) return;
         const td = p.toSign as { message: Record<string, string> };
@@ -320,8 +321,8 @@ describe("the investing engine", () => {
     });
 
     it("refuses to approve a proposal that was never offered", async () => {
-        const e = engineFor("3.00");
-        e.syncRevenue();
+        const e = await engineFor("3.00");
+        await e.syncRevenue();
         const r = await e.approve("nope", "0x" + "11".repeat(65));
         expect(r.ok).toBe(false);
         if (!r.ok) expect(r.reasons.join(" ")).toMatch(/no approval payload was offered/);
@@ -338,7 +339,7 @@ describe("the investing engine", () => {
             market,
             chainId: CHAIN_ID,
         });
-        e.syncRevenue();
+        await e.syncRevenue();
         await e.propose("p1");
         const r = await e.approve("p1", "0x" + "11".repeat(65));
         expect(r.ok).toBe(false);
@@ -346,8 +347,8 @@ describe("the investing engine", () => {
     });
 
     it("runs propose, approve and execute as three separate steps", async () => {
-        const e = engineFor("3.00");
-        e.syncRevenue();
+        const e = await engineFor("3.00");
+        await e.syncRevenue();
         const p = await e.propose("p1");
         expect(p.ok).toBe(true);
         if (!p.ok) return;
@@ -364,43 +365,43 @@ describe("the investing engine", () => {
         expect(e.treasury.ledger.all().every((l) => l.mode === "sim")).toBe(true);
     });
 
-    it("persists the investing book and reloads it", () => {
+    it("persists the investing book and reloads it", async () => {
         const store = new JsonlLedgerStore(join(dir, "invest.jsonl"));
-        const first = engineFor("3.00", store);
-        first.syncRevenue();
+        const first = await engineFor("3.00", store);
+        await first.syncRevenue();
         const investable = first.treasury.ledger.balance("surplus.investable");
 
-        const second = engineFor("3.00", store);
+        const second = await engineFor("3.00", store);
         expect(second.treasury.ledger.balance("surplus.investable")).toBe(investable);
         // the restored engine knows the revenue was already mirrored
         const n = second.treasury.ledger.all().length;
-        second.syncRevenue();
+        await second.syncRevenue();
         expect(second.treasury.ledger.all().length).toBe(n);
     });
 });
 
 describe("owner working capital", () => {
-    it("records the owner's float so the books do not report money that was never there", () => {
-        const e = engineFor("0.01"); // revenue below the brief cost
-        e.syncRevenue();
+    it("records the owner's float so the books do not report money that was never there", async () => {
+        const e = await engineFor("0.01"); // revenue below the brief cost
+        await e.syncRevenue();
         expect(e.treasury.ledger.balance("cash.operating")).toBeGreaterThan(0n);
         expect(reconcileInternal(e.treasury.ledger).ok).toBe(true);
         const opening = e.treasury.ledger.all().find((x) => x.type === "OPENING_BALANCE")!;
         expect(opening.memo).toContain("owner-provided working capital (simulated)");
     });
 
-    it("without a float, a brief costing more than it earned shows up as negative cash", () => {
+    it("without a float, a brief costing more than it earned shows up as negative cash", async () => {
         // this is the state that reconciliation is supposed to catch, not paper over
-        const e = engineFor("0.01", undefined, 0n);
-        e.syncRevenue();
+        const e = await engineFor("0.01", undefined, 0n);
+        await e.syncRevenue();
         expect(e.treasury.ledger.balance("cash.operating")).toBeLessThan(0n);
         expect(reconcileInternal(e.treasury.ledger).issues).toContain("negative balance on cash.operating");
     });
 
-    it("does not fund the agent twice across a restart", () => {
+    it("does not fund the agent twice across a restart", async () => {
         const store = new JsonlLedgerStore(join(dir, "invest.jsonl"));
-        engineFor("3.00", store).syncRevenue();
-        const second = engineFor("3.00", store);
+        await (await engineFor("3.00", store)).syncRevenue();
+        const second = await engineFor("3.00", store);
         expect(second.treasury.ledger.all().filter((x) => x.type === "OPENING_BALANCE").length).toBe(1);
         expect(second.treasury.ledger.balance("equity.opening")).toBe(-u("1.00"));
     });
@@ -411,11 +412,11 @@ describe("the owner routes", () => {
     const signedConfig = loadConfig({
         X402_PAY_TO: PAY_TO, OWNER_TOKEN: TOKEN, OWNER_ADDRESS: ownerAccount.address,
     } as NodeJS.ProcessEnv);
-    const build = () => buildServer({ config: signedConfig, mandates: mandateFor(terms), readBrief: savedBrief, engine: engineFor("3.00") });
+    const build = async () => buildServer({ config: signedConfig, mandates: mandateFor(terms), readBrief: savedBrief, engine: await engineFor("3.00") });
     const auth = (r: request.Test) => r.set("Authorization", `Bearer ${TOKEN}`);
 
     it("refuses every owner route without a valid token", async () => {
-        const { app } = build();
+        const { app } = await build();
         for (const path of ["/mandate", "/invest/ledger", "/invest/proposals"]) {
             expect((await request(app).get(path)).status).toBe(401);
             expect((await request(app).get(path).set("Authorization", "Bearer wrong")).status).toBe(401);
@@ -426,7 +427,7 @@ describe("the owner routes", () => {
     });
 
     it("does not leak whether a token is merely the wrong length", async () => {
-        const { app } = build();
+        const { app } = await build();
         const short = await request(app).get("/mandate").set("Authorization", "Bearer x");
         const wrong = await request(app).get("/mandate").set("Authorization", `Bearer ${"y".repeat(TOKEN.length)}`);
         expect(short.status).toBe(401);
@@ -435,7 +436,7 @@ describe("the owner routes", () => {
     });
 
     it("serves the mandate with its version and hash", async () => {
-        const { app } = build();
+        const { app } = await build();
         const res = await auth(request(app).get("/mandate"));
         expect(res.status).toBe(200);
         expect(res.body.version).toBe(1);
@@ -444,7 +445,7 @@ describe("the owner routes", () => {
     });
 
     it("walks sync, propose, approve, execute over HTTP", async () => {
-        const { app } = build();
+        const { app } = await build();
         const sync = await auth(request(app).post("/invest/sync"));
         expect(sync.status).toBe(200);
         expect(sync.body.sales).toBe(1);
@@ -473,7 +474,7 @@ describe("the owner routes", () => {
     });
 
     it("reports the investing ledger as reconciling, and labels the fills simulated", async () => {
-        const { app } = build();
+        const { app } = await build();
         await auth(request(app).post("/invest/sync"));
         const prop = await auth(request(app).post("/invest/propose")).send({ id: "p1" });
         await auth(request(app).post("/invest/approve"))
@@ -488,7 +489,7 @@ describe("the owner routes", () => {
     });
 
     it("rejects a propose or approve with no id where one is required", async () => {
-        const { app } = build();
+        const { app } = await build();
         expect((await auth(request(app).post("/invest/approve")).send({})).status).toBe(400);
         expect((await auth(request(app).post("/invest/execute")).send({})).status).toBe(400);
     });
@@ -530,7 +531,7 @@ describe("per-brief attribution", () => {
         return l.all();
     }
 
-    const engine = (briefs: SavedBrief[], sales: readonly LedgerTx[], store?: JsonlLedgerStore) =>
+    const engine = async (briefs: SavedBrief[], sales: readonly LedgerTx[], store?: JsonlLedgerStore) =>
         new InvestingEngine({
             mode: "sim",
             openingFloat: u("1.00"),
@@ -540,27 +541,27 @@ describe("per-brief attribution", () => {
             salesLedger: () => sales,
             market,
             chainId: CHAIN_ID,
-            ...(store && { store }),
+            ...(store ? { ledger: await openLedger(store), sink: store } : {}),
         });
 
-    it("books every brief's cost, not just the newest one", () => {
+    it("books every brief's cost, not just the newest one", async () => {
         const briefs = [briefNamed("b1", "0.02"), briefNamed("b2", "0.03"), briefNamed("b3", "0.04")];
-        const e = engine(briefs, salesFor([{ tx: "0xa", amount: "3.00", briefId: "b1" }]));
-        const r = e.syncRevenue();
+        const e = await engine(briefs, salesFor([{ tx: "0xa", amount: "3.00", briefId: "b1" }]));
+        const r = await e.syncRevenue();
         expect(r.briefsCosted).toBe(3);
         expect(r.costs).toBe(u("0.09"));
         // the ledger agrees: total model spend is all three briefs, not only the one that sold
         expect(e.treasury.ledger.balance("expense.llm")).toBe(u("0.09"));
     });
 
-    it("attributes each sale's revenue to the brief that was actually bought", () => {
+    it("attributes each sale's revenue to the brief that was actually bought", async () => {
         const briefs = [briefNamed("b1", "0.02"), briefNamed("b2", "0.02")];
-        const e = engine(briefs, salesFor([
+        const e = await engine(briefs, salesFor([
             { tx: "0xa", amount: "1.00", briefId: "b1" },
             { tx: "0xb", amount: "2.00", briefId: "b2" },
             { tx: "0xc", amount: "0.50", briefId: "b1" },
         ]));
-        const r = e.syncRevenue();
+        const r = await e.syncRevenue();
         expect(r.sales).toBe(3);
         expect(r.revenue).toBe(u("3.50"));
         expect(r.settled.map((x) => x.briefId)).toEqual(["b1", "b2"]);
@@ -570,42 +571,42 @@ describe("per-brief attribution", () => {
         expect(paid.map((x) => x.txHash)).toEqual(["0xa", "0xb", "0xc"]);
     });
 
-    it("counts each sale once, however often it syncs", () => {
+    it("counts each sale once, however often it syncs", async () => {
         const briefs = [briefNamed("b1", "0.02")];
         const sales = salesFor([{ tx: "0xa", amount: "1.00", briefId: "b1" }, { tx: "0xb", amount: "1.00", briefId: "b1" }]);
-        const e = engine(briefs, sales);
-        e.syncRevenue();
+        const e = await engine(briefs, sales);
+        await e.syncRevenue();
         const n = e.treasury.ledger.all().length;
-        const again = e.syncRevenue();
+        const again = await e.syncRevenue();
         expect(again.revenue).toBe(u("2.00"));
         expect(e.treasury.ledger.all().length).toBe(n);
         expect(e.treasury.ledger.balance("revenue.research")).toBe(-u("2.00"));
     });
 
-    it("picks up a new sale after a restart without re-mirroring the old ones", () => {
+    it("picks up a new sale after a restart without re-mirroring the old ones", async () => {
         const store = new JsonlLedgerStore(join(dir, "invest.jsonl"));
         const briefs = [briefNamed("b1", "0.02")];
-        engine(briefs, salesFor([{ tx: "0xa", amount: "1.00", briefId: "b1" }]), store).syncRevenue();
+        await (await engine(briefs, salesFor([{ tx: "0xa", amount: "1.00", briefId: "b1" }]), store)).syncRevenue();
 
-        const after = engine(briefs, salesFor([
+        const after = await engine(briefs, salesFor([
             { tx: "0xa", amount: "1.00", briefId: "b1" },
             { tx: "0xb", amount: "1.00", briefId: "b1" },
         ]), store);
-        after.syncRevenue();
+        await after.syncRevenue();
         expect(after.treasury.ledger.balance("revenue.research")).toBe(-u("2.00"));
         expect(after.treasury.ledger.all().filter((x) => x.type === "PAYMENT_RECEIVED").length).toBe(2);
     });
 
-    it("keeps revenue for a sale that never named its brief, and says how many", () => {
+    it("keeps revenue for a sale that never named its brief, and says how many", async () => {
         const briefs = [briefNamed("b1", "0.02")];
-        const e = engine(briefs, salesFor([{ tx: "0xa", amount: "1.00" }]));
-        const r = e.syncRevenue();
+        const e = await engine(briefs, salesFor([{ tx: "0xa", amount: "1.00" }]));
+        const r = await e.syncRevenue();
         expect(r.unattributedSales).toBe(1);
         expect(r.revenue).toBe(u("1.00"));
         expect(e.treasury.ledger.all().find((x) => x.type === "PAYMENT_RECEIVED")!.briefId).toBe(UNATTRIBUTED);
     });
 
-    it("refuses a book that lumped revenue before attribution existed, rather than guessing", () => {
+    it("refuses a book that lumped revenue before attribution existed, rather than guessing", async () => {
         const store = new JsonlLedgerStore(join(dir, "legacy.jsonl"));
         const legacy = new Ledger();
         legacy.post({
@@ -617,17 +618,17 @@ describe("per-brief attribution", () => {
             ],
         });
         store.append(legacy.all());
-        expect(() => engine([briefNamed("b1", "0.02")], salesFor([]), store))
-            .toThrow(/lumped revenue entry.*delete it and let it regenerate/s);
+        await expect(engine([briefNamed("b1", "0.02")], salesFor([]), store))
+            .rejects.toThrow(/lumped revenue entry/);
     });
 
-    it("sends the reserve gap to the first settled brief and the rest to surplus", () => {
+    it("sends the reserve gap to the first settled brief and the rest to surplus", async () => {
         const briefs = [briefNamed("b1", "0.02"), briefNamed("b2", "0.02")];
-        const e = engine(briefs, salesFor([
+        const e = await engine(briefs, salesFor([
             { tx: "0xa", amount: "1.00", briefId: "b1" },
             { tx: "0xb", amount: "1.00", briefId: "b2" },
         ]));
-        const r = e.syncRevenue();
+        const r = await e.syncRevenue();
         // reserve target is 0.50 in these terms, so b1 fills it and b2 is pure surplus
         expect(e.treasury.ledger.balance("reserve")).toBe(u("0.50"));
         expect(r.settled[0]!.investable).toBeLessThan(r.settled[1]!.investable);
@@ -636,7 +637,7 @@ describe("per-brief attribution", () => {
 });
 
 describe("H1 regression: later sales keep reaching the surplus", () => {
-    it("sweeps a second sale of the same brief instead of parking it in cash", () => {
+    it("sweeps a second sale of the same brief instead of parking it in cash", async () => {
         const briefs = [{ ...savedBrief(), costUsdcMinor: u("0.02") }];
         const one = [{ tx: "0xa", amount: "1.00", briefId: "brief-test" }];
         const two = [...one, { tx: "0xb", amount: "5.00", briefId: "brief-test" }];
@@ -664,12 +665,12 @@ describe("H1 regression: later sales keep reaching the surplus", () => {
             salesLedger: () => ledgerFor(current), market, chainId: CHAIN_ID,
         });
 
-        e.syncRevenue();
+        await e.syncRevenue();
         const afterFirst = e.treasury.ledger.balance("surplus.investable");
         expect(afterFirst).toBeGreaterThan(0n);
 
         current = two;
-        const r = e.syncRevenue();
+        const r = await e.syncRevenue();
         expect(r.revenue).toBe(u("6.00"));
         // the 5.00 second sale must reach the surplus, not sit in operating cash
         expect(e.treasury.ledger.balance("surplus.investable")).toBe(afterFirst + u("2.50"));
@@ -690,7 +691,7 @@ describe("H2 regression: a signature cannot cross a mandate change", () => {
         const mandates = new MandateStore();
         mandates.create(terms);
         const e = withMandates(mandates);
-        e.syncRevenue();
+        await e.syncRevenue();
 
         const p = await e.propose("p1");
         expect(p.ok).toBe(true);
@@ -711,7 +712,7 @@ describe("H2 regression: a signature cannot cross a mandate change", () => {
         const mandates = new MandateStore();
         mandates.create(terms);
         const e = withMandates(mandates);
-        e.syncRevenue();
+        await e.syncRevenue();
         const p = await e.propose("p1");
         if (!p.ok) return;
         const a = await e.approve("p1", await signOffer(ownerAccount, p.toSign));
@@ -743,7 +744,7 @@ describe("H3/H4 regression: buyer briefs do not disturb the owner's loop", () =>
 
     it("skips a theme the mandate does not fund instead of throwing", async () => {
         const e = engineForBrief(briefWithThemes("mixed", ["ai-compute", "a-buyers-own-theme"]));
-        e.syncRevenue();
+        await e.syncRevenue();
         const p = await e.propose("p1");
         expect(p.ok).toBe(true);
         if (!p.ok) return;
@@ -754,7 +755,7 @@ describe("H3/H4 regression: buyer briefs do not disturb the owner's loop", () =>
 
     it("refuses clearly when nothing in the brief is funded, rather than crashing", async () => {
         const e = engineForBrief(briefWithThemes("custom", ["a-buyers-own-theme"]));
-        e.syncRevenue();
+        await e.syncRevenue();
         const p = await e.propose("p1");
         expect(p.ok).toBe(false);
         if (!p.ok) expect(p.reasons.join(" ")).toMatch(/no theme the mandate funds.*a-buyers-own-theme/);
@@ -762,33 +763,33 @@ describe("H3/H4 regression: buyer briefs do not disturb the owner's loop", () =>
 });
 
 describe("M2 regression: working capital is a total, not a per-amount entry", () => {
-    const withFloat = (store: JsonlLedgerStore, float: bigint) => new InvestingEngine({
+    const withFloat = async (store: JsonlLedgerStore, float: bigint) => new InvestingEngine({
         mode: "sim", openingFloat: float, mandates: mandateFor(terms),
         readBrief: savedBrief, allBriefs: () => [savedBrief()],
-        salesLedger: () => salesLedger("3.00"), market, chainId: CHAIN_ID, store,
+        salesLedger: () => salesLedger("3.00"), market, chainId: CHAIN_ID, ledger: await openLedger(store), sink: store,
     });
 
-    it("books only the increase when the owner raises the float", () => {
+    it("books only the increase when the owner raises the float", async () => {
         const store = new JsonlLedgerStore(join(dir, "float.jsonl"));
-        withFloat(store, u("1.00"));
-        const second = withFloat(store, u("2.00"));
+        await withFloat(store, u("1.00"));
+        const second = await withFloat(store, u("2.00"));
         expect(second.treasury.ledger.balance("equity.opening")).toBe(-u("2.00"));
         expect(second.treasury.ledger.balance("cash.operating")).toBe(u("2.00"));
         expect(second.treasury.ledger.all().filter((x) => x.type === "OPENING_BALANCE").length).toBe(2);
     });
 
-    it("books nothing when the float is unchanged", () => {
+    it("books nothing when the float is unchanged", async () => {
         const store = new JsonlLedgerStore(join(dir, "same.jsonl"));
-        withFloat(store, u("1.00"));
-        const second = withFloat(store, u("1.00"));
+        await withFloat(store, u("1.00"));
+        const second = await withFloat(store, u("1.00"));
         expect(second.treasury.ledger.all().filter((x) => x.type === "OPENING_BALANCE").length).toBe(1);
         expect(second.treasury.ledger.balance("equity.opening")).toBe(-u("1.00"));
     });
 
-    it("refuses a reduction rather than rewriting history", () => {
+    it("refuses a reduction rather than rewriting history", async () => {
         const store = new JsonlLedgerStore(join(dir, "down.jsonl"));
-        withFloat(store, u("2.00"));
-        expect(() => withFloat(store, u("1.00"))).toThrow(/already booked/);
+        await withFloat(store, u("2.00"));
+        await expect(withFloat(store, u("1.00"))).rejects.toThrow(/already booked/);
     });
 });
 
@@ -818,7 +819,7 @@ describe("the mandate can forbid investing while behind", () => {
         // the sold brief earns 5.00 against its 0.10 cost, so there is surplus to invest,
         // but an unsold brief cost 6.00, leaving the agent 1.10 behind over its life
         const e = engineWith(mandates, "5.00", u("6.00"));
-        e.syncRevenue();
+        await e.syncRevenue();
         expect(e.treasury.ledger.balance("surplus.investable")).toBeGreaterThan(0n);
         expect(e.lifetime().behindBy).toBe(u("1.10"));
 
@@ -831,7 +832,7 @@ describe("the mandate can forbid investing while behind", () => {
         const mandates = new MandateStore();
         mandates.create({ ...terms, reserveTargetUsdc: u("0"), investOnlyWhenAhead: true });
         const e = engineWith(mandates, "5.00", u("1.00"));
-        e.syncRevenue();
+        await e.syncRevenue();
         expect(e.lifetime().behindBy).toBe(0n);
         const r = await e.propose("p1");
         expect(r.ok).toBe(true);
@@ -841,17 +842,17 @@ describe("the mandate can forbid investing while behind", () => {
         const mandates = new MandateStore();
         mandates.create({ ...terms, reserveTargetUsdc: u("0") }); // term absent
         const e = engineWith(mandates, "5.00", u("6.00"));
-        e.syncRevenue();
+        await e.syncRevenue();
         expect(e.lifetime().behindBy).toBeGreaterThan(0n);
         const r = await e.propose("p1");
         expect(r.ok).toBe(true); // behind, but nothing in this mandate forbids it
     });
 
-    it("reports the lifetime position from its own book", () => {
+    it("reports the lifetime position from its own book", async () => {
         const mandates = new MandateStore();
         mandates.create({ ...terms, reserveTargetUsdc: u("0") });
         const e = engineWith(mandates, "5.00", u("6.00"));
-        e.syncRevenue();
+        await e.syncRevenue();
         const l = e.lifetime();
         expect(l.revenue).toBe(u("5.00"));
         expect(l.costs).toBe(u("6.10")); // 0.10 for the sold brief, 6.00 for the unsold one

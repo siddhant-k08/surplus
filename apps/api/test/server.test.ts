@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import request from "supertest";
-import { parseUsdc as u, BASE_REGISTRY, JsonlLedgerStore, flushNewEntries, Ledger, MandateStore, type MandateTerms, type SavedBrief, type Brief } from "@surplus/core";
+import {
+    parseUsdc as u, BASE_REGISTRY, JsonlLedgerStore, flushNewEntries, openLedger, Ledger, MandateStore,
+    type MandateTerms, type SavedBrief, type Brief,
+} from "@surplus/core";
 import { buildServer, bookSettlement, salesFromLedger, BRIEF_ROUTE, type BookedSale } from "../src/server";
 import { UNATTRIBUTED } from "../src/investing";
 import { loadConfig, USDC, BASE_SEPOLIA } from "../src/config";
@@ -92,7 +95,7 @@ describe("bookSettlement", () => {
         return { treasury, sales };
     };
 
-    it("books a settled payment as revenue, once per transaction", () => {
+    it("books a settled payment as revenue, once per transaction", async () => {
         const { treasury, sales } = setup();
         const args = { treasury, sales, expectedAsset: ASSET, briefId: brief.id, facts: facts() };
         expect(bookSettlement(args)).toBe("booked");
@@ -104,7 +107,7 @@ describe("bookSettlement", () => {
         expect(treasury.ledger.all()[0]!.txHash).toBe("0xdeadbeef");
     });
 
-    it("prefers the actually settled amount over the required amount", () => {
+    it("prefers the actually settled amount over the required amount", async () => {
         const { treasury, sales } = setup();
         const v = bookSettlement({
             treasury, sales, expectedAsset: ASSET, briefId: brief.id,
@@ -114,7 +117,7 @@ describe("bookSettlement", () => {
         expect(treasury.ledger.balance("cash.operating")).toBe(u("2.50"));
     });
 
-    it("refuses to count another token's atomic units as USDC", () => {
+    it("refuses to count another token's atomic units as USDC", async () => {
         const { treasury, sales } = setup();
         const v = bookSettlement({
             treasury, sales, expectedAsset: ASSET, briefId: brief.id,
@@ -125,7 +128,7 @@ describe("bookSettlement", () => {
         expect(sales.length).toBe(0);
     });
 
-    it("books nothing for an unsuccessful or zero settlement", () => {
+    it("books nothing for an unsuccessful or zero settlement", async () => {
         const { treasury, sales } = setup();
         expect(bookSettlement({
             treasury, sales, expectedAsset: ASSET, briefId: brief.id, facts: facts({ success: false }),
@@ -136,13 +139,28 @@ describe("bookSettlement", () => {
         expect(treasury.ledger.all().length).toBe(0);
     });
 
-    it("matches the asset case-insensitively", () => {
+    it("matches the asset case-insensitively", async () => {
         const { treasury, sales } = setup();
         const v = bookSettlement({
             treasury, sales, expectedAsset: ASSET.toUpperCase().replace("0X", "0x"),
             briefId: brief.id, facts: facts({ asset: ASSET.toLowerCase() }),
         });
         expect(v).toBe("booked");
+    });
+});
+
+describe("what /health reports", () => {
+    it("names the storage that is live, because the wrong one does not announce itself", async () => {
+        const withDb = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, storage: "postgres" });
+        const res = await request(withDb.app).get("/health");
+        expect(res.body.storage).toBe("postgres");
+
+        const withFiles = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, storage: "files" });
+        expect((await request(withFiles.app).get("/health")).body.storage).toBe("files");
+
+        // a server built with no storage at all says so rather than claiming one
+        const neither = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved });
+        expect((await request(neither.app).get("/health")).body.storage).toBe("none");
     });
 });
 
@@ -155,8 +173,8 @@ describe("persistence", () => {
     });
     afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-    const bookOne = (tx: string) => {
-        const built = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, store });
+    const bookOne = async (tx: string) => {
+        const built = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, ledger: await openLedger(store), sink: store });
         const verdict = bookSettlement({
             treasury: built.treasury,
             sales: built.sales,
@@ -167,13 +185,13 @@ describe("persistence", () => {
         return { built, verdict };
     };
 
-    it("survives a restart: balances, sales and the brief sold all come back", () => {
-        const first = bookOne("0xaaa");
+    it("survives a restart: balances, sales and the brief sold all come back", async () => {
+        const first = await bookOne("0xaaa");
         expect(first.verdict).toBe("booked");
         // the server flushes inside the settle hook, so flush here the way the hook does
-        flushNewEntries(first.built.treasury.ledger, store, 0);
+        await flushNewEntries(first.built.treasury.ledger, store, 0);
 
-        const restarted = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, store });
+        const restarted = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, ledger: await openLedger(store), sink: store });
         expect(restarted.treasury.ledger.balance("cash.operating")).toBe(u("0.01"));
         expect(restarted.sales.length).toBe(1);
         expect(restarted.sales[0]!.transaction).toBe("0xaaa");
@@ -181,11 +199,11 @@ describe("persistence", () => {
         expect(restarted.treasury.ledger.all()[0]!.txHash).toBe("0xaaa");
     });
 
-    it("refuses to book the same settlement again after a restart", () => {
-        const first = bookOne("0xaaa");
-        flushNewEntries(first.built.treasury.ledger, store, 0);
+    it("refuses to book the same settlement again after a restart", async () => {
+        const first = await bookOne("0xaaa");
+        await flushNewEntries(first.built.treasury.ledger, store, 0);
 
-        const restarted = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, store });
+        const restarted = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, ledger: await openLedger(store), sink: store });
         const again = bookSettlement({
             treasury: restarted.treasury,
             sales: restarted.sales,
@@ -199,13 +217,13 @@ describe("persistence", () => {
         expect(restarted.sales.length).toBe(1);
     });
 
-    it("starts clean when there is no ledger file yet", () => {
-        const built = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, store });
+    it("starts clean when there is no ledger file yet", async () => {
+        const built = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, ledger: await openLedger(store), sink: store });
         expect(built.treasury.ledger.all()).toEqual([]);
         expect(built.sales).toEqual([]);
     });
 
-    it("works with no store at all, keeping everything in memory", () => {
+    it("works with no store at all, keeping everything in memory", async () => {
         const built = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved });
         expect(built.sales).toEqual([]);
         expect(existsSync(join(dir, "ledger.jsonl"))).toBe(false);
@@ -213,7 +231,7 @@ describe("persistence", () => {
 });
 
 describe("salesFromLedger", () => {
-    it("ignores entries that are not booked sales", () => {
+    it("ignores entries that are not booked sales", async () => {
         const l = new Ledger();
         l.post({ type: "REFUSAL", mode: "testnet", at: new Date("2026-11-21T00:00:00Z"), lines: [], memo: "nope" });
         l.post({
@@ -225,7 +243,7 @@ describe("salesFromLedger", () => {
 });
 
 describe("M1 regression: attribution never guesses", () => {
-    it("falls back to unattributed rather than to the newest brief", () => {
+    it("falls back to unattributed rather than to the newest brief", async () => {
         // outside a request there is no served-brief context, which is exactly the case where the old
         // code reached for `readBrief()` and attributed the sale to a brief nobody bought
         const { treasury } = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved });

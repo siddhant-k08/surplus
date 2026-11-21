@@ -34,33 +34,33 @@ const receipt = (over: Partial<Parameters<JsonlReceiptStore["issue"]>[0]> = {}) 
 });
 
 describe("the receipt store", () => {
-    it("round-trips a receipt through disk", () => {
+    it("round-trips a receipt through disk", async () => {
         const path = join(freshDir(), "nested", "receipts.jsonl");
         const store = new JsonlReceiptStore(path);
         const r = receipt();
-        store.issue(r);
+        await store.issue(r);
 
         const reopened = new JsonlReceiptStore(path);
-        expect(reopened.find(r.id)).toEqual(r);
-        expect(reopened.size).toBe(1);
+        expect(await reopened.find(r.id)).toEqual(r);
+        expect(await reopened.count()).toBe(1);
     });
 
-    it("issues one receipt per settlement, however often it is replayed", () => {
+    it("issues one receipt per settlement, however often it is replayed", async () => {
         const path = join(freshDir(), "receipts.jsonl");
         const store = new JsonlReceiptStore(path);
         const r = receipt();
-        store.issue(r);
-        store.issue(r);
-        expect(store.size).toBe(1);
+        await store.issue(r);
+        await store.issue(r);
+        expect(await store.count()).toBe(1);
         expect(readFileSync(path, "utf8").trimEnd().split("\n").length).toBe(1);
     });
 
-    it("finds the receipt a settlement produced", () => {
+    it("finds the receipt a settlement produced", async () => {
         const store = new JsonlReceiptStore(join(freshDir(), "receipts.jsonl"));
         const r = receipt();
-        store.issue(r);
-        expect(store.forTransaction(TX.toUpperCase())?.id).toBe(r.id);
-        expect(store.forTransaction("0x" + "cd".repeat(32))).toBe(null);
+        await store.issue(r);
+        expect((await store.forTransaction(TX.toUpperCase()))?.id).toBe(r.id);
+        expect(await store.forTransaction("0x" + "cd".repeat(32))).toBe(null);
     });
 
     it("mints ids that are long and url safe", () => {
@@ -114,7 +114,7 @@ describe("the receipt route", () => {
         // The mistake this guards: settlements are public on Base, so keying receipts on the transaction
         // would let anyone watching the seller's address read briefs they never bought.
         const { app, receipts } = build();
-        receipts.issue(receipt());
+        await receipts.issue(receipt());
         const res = await request(app).get(`/receipt/${TX}`);
         expect(res.status).toBe(404);
     });
@@ -122,7 +122,7 @@ describe("the receipt route", () => {
     it("serves the brief to whoever holds the receipt link", async () => {
         const { app, receipts } = build();
         const r = receipt();
-        receipts.issue(r);
+        await receipts.issue(r);
         const res = await request(app).get(`/receipt/${r.id}`);
         expect(res.status).toBe(200);
         expect(res.body.brief.id).toBe("brief-test");
@@ -140,8 +140,8 @@ describe("the receipt route", () => {
 
     it("says so when the brief behind a valid receipt is gone", async () => {
         const { app, receipts } = build();
-        receipts.issue(receipt({ briefId: "brief-that-was-deleted" }));
-        const r = receipts.find(receipts.forTransaction(TX)!.id)!;
+        await receipts.issue(receipt({ briefId: "brief-that-was-deleted" }));
+        const r = (await receipts.find((await receipts.forTransaction(TX))!.id))!;
         const res = await request(app).get(`/receipt/${r.id}`);
         expect(res.status).toBe(410);
         expect(res.body.receipt.transaction).toBe(TX);

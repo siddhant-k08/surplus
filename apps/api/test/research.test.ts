@@ -1,3 +1,4 @@
+import { DirBriefBackend } from "../src/briefs";
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -98,7 +99,7 @@ afterEach(() => {
 
 const service = (maxAgeSeconds = 86_400, model = countingLlm(), dir = freshDir()) => ({
     svc: new ResearchService({
-    briefsDir: dir,
+    briefs: new DirBriefBackend(dir),
     companies: async () => companies,
     docs,
     llm: model.llm,
@@ -205,7 +206,7 @@ describe("generating a brief on demand", () => {
     it("stops at the spend cap instead of spending without limit", async () => {
         const model = countingLlm();
         const capped = new ResearchService({
-            briefsDir: freshDir(),
+            briefs: new DirBriefBackend(freshDir()),
             companies: async () => companies,
             docs,
             llm: model.llm,
@@ -264,7 +265,7 @@ describe("M4 regression: concurrency and a total budget", () => {
     it("refuses once the process-wide research budget is used up", async () => {
         const model = countingLlm();
         const svc = new ResearchService({
-            briefsDir: freshDir(),
+            briefs: new DirBriefBackend(freshDir()),
             companies: async () => companies,
             docs,
             llm: model.llm,
@@ -282,7 +283,7 @@ describe("M4 regression: concurrency and a total budget", () => {
 
     it("refuses a configuration whose total is below one brief's cap", () => {
         expect(() => new ResearchService({
-            briefsDir: freshDir(),
+            briefs: new DirBriefBackend(freshDir()),
             companies: async () => companies, docs, llm: countingLlm().llm,
             provider: "t", model: "t",
             priceInputPerMTokUsd: 0.25, priceOutputPerMTokUsd: 1.5,
