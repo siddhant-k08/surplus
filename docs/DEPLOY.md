@@ -59,7 +59,9 @@ imported.
 
 ## Serverless, on Vercel
 
-`vercel.json` and `api/index.ts` are the whole deployment. The function assembles the agent once per
+Live at https://surplus-eosin-seven.vercel.app (project `surplus`, deployed 21 Nov 2026).
+
+`vercel.json` and the bundled `api/index.mjs` are the whole deployment. The function assembles the agent once per
 instance and serves every API route; `apps/web/dist` is served as static files by the platform, with
 anything unmatched falling back to `index.html` for the single-page app.
 
@@ -80,9 +82,29 @@ What it needs, and why:
   answers 402 rather than 500; the owner desk loads; sign-in sticks across a page reload (this is the one
   that proves sessions really are in the database); a receipt link opens the brief it paid for.
 
-One unverified assumption, stated as such: the rewrites select the function while leaving the original
-path in the request, which is what lets one Express app serve every route. If a route 404s on the first
-deploy with the function clearly running, that is the thing to check.
+### Two things the host does that broke the first deploy
+
+Both failed the same way, with every API route returning 500 while the static site served fine.
+
+1. **The function must be bundled before it is uploaded.** Vercel's builder transpiles a TypeScript
+   function without bundling it, which leaves extensionless relative imports Node cannot resolve and a
+   CommonJS wrapper around ESM syntax. `npm run build:serverless` bundles `apps/api/src/serverless.ts`
+   into `api/index.mjs` with esbuild, which also resolves `@surplus/core`, whose entry point is
+   TypeScript source rather than built JavaScript. The output is ESM because the code uses
+   `import.meta.url`, and it carries a `createRequire` banner because `debug`, reached through Express,
+   calls `require("tty")` dynamically and an ESM bundle has no `require`.
+2. **The deployment root is not where the code thinks it is.** `REPO_ROOT` is derived from the module's
+   own location, which is right for `apps/api/src` and points above the deployment for a bundle sitting
+   at the root. The serverless entry sets `SURPLUS_ROOT` from the working directory before anything
+   reads it. Without that the catalogue resolved to `/docs/briefs`, and the symptom was not an error:
+   every route answered, `GET /health` returned `"latestBrief": null`, and the agent had nothing to sell.
+
+The rewrites do leave the original path on the request, so one Express app serves every route. Verified
+on the deployment, not assumed.
+
+Each cold start logs one line (`vercel logs --deployment <url>`) naming the storage, the root, how many
+briefs the catalogue holds, the mandate version and the sales booked. Those are the things that can be
+wrong while every route still answers.
 
 ## Before the first start
 

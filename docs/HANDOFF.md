@@ -533,13 +533,118 @@ it. Fixed by setting the Wi-Fi connection's DNS to 1.1.1.1 and 8.8.8.8. The test
 resolver fallback; the application deliberately does not, because silently rerouting DNS in an app that
 holds database credentials is not a thing to do quietly.
 
+### Deployed, 21 Nov 2026
+
+Live at https://surplus-eosin-seven.vercel.app, Vercel project `surplus`, serving the Neon database.
+Verified on the deployment: `/health` reports `"storage": "postgres"`, the catalogue brief and 2 sales;
+`/catalogue` 200; `/brief` 402 with the same body the local server returns; `/mandate` 401 without
+credentials and v2 with the owner token; `/ledger` 401 because `PUBLIC_LEDGER` is unset; `/invest/ledger`
+9 entries with `reconcile.ok` true; the storefront renders and shows "2 sold, 0.020000 USDC earned" read
+from Postgres, with no console errors. The cold-start log line reads:
+
+```
+Surplus assembled: storage postgres, root /var/task, catalogue /var/task/docs/briefs (5 brief(s)),
+mandate v2, 2 sale(s) booked
+```
+
+Two host behaviours broke the first attempt, both making every API route 500 while the static site
+served fine. Vercel transpiles a TypeScript function without bundling it, so the function is now bundled
+by esbuild into `api/index.mjs` before upload (ESM, because the code uses `import.meta.url`, with a
+`createRequire` banner because `debug` calls `require("tty")` dynamically). And `REPO_ROOT`, derived
+from a module's own location, points above the deployment once the code is one bundled file at the root:
+the serverless entry now sets `SURPLUS_ROOT` from the working directory first. That second one did not
+announce itself, which is the lesson worth keeping: every route answered and `"latestBrief"` was simply
+null.
+
+Three private keys were deliberately not uploaded: `OWNER_PRIVATE_KEY` and `X402_BUYER_PRIVATE_KEY` are
+only used by the local `approve` and `buy` CLIs, and `EXECUTION_PRIVATE_KEY` is absent so the deployed
+agent cannot execute a real swap even if `MAINNET_ENABLED` were flipped by accident. `.vercelignore`
+keeps `.env` and `data/` off the host.
+
+## The research spend cap, fixed 22 Nov 2026
+
+The lifetime model-spend ceiling (`RESEARCH_TOTAL_MAX_USD`) was a field on `ResearchService`, which is
+rebuilt on every cold start. On serverless that made it a per-instance ceiling with nothing bounding the
+number of instances: the guard read as "$10 for the life of the deployment" and meant "$10 each".
+
+It is now counted from the stored briefs, through a new `BriefBackend.totalCostUsdcMinor()`, so every
+instance reads the same total. Postgres sums it in a `cost_usdc_minor` column (added with
+`alter table ... add column if not exists`, so the deployed database picked it up on the next start) and
+returns it as a decimal string of minor units, keeping money off the float path. The directory backend
+sums the files.
+
+A generation in flight is not stored yet but has committed real money, so it holds a reservation of
+`RESEARCH_MAX_USD` until the brief lands, released in a `finally` so a failed generation cannot hold the
+budget for ever.
+
+The first version of that reservation did not work, and the reason is worth keeping: the check called
+`budget()` and then reserved, and returning from an async method is itself an await hop. Two requests
+arriving together both read the total before either reserved, and both passed. The check and the
+reservation are now one synchronous step with no `await` between them. The test that caught it needed a
+model that could be held open: with an instant fake, the first generation finishes before the second one
+looks, and nothing concurrent is ever exercised.
+
+What this does not fix: two instances can still start a generation in the same instant, each reading a
+total the other has not written yet. The overshoot is bounded by one brief's cap per instance, and every
+generation is paid for at `RESEARCH_PRICE_USD`, which the config refuses to let fall below the cap. A
+reservation table in Postgres would close it properly if that ever matters.
+
+### A connection bug worth remembering, 22 Nov 2026
+
+Neon became unreachable from Siddhant's laptop while the deployment kept working, and the cause was not
+the network alone. Node tries the resolved addresses in parallel and allows each one 250 ms. From India
+to `us-east-1` every IPv4 attempt takes longer than that, and on a network where IPv6 is unreachable
+(`ENETUNREACH`, which one of his two networks does and the other does not) there is nothing left to
+succeed, so the connection fails with `ETIMEDOUT` even though a plain blocking socket connects and the
+server answers the SSL handshake. `openSql` now widens that window to 1500 ms (`widenConnectWindow`),
+which fixes the application as well as the tests: a deployment sitting beside its database never sees
+this, and a developer far from it sees nothing else.
+
+Worth knowing for next time: a failure in the Postgres suites' `beforeAll` is reported by vitest as
+"22 skipped" rather than as a failure, which reads like "no database configured". Check the output
+above the summary before believing it.
+
+## Paid-request durability, 22 Nov 2026
+
+The milestone after deployment: what happens to a buyer when something goes wrong mid-purchase.
+
+First, measured rather than guessed. `researchBrief` now records per-theme stage timings (`StageTiming`
+on `ResearchResult`), `ResearchService` logs them on every generation, and a real run of
+`demo-research.ts` over three themes took **16 s**: filings 5.3 s (the provider caches across themes, so
+only the first pays), model 10.4 s, 30 SEC requests, $0.0207. Against Vercel's 60 s ceiling that is
+comfortable but not vast, and a buyer asking for three dense themes is the case to watch. The timing
+line is in the production logs now, so this stays measured.
+
+That reframed the risk. If the function dies mid-handler, settlement never runs and the buyer is not
+charged, which is the safe direction. The dangerous window is narrower: the payment settles and the
+response never reaches the buyer. They are charged, and the receipt id existed only in that response.
+
+So a buyer can now prove the wallet that paid and get their links back:
+
+- The receipt records the `payer` the facilitator reported (new column, added with
+  `add column if not exists`, so the deployed database took it without a migration step).
+- `POST /receipt/nonce` offers an EIP-712 payload; `POST /receipt/recover` takes the signature and
+  returns every receipt that wallet paid for.
+- The address alone proves nothing, which is the whole point: payers are public on Base, so anyone
+  watching the seller could otherwise read other people's briefs. The nonce is single use and short
+  lived, so a captured signature cannot be replayed either. Same shape as the owner's sign-in, and
+  deliberately so.
+- The owner cannot recover someone else's briefs. Control of the paying wallet is the only key.
+- `apps/web/src/Recover.tsx` is the buyer's side of it: connect, sign, get the links. Checked at 375 px
+  for overflow, and the control explains itself when no wallet is present.
+
+Seven new tests cover it, including a signature from the wrong wallet, a replayed nonce, a nonce the
+server never issued, an address with no purchases, and a receipt written before payers were recorded.
+Core 256, API 175.
+
 ### Still open on this
 
-- The Vercel rewrites are assumed to leave the original path on the request, which is what lets one
-  Express app serve every route. Unverified until the first deploy; if a route 404s with the function
-  clearly running, that is the cause.
-- Nothing has been deployed. `DATABASE_URL` and every other variable have to go into the Vercel
-  project's environment variables, and the first-deploy checks are in `docs/DEPLOY.md`.
+- A real purchase against the deployed endpoint has not been made.
+  `X402_API_URL=https://surplus-eosin-seven.vercel.app npm run buy -w @surplus/api` would prove the loop
+  end to end and write the first sale into Postgres from the host. That spends testnet USDC from
+  Siddhant's buyer wallet, so it is his to run.
+- The deployment is not connected to GitHub (`vercel link` could not reach the repository), so deploys
+  are manual: `npm run build && npx vercel deploy --prod`.
 
 ## Next milestones, in order
 

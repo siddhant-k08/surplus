@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { Resolver } from "node:dns/promises";
 import postgres from "postgres";
 import { loadRootEnv } from "../src/paths";
-import { migrate, type Sql } from "../src/pg";
+import { migrate, widenConnectWindow, type Sql } from "../src/pg";
 
 /**
  * A disposable Postgres schema for one test file, or null when no database is configured.
@@ -12,6 +12,7 @@ import { migrate, type Sql } from "../src/pg";
  */
 
 loadRootEnv();
+widenConnectWindow();
 
 export const DATABASE_URL = (process.env.DATABASE_URL ?? "").trim();
 export const hasDatabase = DATABASE_URL !== "";
@@ -37,6 +38,8 @@ async function connect(url: string, schema: string): Promise<Sql> {
     const options = {
         max: 1,
         idle_timeout: 5,
+        // fail fast so a dead network falls through to the next address instead of hanging the suite
+        connect_timeout: 12,
         connection: { options: `-c search_path="${schema}"` },
         onnotice: () => {},
     } as const;
@@ -46,21 +49,39 @@ async function connect(url: string, schema: string): Promise<Sql> {
         password: decodeURIComponent(u.password),
         database: u.pathname.slice(1),
     };
-    try {
-        const sql = postgres({ ...options, ...credentials, host, ssl: { servername: host } });
+
+    const attempt = async (host_: string, servername: string): Promise<Sql> => {
+        const sql = postgres({ ...options, ...credentials, host: host_, ssl: { servername } });
         await sql`select 1`;
         return sql;
-    } catch (e) {
-        if (!(e instanceof Error) || !/EAI_AGAIN|ENOTFOUND|getaddrinfo/.test(String(e))) throw e;
+    };
+
+    try {
+        return await attempt(host, host);
+    } catch (first) {
+        // Two local network faults have each broken this, and neither is the application's problem: a
+        // resolver that answers REFUSED for the provider's name, and a network where the provider's
+        // IPv4 addresses time out while IPv6 works. So the addresses are resolved explicitly and tried
+        // one at a time, IPv6 first, with the hostname kept as the TLS name because the provider routes
+        // on SNI. Production connects with the connection string exactly as given.
         const resolver = new Resolver();
         resolver.setServers(["1.1.1.1", "8.8.8.8"]);
-        const [ip] = await resolver.resolve4(host);
-        return postgres({
-            ...options,
-            ...credentials,
-            host: ip,
-            ssl: { servername: host, rejectUnauthorized: true },
-        });
+        const addresses: string[] = [];
+        for (const lookup of [resolver.resolve6(host), resolver.resolve4(host)]) {
+            try {
+                addresses.push(...(await lookup));
+            } catch {
+                continue;
+            }
+        }
+        for (const address of addresses) {
+            try {
+                return await attempt(address, host);
+            } catch {
+                continue;
+            }
+        }
+        throw first;
     }
 }
 
