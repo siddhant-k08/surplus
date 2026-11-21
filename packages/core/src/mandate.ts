@@ -16,6 +16,17 @@ export interface MandateTerms {
     readonly maxSlippageBps: number;
     readonly driftToleranceBps: number;
     readonly approvalExpirySeconds: number;
+    /**
+     * Refuse to invest while the agent has spent more over its life than it has earned.
+     *
+     * Per-brief settlement means one brief that sold well can produce investable surplus even when the
+     * business as a whole is behind. Without this the agent would compound a loss.
+     *
+     * Optional on purpose. `canonicalJson` drops undefined keys, so a mandate written before this term
+     * existed hashes exactly as it did before and its stored chain still verifies. A mandate only gains
+     * the constraint when an owner sets it.
+     */
+    readonly investOnlyWhenAhead?: boolean;
 }
 
 export interface MandateVersion {

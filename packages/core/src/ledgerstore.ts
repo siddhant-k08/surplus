@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { Ledger, type AccountId, type EntryType, type Line, type LedgerTx, type Mode } from "./ledger";
+import type { LedgerStore } from "./storage";
 
 /**
  * Append-only JSONL persistence for the ledger, one entry per line in the order it was posted.
@@ -93,39 +94,39 @@ export function parseLedgerFile(text: string, where = "ledger"): LedgerTx[] {
     return out;
 }
 
-export class JsonlLedgerStore {
+/** The books as append-only JSONL on a disk. One implementation of `LedgerStore`. */
+export class JsonlLedgerStore implements LedgerStore {
     constructor(readonly path: string) {}
 
     /** Entries on disk, oldest first. An absent file is an empty ledger, not an error. */
-    load(): LedgerTx[] {
+    readSync(): LedgerTx[] {
         if (!existsSync(this.path)) return [];
         return parseLedgerFile(readFileSync(this.path, "utf8"), this.path);
     }
 
+    async load(): Promise<LedgerTx[]> {
+        return this.readSync();
+    }
+
     /** A ledger rebuilt from disk, with its dedup index and balances restored. */
     loadLedger(): Ledger {
-        return Ledger.replay(this.load());
+        return Ledger.replay(this.readSync());
     }
 
-    /** Appends entries in order. Creates the directory and file if needed. */
-    append(txs: readonly LedgerTx[]): void {
+    /**
+     * Appends entries in order, skipping any the file already holds.
+     *
+     * The skip makes a retry after a partial write safe: entry ids are assigned in order from 1, so
+     * anything at or below the last stored id is already there.
+     */
+    async append(txs: readonly LedgerTx[]): Promise<void> {
         if (txs.length === 0) return;
+        const lastStored = this.readSync().at(-1)?.id ?? 0;
+        const fresh = txs.filter((t) => t.id > lastStored);
+        if (fresh.length === 0) return;
         mkdirSync(dirname(this.path), { recursive: true });
-        appendFileSync(this.path, txs.map((t) => serializeTx(t) + "\n").join(""));
+        appendFileSync(this.path, fresh.map((t) => serializeTx(t) + "\n").join(""));
     }
-}
-
-/**
- * Appends whatever a ledger has that the store has not seen yet, and returns the new high-water mark.
- *
- * Entry ids are assigned in order from 1, so the id doubles as the cursor. This avoids having to intercept
- * every post: the caller flushes after doing work, and a crash before the flush loses only entries that
- * can be rebuilt from the same inputs.
- */
-export function flushNewEntries(ledger: Ledger, store: JsonlLedgerStore, lastPersistedId: number): number {
-    const pending = ledger.all().filter((t) => t.id > lastPersistedId);
-    store.append(pending);
-    return pending.length > 0 ? pending[pending.length - 1]!.id : lastPersistedId;
 }
 
 /** A sale the ledger actually records: a payment entry carrying its settlement transaction. */

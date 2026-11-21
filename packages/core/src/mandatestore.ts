@@ -28,6 +28,7 @@ interface StoredTerms {
     maxSlippageBps: number;
     driftToleranceBps: number;
     approvalExpirySeconds: number;
+    investOnlyWhenAhead?: boolean;
 }
 
 export function serializeMandate(v: MandateVersion): string {
@@ -43,6 +44,8 @@ export function serializeMandate(v: MandateVersion): string {
         maxSlippageBps: t.maxSlippageBps,
         driftToleranceBps: t.driftToleranceBps,
         approvalExpirySeconds: t.approvalExpirySeconds,
+        // written only when set, so a mandate from before this term keeps its original hash
+        ...(t.investOnlyWhenAhead !== undefined && { investOnlyWhenAhead: t.investOnlyWhenAhead }),
     };
     return JSON.stringify({
         version: v.version,
@@ -58,6 +61,11 @@ const minor = (v: unknown, field: string, where: string): bigint => {
         throw new Error(`${where}: terms.${field} must be a decimal string of USDC minor units, got ${JSON.stringify(v)}`);
     }
     return BigInt(v);
+};
+
+const bool = (v: unknown, field: string, where: string): boolean => {
+    if (typeof v !== "boolean") throw new Error(`${where}: terms.${field} must be true or false`);
+    return v;
 };
 
 const int = (v: unknown, field: string, where: string): number => {
@@ -110,6 +118,9 @@ export function parseMandateLine(line: string, where: string): MandateVersion {
         maxSlippageBps: int(t.maxSlippageBps, "maxSlippageBps", where),
         driftToleranceBps: int(t.driftToleranceBps, "driftToleranceBps", where),
         approvalExpirySeconds: int(t.approvalExpirySeconds, "approvalExpirySeconds", where),
+        ...(t.investOnlyWhenAhead === undefined
+            ? {}
+            : { investOnlyWhenAhead: bool(t.investOnlyWhenAhead, "investOnlyWhenAhead", where) }),
     };
 
     return { version: r.version, hash: r.hash, prevHash: r.prevHash, createdAt: r.createdAt, terms };

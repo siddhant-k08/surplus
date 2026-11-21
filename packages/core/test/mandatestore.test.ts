@@ -120,3 +120,37 @@ describe("openMandate", () => {
         expect(store.load().length).toBe(1);
     });
 });
+
+describe("the underwater term and stored-mandate compatibility", () => {
+    it("leaves the hash of a mandate written before the term existed untouched", () => {
+        // The migration hazard: adding a field that the hash covers would make every stored mandate
+        // fail verification and the server refuse to start. canonicalJson drops undefined keys, and the
+        // parser must not invent a default, so an old mandate hashes exactly as it did.
+        const before = new MandateStore().create(baseTerms());
+        const roundTripped = parseMandateFile(serializeMandate(before), "f")[0]!;
+        expect(roundTripped.hash).toBe(before.hash);
+        expect("investOnlyWhenAhead" in roundTripped.terms).toBe(false);
+        expect(() => new MandateStore().adopt([roundTripped])).not.toThrow();
+    });
+
+    it("carries the term when an owner sets it, and keeps the chain verifiable", () => {
+        const live = new MandateStore();
+        const v1 = live.create(baseTerms());
+        const v2 = live.create(baseTerms({ investOnlyWhenAhead: true }));
+        expect(v2.terms.investOnlyWhenAhead).toBe(true);
+        expect(v2.hash).not.toBe(v1.hash);
+
+        const back = parseMandateFile(`${serializeMandate(v1)}\n${serializeMandate(v2)}`, "f");
+        const store = new MandateStore();
+        store.adopt(back);
+        expect(store.verifyChain()).toBe(true);
+        expect(store.current().terms.investOnlyWhenAhead).toBe(true);
+    });
+
+    it("refuses a stored term that is not a boolean", () => {
+        const live = new MandateStore();
+        const line = serializeMandate(live.create(baseTerms({ investOnlyWhenAhead: true })));
+        expect(() => parseMandateFile(line.replace('"investOnlyWhenAhead":true', '"investOnlyWhenAhead":"yes"'), "f"))
+            .toThrow(/must be true or false/);
+    });
+});

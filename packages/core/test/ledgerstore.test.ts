@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Ledger } from "../src/ledger";
+import { flushNewEntries } from "../src/storage";
 import {
     JsonlLedgerStore,
-    flushNewEntries,
     parseLedgerFile,
     parseTxLine,
     realizedRevenue,
@@ -36,7 +36,7 @@ const sale = (at: Date, tx: string) => ({
 });
 
 describe("JsonlLedgerStore", () => {
-    it("round-trips a ledger through disk with every field and balance intact", () => {
+    it("round-trips a ledger through disk with every field and balance intact", async () => {
         const l = new Ledger();
         l.post(sale(new Date("2026-11-21T00:00:00Z"), "0xaaa"));
         l.post({
@@ -48,7 +48,7 @@ describe("JsonlLedgerStore", () => {
         });
 
         const store = new JsonlLedgerStore(path);
-        store.append(l.all());
+        await store.append(l.all());
         const back = store.loadLedger();
 
         expect(back.all()).toEqual(l.all());
@@ -65,12 +65,12 @@ describe("JsonlLedgerStore", () => {
         expect(JSON.parse(line).lines[0].amount).toBe("10000");
     });
 
-    it("a ledger reloaded from disk refuses the same settlement twice", () => {
+    it("a ledger reloaded from disk refuses the same settlement twice", async () => {
         const l = new Ledger();
         const s = sale(new Date("2026-11-21T00:00:00Z"), "0xaaa");
         l.post(s);
         const store = new JsonlLedgerStore(path);
-        store.append(l.all());
+        await store.append(l.all());
 
         const back = store.loadLedger();
         back.post(s); // the facilitator replays the settlement after a restart
@@ -78,38 +78,38 @@ describe("JsonlLedgerStore", () => {
         expect(back.balance("cash.operating")).toBe(u("0.01"));
     });
 
-    it("round-trips an event entry that moves no money", () => {
+    it("round-trips an event entry that moves no money", async () => {
         // Treasury records REFUSAL and PROPOSAL_CREATED as entries with no lines
         const l = new Ledger();
         l.post({ type: "REFUSAL", mode: "testnet", at: new Date("2026-11-21T00:00:00Z"), lines: [], memo: "quote too old" });
         const store = new JsonlLedgerStore(path);
-        store.append(l.all());
+        await store.append(l.all());
         const back = store.loadLedger();
         expect(back.all()).toEqual(l.all());
         expect(back.all()[0]!.memo).toBe("quote too old");
     });
 
-    it("treats a missing file as an empty ledger", () => {
+    it("treats a missing file as an empty ledger", async () => {
         const store = new JsonlLedgerStore(join(dir, "none.jsonl"));
-        expect(store.load()).toEqual([]);
+        expect(await store.load()).toEqual([]);
         expect(store.loadLedger().all()).toEqual([]);
     });
 
-    it("appends only what is new and reports the high-water mark", () => {
+    it("appends only what is new and reports the high-water mark", async () => {
         const l = new Ledger();
         const store = new JsonlLedgerStore(path);
         l.post(sale(new Date("2026-11-21T00:00:00Z"), "0xaaa"));
-        let mark = flushNewEntries(l, store, 0);
+        let mark = await flushNewEntries(l, store, 0);
         expect(mark).toBe(1);
 
-        mark = flushNewEntries(l, store, mark); // nothing new
+        mark = await flushNewEntries(l, store, mark); // nothing new
         expect(mark).toBe(1);
-        expect(store.load().length).toBe(1);
+        expect((await store.load()).length).toBe(1);
 
         l.post(sale(new Date("2026-11-21T00:00:02Z"), "0xbbb"));
-        mark = flushNewEntries(l, store, mark);
+        mark = await flushNewEntries(l, store, mark);
         expect(mark).toBe(2);
-        expect(store.load().length).toBe(2);
+        expect((await store.load()).length).toBe(2);
         expect(readFileSync(path, "utf8").trimEnd().split("\n").length).toBe(2);
     });
 });
@@ -190,11 +190,11 @@ describe("what the ledger proves was earned", () => {
         expect(realizedRevenue(l.all())).toBe(u("0.02")); // unchanged by the cost
     });
 
-    it("survives a round trip through the file", () => {
+    it("survives a round trip through the file", async () => {
         const l = mk(new Ledger());
         const store = new JsonlLedgerStore(path);
-        store.append(l.all());
-        expect(realizedRevenue(store.load())).toBe(u("0.02"));
-        expect(realizedSales(store.load())[0]!.briefId).toBe("brief-1");
+        await store.append(l.all());
+        expect(realizedRevenue(await store.load())).toBe(u("0.02"));
+        expect(realizedSales(await store.load())[0]!.briefId).toBe("brief-1");
     });
 });
