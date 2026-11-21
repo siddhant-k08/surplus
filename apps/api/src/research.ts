@@ -143,6 +143,12 @@ export interface ResearchDeps {
     maxSpendUsd: number;
     /** A cached brief for the same themes younger than this is served instead of generating again. */
     maxAgeSeconds: number;
+    /**
+     * Ceiling on what this process may spend generating briefs in total.
+     *
+     * `maxSpendUsd` caps one brief; without a total, N concurrent requests could spend N times that.
+     */
+    totalMaxSpendUsd: number;
     now?: () => Date;
 }
 
@@ -164,8 +170,22 @@ export interface ResearchOutcome {
  */
 export class ResearchService {
     private readonly now: () => Date;
+    /** Generations in flight, keyed by theme request, so identical requests share one. */
+    private readonly inFlight = new Map<string, Promise<ResearchOutcome>>();
+    private spentUsd = 0;
+
     constructor(private readonly deps: ResearchDeps) {
         this.now = deps.now ?? (() => new Date());
+        if (deps.totalMaxSpendUsd < deps.maxSpendUsd) {
+            throw new Error(
+                `totalMaxSpendUsd (${deps.totalMaxSpendUsd}) must be at least maxSpendUsd (${deps.maxSpendUsd})`,
+            );
+        }
+    }
+
+    /** What this process has spent generating briefs, and what it may still spend. */
+    budget(): { spentUsd: number; remainingUsd: number } {
+        return { spentUsd: this.spentUsd, remainingUsd: Math.max(0, this.deps.totalMaxSpendUsd - this.spentUsd) };
     }
 
     /** A brief for these themes that is young enough to serve, if one exists. */
@@ -182,10 +202,34 @@ export class ResearchService {
         return null;
     }
 
+    /**
+     * A brief for these themes, reusing a recent one or a generation already under way.
+     *
+     * Two identical requests arriving together used to miss the cache independently and both generate,
+     * paying twice for the same work. They now share one in-flight promise.
+     */
     async obtain(themes: readonly ThemeSpec[]): Promise<ResearchOutcome> {
         const cached = this.findCached(themes);
         if (cached !== null) {
             return { saved: cached, cached: true, costUsdcMinor: 0n, issues: 0, rejected: [] };
+        }
+
+        const key = themesKey(themes);
+        const running = this.inFlight.get(key);
+        if (running !== undefined) return running;
+
+        const started = this.generate(themes).finally(() => this.inFlight.delete(key));
+        this.inFlight.set(key, started);
+        return started;
+    }
+
+    private async generate(themes: readonly ThemeSpec[]): Promise<ResearchOutcome> {
+        const { remainingUsd } = this.budget();
+        if (remainingUsd < this.deps.maxSpendUsd) {
+            throw new Error(
+                `research budget exhausted: $${this.spentUsd.toFixed(4)} of $${this.deps.totalMaxSpendUsd} spent, ` +
+                `which leaves less than the $${this.deps.maxSpendUsd} a brief may cost`,
+            );
         }
 
         const companies = await this.deps.companies();
@@ -211,6 +255,7 @@ export class ResearchService {
             inputPerMTokUsd: this.deps.priceInputPerMTokUsd,
             outputPerMTokUsd: this.deps.priceOutputPerMTokUsd,
         });
+        this.spentUsd += costUsd;
         const costUsdcMinor = usdToUsdcMinor(costUsd);
 
         const saved: SavedBrief = {

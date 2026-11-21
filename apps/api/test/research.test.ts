@@ -107,6 +107,7 @@ const service = (maxAgeSeconds = 86_400, model = countingLlm(), dir = freshDir()
     priceInputPerMTokUsd: 0.25,
     priceOutputPerMTokUsd: 1.5,
     maxSpendUsd: 1.5,
+    totalMaxSpendUsd: 100,
     maxAgeSeconds,
     }),
     calls: model.calls,
@@ -213,6 +214,7 @@ describe("generating a brief on demand", () => {
             priceInputPerMTokUsd: 1000,
             priceOutputPerMTokUsd: 1000,
             maxSpendUsd: 0.000001,
+            totalMaxSpendUsd: 1,
             maxAgeSeconds: 86_400,
         });
         // the budget guard refuses the call, so the theme comes back as a gap rather than silently costing more
@@ -235,5 +237,56 @@ describe("the paid research route", () => {
         const { app } = buildServer({ config, mandates: mandateFor(terms), readBrief: () => { throw new Error("not used"); } });
         const res = await request(app).post(RESEARCH_ROUTE).send({ themes: [theme] });
         expect(res.status).toBe(404);
+    });
+});
+
+describe("M4 regression: concurrency and a total budget", () => {
+    it("shares one generation between identical simultaneous requests", async () => {
+        const { svc, calls, dir } = service();
+        const t = [theme];
+        const [a, b] = await Promise.all([svc.obtain(t), svc.obtain(t)]);
+        expect(calls()).toBe(1);                 // paid for once, not twice
+        expect(a.saved.brief.id).toBe(b.saved.brief.id);
+        expect(readdirSync(dir).length).toBe(1);
+        // exactly one of them carries the cost, so revenue accounting cannot double count it
+        expect([a.cached, b.cached].filter((x) => x === false).length).toBeGreaterThan(0);
+    });
+
+    it("still generates separately for different themes in parallel", async () => {
+        const { svc, calls } = service();
+        await Promise.all([
+            svc.obtain([theme]),
+            svc.obtain([{ ...theme, id: "other", name: "Other", description: "something else" }]),
+        ]);
+        expect(calls()).toBe(2);
+    });
+
+    it("refuses once the process-wide research budget is used up", async () => {
+        const model = countingLlm();
+        const svc = new ResearchService({
+            briefsDir: freshDir(),
+            companies: async () => companies,
+            docs,
+            llm: model.llm,
+            provider: "test", model: "test-model",
+            priceInputPerMTokUsd: 0.25, priceOutputPerMTokUsd: 1.5,
+            // the total equals one brief's cap, so any spend at all leaves too little for another brief
+            maxSpendUsd: 1, totalMaxSpendUsd: 1,
+            maxAgeSeconds: 0, // never reuse, so every call tries to generate
+        });
+        await svc.obtain([theme]);               // consumes budget
+        expect(svc.budget().spentUsd).toBeGreaterThan(0);
+        await expect(svc.obtain([{ ...theme, id: "second", name: "Second", description: "another" }]))
+            .rejects.toThrow(/research budget exhausted/);
+    });
+
+    it("refuses a configuration whose total is below one brief's cap", () => {
+        expect(() => new ResearchService({
+            briefsDir: freshDir(),
+            companies: async () => companies, docs, llm: countingLlm().llm,
+            provider: "t", model: "t",
+            priceInputPerMTokUsd: 0.25, priceOutputPerMTokUsd: 1.5,
+            maxSpendUsd: 2, totalMaxSpendUsd: 1, maxAgeSeconds: 10,
+        })).toThrow(/must be at least maxSpendUsd/);
     });
 });

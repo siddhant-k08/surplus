@@ -10,7 +10,7 @@ import {
     loadLiquidityScores,
     quoteLegs,
     loadLatestBrief,
-    loadBriefs,
+    scanBriefs,
     BASE_REGISTRY as REGISTRY,
     EdgarClient,
     EdgarDocProvider,
@@ -23,9 +23,12 @@ import {
 import { InvestingEngine, type MarketData } from "./investing";
 import { ResearchService } from "./research";
 import { verifyApprovalSignature } from "./signature";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import express from "express";
 import { loadConfig } from "./config";
 import { buildServer, BRIEF_ROUTE } from "./server";
-import { loadRootEnv } from "./paths";
+import { loadRootEnv, fromRepoRoot } from "./paths";
 
 const envPath = loadRootEnv();
 
@@ -88,7 +91,8 @@ function main(): void {
     // On-demand research. The model client and SEC provider are built once; the spend cap is applied per
     // brief inside the service, and the config refuses to let the cap exceed the sale price.
     const research = new ResearchService({
-        briefsDir: config.briefsDir,
+        // buyer-commissioned work lives apart from the owner's catalogue
+        briefsDir: config.customBriefsDir,
         companies: async (): Promise<readonly CandidateCompany[]> => {
             const { tokens } = await loadAllTokens();
             const names = new Map(REGISTRY.map((r) => [r.address.toLowerCase(), r.name]));
@@ -108,6 +112,7 @@ function main(): void {
         priceInputPerMTokUsd: Number(env("PRICE_INPUT_PER_MTOK_USD")),
         priceOutputPerMTokUsd: Number(env("PRICE_OUTPUT_PER_MTOK_USD")),
         maxSpendUsd: config.researchMaxUsd,
+        totalMaxSpendUsd: config.researchTotalMaxUsd,
         maxAgeSeconds: config.briefMaxAgeSeconds,
     });
 
@@ -122,8 +127,14 @@ function main(): void {
         mode: config.investMode,
         openingFloat: config.openingFloatUsdcMinor,
         mandates,
+        // Proposals are built from the owner's catalogue only: a buyer's themes are not funded by the
+        // mandate. Cost accounting covers both, because a buyer's brief cost the agent real money too.
         readBrief: () => loadLatestBrief(config.briefsDir),
-        allBriefs: () => loadBriefs(config.briefsDir),
+        allBriefs: () => [...scanBriefs(config.briefsDir).briefs, ...scanBriefs(config.customBriefsDir).briefs],
+        briefProblems: () => [
+            ...scanBriefs(config.briefsDir).problems,
+            ...scanBriefs(config.customBriefsDir).problems,
+        ],
         salesLedger: () => store.load(),
         market,
         store: new JsonlLedgerStore(config.investLedgerPath),
@@ -139,6 +150,17 @@ function main(): void {
 
     const { app, treasury, sales } = buildServer({ config, mandates, store, engine, research, updateMandate });
 
+    // The built owner desk and storefront, served by the same process that serves the API. Mounted last
+    // so a route added above always wins over a file with the same name.
+    const webDist = fromRepoRoot("apps/web/dist");
+    if (existsSync(webDist)) {
+        app.use(express.static(webDist, { index: "index.html" }));
+        // a single page app: anything unmatched that is not an API path falls back to index.html
+        app.get(/^(?!\/(?:health|brief|research|ledger|mandate|invest|auth|receipt)\b).*/, (_req, res) => {
+            res.sendFile(join(webDist, "index.html"));
+        });
+    }
+
     app.listen(config.port, () => {
         console.log(`Surplus research endpoint on http://localhost:${config.port}`);
         console.log(`  env         ${envPath ?? "no .env found at the repo root; using the process environment"}`);
@@ -150,14 +172,19 @@ function main(): void {
         console.log(`  network     ${config.network}`);
         console.log(`  facilitator ${config.facilitatorUrl}`);
         console.log(`  paid route  GET ${BRIEF_ROUTE} at ${config.priceUsd}, paid to ${config.payTo}`);
-        console.log(`  paid route  POST /research at ${config.researchPriceUsd} (cap $${config.researchMaxUsd} per brief, reuse within ${config.briefMaxAgeSeconds}s)`);
-        console.log(`  briefs      ${config.briefsDir}`);
+        console.log(
+            `  paid route  POST /research at ${config.researchPriceUsd} ` +
+            `(cap $${config.researchMaxUsd} per brief, $${config.researchTotalMaxUsd} total, reuse within ${config.briefMaxAgeSeconds}s)`,
+        );
+        console.log(`  catalogue   ${config.briefsDir} (served by GET /brief, funded by the mandate)`);
+        console.log(`  custom      ${config.customBriefsDir} (buyer-commissioned, never served to another buyer)`);
         console.log(
             `  ledger      ${config.ledgerPath} ` +
             `(${treasury.ledger.all().length} entries restored, ${sales.length} sales, ` +
             `cash ${formatUsdc(treasury.ledger.balance("cash.operating"))} USDC)`,
         );
         console.log(`  free        GET /health, GET /ledger`);
+        console.log(`  web         ${existsSync(webDist) ? webDist : "not built yet; run npm run build:web"}`);
         console.log(`  owner       POST /invest/sync|propose|approve|execute, GET /invest/ledger|proposals, GET /mandate`);
         console.log(`  approvals   EIP-712 signed by ${config.ownerAddress} on chain ${config.approvalChainId}`);
         console.log(`  invest book ${config.investLedgerPath} [${config.investMode}]${config.investMode === "mainnet" ? "" : " (fills simulated)"}`);

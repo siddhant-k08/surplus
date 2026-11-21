@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { paymentMiddleware, x402ResourceServer } from "@x402/express";
 import { HTTPFacilitatorClient } from "@x402/core/server";
@@ -17,12 +18,34 @@ import {
     type SavedBrief,
 } from "@surplus/core";
 import type { ApiConfig } from "./config";
-import { requireOwner } from "./owner";
-import type { InvestingEngine } from "./investing";
+import {
+    SessionStore, requireOwnerAccess, verifyLogin, loginPayload,
+    SESSION_COOKIE, SESSION_TTL_MS, readCookie,
+} from "./session";
+import { UNATTRIBUTED, type InvestingEngine } from "./investing";
 import { normalizeThemes, type ResearchService } from "./research";
 import { parseTermsUpdate, changedTerms } from "./terms";
 
 export const BRIEF_ROUTE = "/brief";
+
+/**
+ * Which brief the handler actually served, readable by the settlement hook.
+ *
+ * The hook runs after the handler in the same request, but it is not given the response, so it used to ask
+ * for "the newest brief" instead. That is wrong whenever the handler served something else: a cached
+ * custom brief, or any brief at all once a concurrent request has written a newer one. Revenue would then
+ * be attributed to a brief the buyer never bought.
+ */
+interface ServedContext {
+    briefId?: string;
+}
+const servedStore = new AsyncLocalStorage<ServedContext>();
+
+/** Records the brief this request served, so settlement can attribute the sale to it. */
+export function noteServedBrief(briefId: string): void {
+    const ctx = servedStore.getStore();
+    if (ctx !== undefined) ctx.briefId = briefId;
+}
 export const RESEARCH_ROUTE = "/research";
 
 export interface BookedSale {
@@ -101,6 +124,8 @@ export interface ServerDeps {
     engine?: InvestingEngine;
     /** When given, the paid on-demand research route is mounted. */
     research?: ResearchService;
+    /** Shared so tests can drive sign-in; one is made per server otherwise. */
+    sessions?: SessionStore;
     /**
      * Creates and persists a new mandate version from the owner's terms.
      *
@@ -151,6 +176,7 @@ export function mandateView(m: MandateVersion) {
 
 export interface BuiltServer {
     app: Express;
+    sessions: SessionStore;
     treasury: Treasury;
     sales: BookedSale[];
 }
@@ -185,7 +211,9 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 treasury,
                 sales,
                 expectedAsset: config.expectedAsset,
-                briefId: readBrief().brief.id,
+                // never fall back to "the newest brief": attributing a sale to the wrong brief is worse
+                // than recording that it is unknown, which `syncRevenue` reports as unattributed
+                briefId: servedStore.getStore()?.briefId ?? UNATTRIBUTED,
                 facts: {
                     success: result.success,
                     transaction: result.transaction,
@@ -212,8 +240,71 @@ export function buildServer(deps: ServerDeps): BuiltServer {
 
     const app = express();
     app.disable("x-powered-by");
+    app.use((_req, _res, next) => servedStore.run({}, next));
     // a small cap: these bodies carry an id, never a document
     app.use(express.json({ limit: "16kb" }));
+
+    const sessions = deps.sessions ?? new SessionStore();
+    const owner = requireOwnerAccess({ token: config.ownerToken, sessions });
+
+    // ---- sign in with the owner wallet ----
+    //
+    // The nonce is single use and expires, the signature is EIP-712 bound to the chain, and the
+    // recovered address must equal the configured owner. The session rides in an httpOnly,
+    // SameSite=Strict cookie so another origin cannot use it, and it never contains the owner token.
+    app.post("/auth/nonce", (_req: Request, res: Response) => {
+        const { nonce, issuedAt } = sessions.issueNonce();
+        const payload = loginPayload({
+            address: config.ownerAddress, nonce, issuedAt, chainId: config.approvalChainId,
+        });
+        // issuedAt is a uint256 in the typed data, so it crosses the wire as a decimal string
+        res.json({
+            ...payload,
+            message: { ...payload.message, issuedAt: payload.message.issuedAt.toString() },
+        });
+    });
+
+    app.post("/auth/verify", async (req: Request, res: Response) => {
+        const body = req.body as { signature?: unknown; nonce?: unknown } | undefined;
+        if (typeof body?.signature !== "string" || typeof body.nonce !== "string") {
+            return void res.status(400).json({ error: "signature and nonce are required" });
+        }
+        const issuedAt = sessions.consumeNonce(body.nonce);
+        if (issuedAt === null) {
+            return void res.status(400).json({ error: "that sign-in request expired or was already used" });
+        }
+        const verdict = await verifyLogin({
+            signature: body.signature,
+            nonce: body.nonce,
+            issuedAt,
+            chainId: config.approvalChainId,
+            ownerAddress: config.ownerAddress,
+        });
+        if (!verdict.ok) return void res.status(401).json({ error: verdict.reason });
+
+        const { token, expiresAt } = sessions.open(verdict.address);
+        res.cookie(SESSION_COOKIE, token, {
+            httpOnly: true,
+            sameSite: "strict",
+            secure: config.cookieSecure,
+            maxAge: SESSION_TTL_MS,
+            path: "/",
+        });
+        res.json({ address: verdict.address, expiresAt });
+    });
+
+    app.post("/auth/logout", (req: Request, res: Response) => {
+        const cookie = readCookie(req.header("cookie"), SESSION_COOKIE);
+        if (cookie !== null) sessions.close(cookie);
+        res.clearCookie(SESSION_COOKIE, { path: "/" });
+        res.json({ signedOut: true });
+    });
+
+    app.get("/auth/me", (req: Request, res: Response) => {
+        const cookie = readCookie(req.header("cookie"), SESSION_COOKIE);
+        const address = cookie === null ? null : sessions.whoIs(cookie);
+        res.json({ signedIn: address !== null, address });
+    });
 
     app.use(
         paymentMiddleware(
@@ -269,6 +360,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             price: config.priceUsd,
             asset: config.expectedAsset,
             route: BRIEF_ROUTE,
+            ledgerPublic: config.publicLedger,
             latestBrief: briefId,
             latestBriefCreatedAt: createdAt,
             salesBooked: sales.length,
@@ -277,6 +369,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
 
     app.get(BRIEF_ROUTE, (_req: Request, res: Response) => {
         const saved = readBrief();
+        noteServedBrief(saved.brief.id);
         res.json({
             brief: saved.brief,
             provider: saved.provider,
@@ -301,6 +394,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             }
             try {
                 const outcome = await research.obtain(parsed.themes);
+                noteServedBrief(outcome.saved.brief.id);
                 res.json({
                     brief: outcome.saved.brief,
                     provider: outcome.saved.provider,
@@ -320,8 +414,10 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         });
     }
 
-    // free, read-only: the chronological ledger, so a buyer can see the sale was booked
-    app.get("/ledger", (_req: Request, res: Response) => {
+    // The chronological sales book. Public only when the operator opts in with PUBLIC_LEDGER=true;
+    // otherwise it needs the owner token, because it is the operator's whole financial history.
+    const ledgerGuards = config.publicLedger ? [] : [owner];
+    app.get("/ledger", ...ledgerGuards, (_req: Request, res: Response) => {
         res.json({
             mode: config.mode,
             entries: treasury.ledger.all().map((e) => ({
@@ -342,7 +438,6 @@ export function buildServer(deps: ServerDeps): BuiltServer {
     // These read or decide what to do with money, so they are gated. The bearer token only proves the
     // caller holds a secret; it is not the owner's signature on a trade. Nothing here ever approves on the
     // owner's behalf: propose, approve and execute are three separate calls on purpose.
-    const owner = requireOwner(config.ownerToken);
 
     // The mandate is the owner's own constraint set, not an investing feature, so these are mounted
     // whether or not an investing engine is wired in.
@@ -405,6 +500,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 sales: r.sales,
                 unattributedSales: r.unattributedSales,
                 briefsCosted: r.briefsCosted,
+                unreadableBriefs: r.unreadableBriefs,
                 revenueUsdcMinor: r.revenue.toString(),
                 costsUsdcMinor: r.costs.toString(),
                 investableUsdcMinor: r.investable.toString(),
@@ -413,7 +509,14 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         });
 
         app.post("/invest/propose", owner, async (req: Request, res: Response) => {
-            const id = typeof req.body?.id === "string" && req.body.id !== "" ? req.body.id : `p-${Date.now()}`;
+            const asked: unknown = req.body?.id;
+            if (asked !== undefined && (typeof asked !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(asked))) {
+                // the id ends up in persisted ledger memos, so it is bounded rather than free text
+                return void res.status(400).json({
+                    error: "id must be 1 to 64 characters of letters, digits, dot, underscore or hyphen",
+                });
+            }
+            const id = typeof asked === "string" ? asked : `p-${Date.now()}`;
             try {
                 const r = await engine.propose(id);
                 res.status(r.ok ? 200 : 409).json(r.ok ? { ...r.view, toSign: r.toSign, warnings: r.warnings } : { id, refused: r.reasons });
@@ -425,7 +528,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         // The owner's EIP-712 signature over the payload /invest/propose returned. There is no unsigned
         // path: the bearer token decides who may reach this route, the signature authorizes the spend.
         app.post("/invest/approve", owner, async (req: Request, res: Response) => {
-            const id = req.body?.id;
+            const id: unknown = req.body?.id;
             const signature = req.body?.signature;
             if (typeof id !== "string" || id === "") return void res.status(400).json({ error: "id is required" });
             if (typeof signature !== "string" || signature === "") {
@@ -442,7 +545,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         });
 
         app.post("/invest/execute", owner, async (req: Request, res: Response) => {
-            const id = req.body?.id;
+            const id: unknown = req.body?.id;
             if (typeof id !== "string" || id === "") return void res.status(400).json({ error: "id is required" });
             try {
                 const r = await engine.execute(id);
@@ -465,5 +568,5 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         });
     }
 
-    return { app, treasury, sales };
+    return { app, treasury, sales, sessions };
 }

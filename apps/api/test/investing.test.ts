@@ -634,3 +634,160 @@ describe("per-brief attribution", () => {
         expect(reconcileInternal(e.treasury.ledger).ok).toBe(true);
     });
 });
+
+describe("H1 regression: later sales keep reaching the surplus", () => {
+    it("sweeps a second sale of the same brief instead of parking it in cash", () => {
+        const briefs = [{ ...savedBrief(), costUsdcMinor: u("0.02") }];
+        const one = [{ tx: "0xa", amount: "1.00", briefId: "brief-test" }];
+        const two = [...one, { tx: "0xb", amount: "5.00", briefId: "brief-test" }];
+        let current = one;
+
+        const mk = (list: typeof one) => list.map((e, i) => ({ ...e, i }));
+        void mk;
+        const ledgerFor = (list: typeof one) => {
+            const l = new Ledger();
+            list.forEach((e, i) => l.post({
+                type: "PAYMENT_RECEIVED", mode: "testnet",
+                at: new Date(Date.parse("2026-11-21T00:00:00Z") + i * 1000),
+                idempotencyKey: `pay:x402:${e.tx}`, txHash: e.tx, briefId: e.briefId,
+                lines: [
+                    { account: "cash.operating", amount: u(e.amount) },
+                    { account: "revenue.research", amount: -u(e.amount) },
+                ],
+            }));
+            return l.all();
+        };
+
+        const e = new InvestingEngine({
+            mode: "sim", openingFloat: u("1.00"), mandates: mandateFor(terms),
+            readBrief: () => briefs[0]!, allBriefs: () => briefs,
+            salesLedger: () => ledgerFor(current), market, chainId: CHAIN_ID,
+        });
+
+        e.syncRevenue();
+        const afterFirst = e.treasury.ledger.balance("surplus.investable");
+        expect(afterFirst).toBeGreaterThan(0n);
+
+        current = two;
+        const r = e.syncRevenue();
+        expect(r.revenue).toBe(u("6.00"));
+        // the 5.00 second sale must reach the surplus, not sit in operating cash
+        expect(e.treasury.ledger.balance("surplus.investable")).toBe(afterFirst + u("2.50"));
+        expect(reconcileInternal(e.treasury.ledger).ok).toBe(true);
+    });
+});
+
+describe("H2 regression: a signature cannot cross a mandate change", () => {
+    const withMandates = (mandates: MandateStore) => new InvestingEngine({
+        mode: "sim", openingFloat: u("1.00"), mandates,
+        readBrief: savedBrief, allBriefs: () => [savedBrief()],
+        salesLedger: () => salesLedger("3.00"), market, chainId: CHAIN_ID,
+        verifyApproval: ({ approval, signature }) =>
+            verifyApprovalSignature({ approval, signature, chainId: CHAIN_ID, ownerAddress: ownerAccount.address }),
+    });
+
+    it("refuses an approval signed under the previous mandate version", async () => {
+        const mandates = new MandateStore();
+        mandates.create(terms);
+        const e = withMandates(mandates);
+        e.syncRevenue();
+
+        const p = await e.propose("p1");
+        expect(p.ok).toBe(true);
+        if (!p.ok) return;
+        const signature = await signOffer(ownerAccount, p.toSign);
+
+        // the owner changes a term the policy engine does not inspect, so nothing else would catch it
+        mandates.create({ ...terms, driftToleranceBps: 1 });
+
+        const a = await e.approve("p1", signature);
+        expect(a.ok).toBe(false);
+        if (!a.ok) expect(a.reasons.join(" ")).toMatch(/mandate changed since this was offered/);
+        // and the proposal must not be executable
+        await expect(e.execute("p1")).rejects.toThrow(/expected APPROVED/);
+    });
+
+    it("still accepts a signature when the mandate has not moved", async () => {
+        const mandates = new MandateStore();
+        mandates.create(terms);
+        const e = withMandates(mandates);
+        e.syncRevenue();
+        const p = await e.propose("p1");
+        if (!p.ok) return;
+        const a = await e.approve("p1", await signOffer(ownerAccount, p.toSign));
+        expect(a.ok).toBe(true);
+    });
+});
+
+describe("H3/H4 regression: buyer briefs do not disturb the owner's loop", () => {
+    const briefWithThemes = (id: string, themeIds: string[]): SavedBrief => ({
+        ...savedBrief(),
+        brief: {
+            ...savedBrief().brief,
+            id,
+            themes: themeIds.map((t) => ({
+                themeId: t,
+                gap: false,
+                claims: [{ id: `${t}:c1`, type: "fact" as const, text: "x", sourceIds: ["s1"],
+                    quotes: [{ sourceId: "s1", text: "data center revenue grew" }] }],
+                fits: [{ asset: NVDA.address, symbol: "NVDAc", fit: 5, evidence: 2, claimIds: [`${t}:c1`] }],
+            })),
+        },
+    });
+
+    const engineForBrief = (b: SavedBrief) => new InvestingEngine({
+        mode: "sim", openingFloat: u("1.00"), mandates: mandateFor(terms),
+        readBrief: () => b, allBriefs: () => [b],
+        salesLedger: () => salesLedger("3.00"), market, chainId: CHAIN_ID,
+    });
+
+    it("skips a theme the mandate does not fund instead of throwing", async () => {
+        const e = engineForBrief(briefWithThemes("mixed", ["ai-compute", "a-buyers-own-theme"]));
+        e.syncRevenue();
+        const p = await e.propose("p1");
+        expect(p.ok).toBe(true);
+        if (!p.ok) return;
+        expect(p.view.legs.length).toBeGreaterThan(0);
+        expect(p.view.legs.every((l) => l.theme === "ai-compute")).toBe(true);
+        expect(p.warnings.join(" ")).toMatch(/a-buyers-own-theme.*not funded/);
+    });
+
+    it("refuses clearly when nothing in the brief is funded, rather than crashing", async () => {
+        const e = engineForBrief(briefWithThemes("custom", ["a-buyers-own-theme"]));
+        e.syncRevenue();
+        const p = await e.propose("p1");
+        expect(p.ok).toBe(false);
+        if (!p.ok) expect(p.reasons.join(" ")).toMatch(/no theme the mandate funds.*a-buyers-own-theme/);
+    });
+});
+
+describe("M2 regression: working capital is a total, not a per-amount entry", () => {
+    const withFloat = (store: JsonlLedgerStore, float: bigint) => new InvestingEngine({
+        mode: "sim", openingFloat: float, mandates: mandateFor(terms),
+        readBrief: savedBrief, allBriefs: () => [savedBrief()],
+        salesLedger: () => salesLedger("3.00"), market, chainId: CHAIN_ID, store,
+    });
+
+    it("books only the increase when the owner raises the float", () => {
+        const store = new JsonlLedgerStore(join(dir, "float.jsonl"));
+        withFloat(store, u("1.00"));
+        const second = withFloat(store, u("2.00"));
+        expect(second.treasury.ledger.balance("equity.opening")).toBe(-u("2.00"));
+        expect(second.treasury.ledger.balance("cash.operating")).toBe(u("2.00"));
+        expect(second.treasury.ledger.all().filter((x) => x.type === "OPENING_BALANCE").length).toBe(2);
+    });
+
+    it("books nothing when the float is unchanged", () => {
+        const store = new JsonlLedgerStore(join(dir, "same.jsonl"));
+        withFloat(store, u("1.00"));
+        const second = withFloat(store, u("1.00"));
+        expect(second.treasury.ledger.all().filter((x) => x.type === "OPENING_BALANCE").length).toBe(1);
+        expect(second.treasury.ledger.balance("equity.opening")).toBe(-u("1.00"));
+    });
+
+    it("refuses a reduction rather than rewriting history", () => {
+        const store = new JsonlLedgerStore(join(dir, "down.jsonl"));
+        withFloat(store, u("2.00"));
+        expect(() => withFloat(store, u("1.00"))).toThrow(/already booked/);
+    });
+});

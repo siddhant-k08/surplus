@@ -5,6 +5,7 @@ import { join } from "node:path";
 import request from "supertest";
 import { parseUsdc as u, BASE_REGISTRY, JsonlLedgerStore, flushNewEntries, Ledger, MandateStore, type MandateTerms, type SavedBrief, type Brief } from "@surplus/core";
 import { buildServer, bookSettlement, salesFromLedger, BRIEF_ROUTE, type BookedSale } from "../src/server";
+import { UNATTRIBUTED } from "../src/investing";
 import { loadConfig, USDC, BASE_SEPOLIA } from "../src/config";
 
 const PAY_TO = "0x" + "a".repeat(40);
@@ -220,5 +221,43 @@ describe("salesFromLedger", () => {
             lines: [{ account: "expense.llm", amount: u("0.02") }, { account: "cash.operating", amount: u("-0.02") }],
         });
         expect(salesFromLedger(l.all())).toEqual([]);
+    });
+});
+
+describe("M1 regression: attribution never guesses", () => {
+    it("falls back to unattributed rather than to the newest brief", () => {
+        // outside a request there is no served-brief context, which is exactly the case where the old
+        // code reached for `readBrief()` and attributed the sale to a brief nobody bought
+        const { treasury } = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved });
+        const sales: BookedSale[] = [];
+        const verdict = bookSettlement({
+            treasury, sales, expectedAsset: ASSET, briefId: UNATTRIBUTED,
+            facts: facts({ requiredAmount: "10000" }),
+        });
+        expect(verdict).toBe("booked");
+        expect(treasury.ledger.all()[0]!.briefId).toBe(UNATTRIBUTED);
+        expect(treasury.ledger.all()[0]!.briefId).not.toBe(saved.brief.id);
+    });
+});
+
+describe("L4/L5 regression: ledger exposure and id validation", () => {
+    const TOK = "owner-token-for-tests-only";
+    const auth = (r: request.Test) => r.set("Authorization", `Bearer ${TOK}`);
+
+    it("keeps the sales ledger owner-only by default", async () => {
+        const { app } = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved });
+        expect((await request(app).get("/ledger")).status).toBe(401);
+        expect((await auth(request(app).get("/ledger"))).status).toBe(200);
+    });
+
+    it("publishes the ledger when the operator opts in", async () => {
+        const open = loadConfig({
+            X402_PAY_TO: PAY_TO, OWNER_TOKEN: TOK, OWNER_ADDRESS: "0x" + "9".repeat(40),
+            PUBLIC_LEDGER: "true",
+        } as NodeJS.ProcessEnv);
+        const { app } = buildServer({ config: open, mandates: mandateFor(terms), readBrief: () => saved });
+        expect((await request(app).get("/ledger")).status).toBe(200);
+        const health = await request(app).get("/health");
+        expect(health.body.ledgerPublic).toBe(true);
     });
 });

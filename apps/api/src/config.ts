@@ -23,7 +23,15 @@ export interface ApiConfig {
     facilitatorUrl: string;
     payTo: string;
     priceUsd: string;
+    /** The owner's catalogue, served by GET /brief and used by the investing loop. */
     briefsDir: string;
+    /**
+     * Buyer-commissioned briefs, kept apart from the catalogue.
+     *
+     * One directory for both would mean the cheap cached route served whatever a buyer just paid the
+     * premium price to have generated, and the investing loop would try to fund a buyer's own themes.
+     */
+    customBriefsDir: string;
     /** The asset the settled amount must be denominated in before any revenue is booked. */
     expectedAsset: string;
     /** Append-only JSONL file the ledger is persisted to. */
@@ -32,6 +40,8 @@ export interface ApiConfig {
     investLedgerPath: string;
     /** Mode of the investing book. `sim` while fills are simulated. */
     investMode: Mode;
+    /** Whether the session cookie is marked Secure. Off for plain-http localhost, on anywhere real. */
+    cookieSecure: boolean;
     /** Shared secret for the owner routes. Decides who may reach them, not what is authorized. */
     ownerToken: string;
     /** The address whose EIP-712 signature authorizes an approval. */
@@ -40,6 +50,13 @@ export interface ApiConfig {
     approvalChainId: number;
     /** Append-only JSONL file the owner's mandate history lives in. */
     mandatePath: string;
+    /**
+     * Whether GET /ledger is public.
+     *
+     * The sales book carries every transaction hash, amount and brief sold, which is the operator's full
+     * financial history. Transparency to a buyer is a deliberate choice, not a default.
+     */
+    publicLedger: boolean;
     /** Owner-provided working capital for the investing book, in USDC minor units. */
     openingFloatUsdcMinor: bigint;
     /** Price of an on-demand brief generated for the buyer's own themes. */
@@ -48,6 +65,8 @@ export interface ApiConfig {
     researchMaxUsd: number;
     /** A cached brief for the same themes younger than this is served instead of generating again. */
     briefMaxAgeSeconds: number;
+    /** Ceiling on total research spend for the life of this process. */
+    researchTotalMaxUsd: number;
     /** Ledger mode tag. Never "sim": money really moves on a testnet. */
     mode: Mode;
 }
@@ -128,6 +147,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         );
     }
 
+    const totalRaw = (env.RESEARCH_TOTAL_MAX_USD ?? "10.00").trim();
+    const researchTotalMaxUsd = Number(totalRaw);
+    if (!Number.isFinite(researchTotalMaxUsd) || researchTotalMaxUsd < researchMaxUsd) {
+        throw new Error(
+            `RESEARCH_TOTAL_MAX_USD must be a number at least RESEARCH_MAX_USD (${researchMaxUsd}), got ${totalRaw}`,
+        );
+    }
+
     const ageRaw = (env.BRIEF_MAX_AGE_SECONDS ?? "86400").trim();
     const briefMaxAgeSeconds = Number(ageRaw);
     if (!Number.isInteger(briefMaxAgeSeconds) || briefMaxAgeSeconds < 0) {
@@ -147,6 +174,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         throw new Error(`APPROVAL_CHAIN_ID must be a positive integer, got ${chainRaw}`);
     }
 
+    // A Secure cookie is never sent over plain http, so local development would silently fail to sign in.
+    // Default on, off only when explicitly developing against http.
+    const cookieSecure = (env.COOKIE_SECURE ?? "true").trim() !== "false";
+
     // The owner routes move money, so there is no default and no open mode: an unset token is a refusal.
     const ownerToken = (env.OWNER_TOKEN ?? "").trim();
     if (ownerToken.length < 16) {
@@ -160,17 +191,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         payTo,
         priceUsd,
         briefsDir: fromRepoRoot((env.BRIEFS_DIR ?? "docs/briefs").trim()),
+        customBriefsDir: fromRepoRoot((env.CUSTOM_BRIEFS_DIR ?? "data/briefs-custom").trim()),
         // one file per mode: a testnet ledger and a mainnet ledger must never share a file
         ledgerPath: fromRepoRoot((env.LEDGER_PATH ?? `data/ledger-${network === BASE_MAINNET ? "mainnet" : "testnet"}.jsonl`).trim()),
         investLedgerPath: fromRepoRoot((env.INVEST_LEDGER_PATH ?? `data/ledger-invest-${investMode}.jsonl`).trim()),
         investMode,
         ownerAddress,
         approvalChainId,
+        cookieSecure,
+        publicLedger: (env.PUBLIC_LEDGER ?? "false").trim() === "true",
         mandatePath: fromRepoRoot((env.MANDATE_PATH ?? "data/mandate.jsonl").trim()),
         ownerToken,
         openingFloatUsdcMinor: openingFloat,
         researchPriceUsd,
         researchMaxUsd,
+        researchTotalMaxUsd,
         briefMaxAgeSeconds,
         expectedAsset,
         mode: network === BASE_MAINNET ? "mainnet" : "testnet",

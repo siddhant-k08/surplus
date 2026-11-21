@@ -55,6 +55,11 @@ export interface InvestingDeps {
     readBrief: () => SavedBrief;
     /** Every brief the agent has produced, so each one's model cost is booked exactly once. */
     allBriefs: () => readonly SavedBrief[];
+    /**
+     * Brief files that could not be read. Reported by `syncRevenue` because each one is a model cost
+     * missing from the ledger, which understates what the agent actually spent.
+     */
+    briefProblems?: () => readonly { file: string; error: string }[];
     /** The paid endpoint's ledger, read only, as the source of real revenue. */
     salesLedger: () => readonly LedgerTx[];
     market: () => Promise<MarketData>;
@@ -71,6 +76,8 @@ export const UNATTRIBUTED = "unattributed";
 
 export interface SyncResult {
     sales: number;
+    /** Brief files that could not be read, so their cost is not in the books. */
+    unreadableBriefs: { file: string; error: string }[];
     /** Sales whose ledger entry carries no brief id, so their revenue cannot be tied to a brief. */
     unattributedSales: number;
     briefsCosted: number;
@@ -141,24 +148,47 @@ export class InvestingEngine {
             }
         }
 
-        const float = deps.openingFloat ?? 0n;
-        if (float > 0n) {
-            // idempotent on the amount, so a restart does not fund the agent twice
+        // Working capital is a running total, not a per-amount entry. Keying on the amount meant that
+        // changing the configured float added a second entry instead of adjusting, silently inflating
+        // recorded equity. Only the difference is booked, and a reduction is refused: taking capital back
+        // out is an owner decision that needs its own deliberate entry, not a quiet config edit.
+        const wanted = deps.openingFloat ?? 0n;
+        if (wanted < 0n) throw new Error("openingFloat must not be negative");
+        const booked = -this.treasury.ledger.balance("equity.opening");
+        if (wanted < booked) {
+            throw new Error(
+                `openingFloat is ${wanted} but ${booked} of working capital is already booked. ` +
+                "Reducing it would rewrite history; book a withdrawal instead or reset the simulated book.",
+            );
+        }
+        const topUp = wanted - booked;
+        if (topUp > 0n) {
             this.treasury.ledger.post({
                 type: "OPENING_BALANCE",
                 mode: deps.mode,
                 at: this.now(),
-                idempotencyKey: `opening:${float.toString()}`,
+                idempotencyKey: `opening:total:${wanted.toString()}`,
                 memo: deps.mode === "mainnet"
                     ? "owner-provided working capital"
                     : "owner-provided working capital (simulated)",
                 lines: [
-                    { account: "cash.operating", amount: float },
-                    { account: "equity.opening", amount: -float },
+                    { account: "cash.operating", amount: topUp },
+                    { account: "equity.opening", amount: -topUp },
                 ],
             });
             this.flush();
         }
+    }
+
+    /** Exposure per asset so far, in the USDC that bought it, read from the positions accounts. */
+    heldByAsset(): Map<string, bigint> {
+        const out = new Map<string, bigint>();
+        for (const [account, amount] of this.treasury.ledger.balances()) {
+            if (!account.startsWith("positions.")) continue;
+            if (amount === 0n) continue;
+            out.set(account.slice("positions.".length).toLowerCase(), amount);
+        }
+        return out;
     }
 
     private flush(): void {
@@ -225,6 +255,7 @@ export class InvestingEngine {
         this.flush();
         return {
             sales: sales.length,
+            unreadableBriefs: [...(this.deps.briefProblems?.() ?? [])],
             unattributedSales: unattributed,
             briefsCosted: briefs.length,
             revenue,
@@ -257,11 +288,26 @@ export class InvestingEngine {
             return { ok: false, reasons: ["nothing investable; sync revenue first or sell more briefs"] };
         }
 
-        const themes = saved.brief.themes.map((t) => ({
-            id: t.themeId,
-            candidates: toCandidates(t.fits, market.liquidity, 3, 1),
-        }));
-        const alloc = allocate({ investable, themes, terms: this.mandates.current().terms });
+        // Only themes the mandate actually targets can be funded. A brief can legitimately carry others
+        // (a custom request, or a theme the owner has since dropped); the allocator throws on those, so
+        // they are filtered out here and reported rather than taking the whole proposal down.
+        const funded = new Set(this.mandates.current().terms.themes.map((t) => t.id));
+        const unfunded = saved.brief.themes.filter((t) => !funded.has(t.themeId)).map((t) => t.themeId);
+        const themes = saved.brief.themes
+            .filter((t) => funded.has(t.themeId))
+            .map((t) => ({ id: t.themeId, candidates: toCandidates(t.fits, market.liquidity, 3, 1) }));
+        if (themes.length === 0) {
+            return {
+                ok: false,
+                reasons: [
+                    `brief ${saved.brief.id} has no theme the mandate funds` +
+                    (unfunded.length > 0 ? ` (it covers ${unfunded.join(", ")})` : ""),
+                ],
+            };
+        }
+        // Count what is already held so the company cap limits total exposure, not just this proposal.
+        const held = this.heldByAsset();
+        const alloc = allocate({ investable, themes, terms: this.mandates.current().terms, held });
         if (alloc.legs.length === 0) {
             return {
                 ok: false,
@@ -270,7 +316,7 @@ export class InvestingEngine {
         }
 
         const quoted = await market.quote(alloc.legs);
-        const created = this.treasury.createProposal({ id, legs: alloc.legs, quotedPrices: quoted.prices });
+        const created = this.treasury.createProposal({ id, legs: alloc.legs, quotedPrices: quoted.prices, held });
         this.proposalIds.add(id);
         this.flush();
         if (!created.ok) return { ok: false, reasons: created.reasons };
@@ -293,7 +339,10 @@ export class InvestingEngine {
             ok: true,
             view: this.view(id),
             toSign: approvalTypedDataJson(approval, this.deps.chainId),
-            warnings: [...quoted.errors].map(([asset, why]) => `no quote for ${asset}: ${why}`),
+            warnings: [
+                ...[...quoted.errors].map(([asset, why]) => `no quote for ${asset}: ${why}`),
+                ...unfunded.map((t) => `theme ${t} is in the brief but not funded by the mandate, so it was skipped`),
+            ],
         };
     }
 
@@ -316,12 +365,27 @@ export class InvestingEngine {
             return { ok: false, reasons: [`no approval payload was offered for ${id}; propose it first`] };
         }
 
+        // The signature covers a mandate version and hash. If the mandate has moved since the offer, the
+        // owner authorized constraints that are no longer in force, so the signature must not be usable.
+        const mandate = this.mandates.current();
+        if (approval.mandateVersion !== mandate.version || approval.mandateHash !== mandate.hash) {
+            this.offered.delete(id);
+            return {
+                ok: false,
+                reasons: [
+                    `the mandate changed since this was offered (authorized v${approval.mandateVersion}, ` +
+                    `current v${mandate.version}); propose again and sign the new payload`,
+                ],
+            };
+        }
+
         const verdict = await verify({ approval, signature });
         if (!verdict.ok) return { ok: false, reasons: [verdict.reason] };
 
         const result = this.treasury.approve(id, verdict.signer, {
             expiresAt: approval.expiresAt,
             signature,
+            expect: approval,
         });
         this.flush();
         if (!result.ok) return { ok: false, reasons: result.reasons };
