@@ -132,6 +132,64 @@ export function bookSettlement(args: {
     return "booked";
 }
 
+/**
+ * Writes a settled sale down: the buyer's receipt, then the ledger.
+ *
+ * Separate from the hook so the failure path can be tested, because the failure path is the interesting
+ * one. The payment middleware holds the buyer's response until settlement finishes, so by the time this
+ * returns the sale is durable and only then is the brief released.
+ *
+ * It never throws. The money has already moved onchain: aborting here would tell the buyer their payment
+ * failed when they have been charged, and they would not get the brief either. A storage failure is
+ * logged in a form that can be reconciled against the chain by hand instead.
+ */
+export async function persistSale(args: {
+    receipts?: ReceiptStore;
+    sink?: LedgerSink;
+    ledger: Ledger;
+    persistedId: number;
+    served?: { briefId?: string; source?: "catalogue" | "custom"; receiptId?: string } | undefined;
+    transaction: string;
+    amountUsdcMinor: bigint;
+    payer?: string;
+}): Promise<number> {
+    const { served } = args;
+    try {
+        if (args.receipts !== undefined && served?.receiptId !== undefined && served.briefId !== undefined) {
+            await args.receipts.issue({
+                id: served.receiptId,
+                briefId: served.briefId,
+                source: served.source ?? "catalogue",
+                transaction: args.transaction,
+                amountUsdcMinor: args.amountUsdcMinor.toString(),
+                at: new Date().toISOString(),
+                // the buyer's only way back if this response never reaches them
+                ...(args.payer !== undefined && { payer: args.payer }),
+            });
+        }
+        let persistedId = args.persistedId;
+        if (args.sink !== undefined) {
+            persistedId = await flushNewEntries(args.ledger, args.sink, persistedId);
+        }
+        console.log(`booked ${formatUsdc(args.amountUsdcMinor)} USDC (tx ${args.transaction})`);
+        return persistedId;
+    } catch (e) {
+        console.error(
+            "MONEY RECEIVED BUT NOT RECORDED. Reconcile this against Base by hand: " +
+            JSON.stringify({
+                transaction: args.transaction,
+                amountUsdcMinor: args.amountUsdcMinor.toString(),
+                briefId: served?.briefId ?? UNATTRIBUTED,
+                payer: args.payer ?? null,
+                receiptId: served?.receiptId ?? null,
+                at: new Date().toISOString(),
+            }),
+            e,
+        );
+        return args.persistedId;
+    }
+}
+
 export interface ServerDeps {
     config: ApiConfig;
     /** The owner's mandate. Shared with the investing engine so both see the same version. */
@@ -283,25 +341,16 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 );
             } else if (verdict === "booked") {
                 const amount = BigInt(result.amount ?? requirements.amount);
-                const served = servedStore.getStore();
-                if (deps.receipts !== undefined && served?.receiptId !== undefined && served.briefId !== undefined) {
-                    await deps.receipts.issue({
-                        id: served.receiptId,
-                        briefId: served.briefId,
-                        source: served.source ?? "catalogue",
-                        transaction: result.transaction,
-                        amountUsdcMinor: amount.toString(),
-                        at: new Date().toISOString(),
-                        // the buyer's only way back if this response never reaches them
-                        ...(result.payer !== undefined && { payer: result.payer }),
-                    });
-                }
-                if (deps.sink !== undefined) {
-                    // flushed before this hook returns, so the settlement is durable before the SDK is
-                    // told the payment is done; a crash in between would leave money received unrecorded
-                    persistedId = await flushNewEntries(treasury.ledger, deps.sink, persistedId);
-                }
-                console.log(`booked ${formatUsdc(amount)} USDC (tx ${result.transaction})`);
+                persistedId = await persistSale({
+                    ...(deps.receipts !== undefined && { receipts: deps.receipts }),
+                    ...(deps.sink !== undefined && { sink: deps.sink }),
+                    ledger: treasury.ledger,
+                    persistedId,
+                    served: servedStore.getStore(),
+                    transaction: result.transaction,
+                    amountUsdcMinor: amount,
+                    ...(result.payer !== undefined && { payer: result.payer }),
+                });
             }
         });
 

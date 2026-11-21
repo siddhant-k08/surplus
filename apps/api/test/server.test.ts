@@ -7,7 +7,9 @@ import {
     parseUsdc as u, BASE_REGISTRY, JsonlLedgerStore, flushNewEntries, openLedger, Ledger, MandateStore,
     type MandateTerms, type SavedBrief, type Brief,
 } from "@surplus/core";
-import { buildServer, bookSettlement, salesFromLedger, BRIEF_ROUTE, type BookedSale } from "../src/server";
+import { buildServer, bookSettlement, persistSale, salesFromLedger, BRIEF_ROUTE, type BookedSale } from "../src/server";
+import { JsonlReceiptStore } from "../src/receipts";
+import { vi } from "vitest";
 import { UNATTRIBUTED } from "../src/investing";
 import { loadConfig, USDC, BASE_SEPOLIA } from "../src/config";
 
@@ -146,6 +148,110 @@ describe("bookSettlement", () => {
             briefId: brief.id, facts: facts({ asset: ASSET.toLowerCase() }),
         });
         expect(v).toBe("booked");
+    });
+});
+
+describe("writing a settled sale down", () => {
+    const tx = "0x" + "fe".repeat(32);
+    const served = { briefId: "brief-test", source: "catalogue" as const, receiptId: "r".repeat(32) };
+
+    it("stores the receipt and the ledger entry, and reports the new high-water mark", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "surplus-persist-"));
+        try {
+            const store = new JsonlLedgerStore(join(dir, "ledger.jsonl"));
+            const receipts = new JsonlReceiptStore(join(dir, "receipts.jsonl"));
+            const ledger = new Ledger();
+            ledger.post({
+                type: "PAYMENT_RECEIVED", mode: "testnet", at: new Date("2026-11-22T00:00:00Z"),
+                idempotencyKey: `x402:${tx}`, txHash: tx, briefId: "brief-test",
+                lines: [
+                    { account: "cash.operating", amount: u("0.01") },
+                    { account: "revenue.research", amount: u("-0.01") },
+                ],
+            });
+
+            const mark = await persistSale({
+                receipts, sink: store, ledger, persistedId: 0, served,
+                transaction: tx, amountUsdcMinor: u("0.01"), payer: "0x" + "b".repeat(40),
+            });
+            expect(mark).toBe(1);
+            expect((await store.load()).length).toBe(1);
+            expect((await receipts.find(served.receiptId))?.payer).toBe("0x" + "b".repeat(40));
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it("never throws when storage fails, and says exactly what to reconcile", async () => {
+        // The money has already moved onchain. Throwing here would fail the settlement closed, telling
+        // the buyer their payment failed when they have been charged, and they would not get the brief
+        // either. The sale must instead be recoverable by hand from the log.
+        const errors: string[] = [];
+        const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+            errors.push(args.map((a) => (typeof a === "string" ? a : "")).join(" "));
+        });
+        try {
+            const ledger = new Ledger();
+            ledger.post({
+                type: "PAYMENT_RECEIVED", mode: "testnet", at: new Date("2026-11-22T00:00:00Z"),
+                idempotencyKey: `x402:${tx}`, txHash: tx, briefId: "brief-test",
+                lines: [
+                    { account: "cash.operating", amount: u("0.01") },
+                    { account: "revenue.research", amount: u("-0.01") },
+                ],
+            });
+            const broken = {
+                load: async () => [],
+                append: async () => { throw new Error("the database is unreachable"); },
+            };
+            const mark = await persistSale({
+                sink: broken, ledger, persistedId: 0, served,
+                transaction: tx, amountUsdcMinor: u("0.01"), payer: "0x" + "b".repeat(40),
+            });
+            expect(mark).toBe(0); // unchanged: nothing was persisted
+            const logged = errors.join("\n");
+            expect(logged).toContain("MONEY RECEIVED BUT NOT RECORDED");
+            expect(logged).toContain(tx);
+            expect(logged).toContain("brief-test");
+            expect(logged).toContain(served.receiptId);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it("still records the ledger entry when only the receipt store fails", async () => {
+        const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const dir = mkdtempSync(join(tmpdir(), "surplus-persist-"));
+            const store = new JsonlLedgerStore(join(dir, "ledger.jsonl"));
+            const ledger = new Ledger();
+            ledger.post({
+                type: "PAYMENT_RECEIVED", mode: "testnet", at: new Date("2026-11-22T00:00:00Z"),
+                idempotencyKey: `x402:${tx}`, txHash: tx, briefId: "brief-test",
+                lines: [
+                    { account: "cash.operating", amount: u("0.01") },
+                    { account: "revenue.research", amount: u("-0.01") },
+                ],
+            });
+            const brokenReceipts = {
+                issue: async () => { throw new Error("receipts are unreachable"); },
+                find: async () => null,
+                forTransaction: async () => null,
+                forPayer: async () => [],
+                count: async () => 0,
+            };
+            // the receipt is the buyer's convenience; the ledger is the money, and this reports the
+            // failure rather than pretending either happened
+            const mark = await persistSale({
+                receipts: brokenReceipts, sink: store, ledger, persistedId: 0, served,
+                transaction: tx, amountUsdcMinor: u("0.01"),
+            });
+            expect(mark).toBe(0);
+            expect(spy).toHaveBeenCalled();
+            rmSync(dir, { recursive: true, force: true });
+        } finally {
+            spy.mockRestore();
+        }
     });
 });
 
