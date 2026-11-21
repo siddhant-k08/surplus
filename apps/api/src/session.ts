@@ -46,12 +46,41 @@ interface Issued {
 }
 
 /**
- * Nonces and sessions, in memory on purpose.
+ * Where nonces and sessions live.
  *
- * A restart signs the owner out, which is the safe direction. Persisting sessions would mean a stolen
- * cookie outliving the process that issued it, for a desk that one person uses.
+ * A port, because the right answer depends on how the process runs. One long-lived process can keep them
+ * in memory, where a restart signs the owner out and that is the safe direction. A process that can be
+ * replaced between two requests cannot: the cookie it handed out a second ago would be unknown to the
+ * next instance, and sign-in would never stick. Either way a session is short lived and swept.
+ *
+ * Async because a database is.
  */
-export class SessionStore {
+export interface SessionStore {
+    /** A fresh single-use nonce for the owner to sign. */
+    issueNonce(): Promise<{ nonce: string; issuedAt: number; expiresAt: number }>;
+    /** Spends a nonce. Returns when it was issued, or null if it is unknown, used or expired. */
+    consumeNonce(nonce: string): Promise<number | null>;
+    /** Starts a session for an address and returns the cookie value. */
+    open(address: string): Promise<{ token: string; expiresAt: number }>;
+    /** The address behind a cookie, or null when it is unknown or expired. */
+    whoIs(token: string): Promise<string | null>;
+    close(token: string): Promise<void>;
+    /** Live sessions. For the startup banner, not for a request's path. */
+    count(): Promise<number>;
+}
+
+/** A fresh nonce. Shared by every implementation so the entropy is not an implementation detail. */
+export const newNonce = (): string => randomBytes(16).toString("hex");
+/** A fresh session cookie value. */
+export const newSessionToken = (): string => randomBytes(32).toString("hex");
+
+/**
+ * Nonces and sessions in memory. The right choice for one long-running process.
+ *
+ * A restart signs the owner out, which is the safe direction: nothing a browser holds outlives the
+ * process that issued it.
+ */
+export class MemorySessionStore implements SessionStore {
     private readonly nonces = new Map<string, Issued>();
     private readonly sessions = new Map<string, { address: string; expiresAt: number }>();
 
@@ -63,17 +92,16 @@ export class SessionStore {
         for (const [k, v] of this.sessions) if (v.expiresAt <= t) this.sessions.delete(k);
     }
 
-    issueNonce(): { nonce: string; issuedAt: number; expiresAt: number } {
+    async issueNonce(): Promise<{ nonce: string; issuedAt: number; expiresAt: number }> {
         this.sweep();
-        const nonce = randomBytes(16).toString("hex");
+        const nonce = newNonce();
         const issuedAt = Math.floor(this.now() / 1000);
         const expiresAt = this.now() + NONCE_TTL_MS;
         this.nonces.set(nonce, { expiresAt, issuedAt });
         return { nonce, issuedAt, expiresAt };
     }
 
-    /** Spends a nonce. Returns when it was issued, or null if it is unknown, used or expired. */
-    consumeNonce(nonce: string): number | null {
+    async consumeNonce(nonce: string): Promise<number | null> {
         this.sweep();
         const found = this.nonces.get(nonce);
         if (found === undefined) return null;
@@ -81,24 +109,25 @@ export class SessionStore {
         return found.issuedAt;
     }
 
-    open(address: string): { token: string; expiresAt: number } {
+    async open(address: string): Promise<{ token: string; expiresAt: number }> {
         this.sweep();
-        const token = randomBytes(32).toString("hex");
+        const token = newSessionToken();
         const expiresAt = this.now() + SESSION_TTL_MS;
         this.sessions.set(token, { address, expiresAt });
         return { token, expiresAt };
     }
 
-    whoIs(token: string): string | null {
+    async whoIs(token: string): Promise<string | null> {
         this.sweep();
         return this.sessions.get(token)?.address ?? null;
     }
 
-    close(token: string): void {
+    async close(token: string): Promise<void> {
         this.sessions.delete(token);
     }
 
-    get size(): number {
+    async count(): Promise<number> {
+        this.sweep();
         return this.sessions.size;
     }
 }
@@ -183,9 +212,9 @@ const sameSecret = (given: string, expected: string): boolean => {
 export function requireOwnerAccess(args: { token: string; sessions: SessionStore }) {
     if (args.token === "") throw new Error("owner token must not be empty");
 
-    return function ownerGate(req: Request, res: Response, next: NextFunction): void {
+    return async function ownerGate(req: Request, res: Response, next: NextFunction): Promise<void> {
         const cookie = readCookie(req.header("cookie"), SESSION_COOKIE);
-        if (cookie !== null && args.sessions.whoIs(cookie) !== null) {
+        if (cookie !== null && (await args.sessions.whoIs(cookie)) !== null) {
             next();
             return;
         }

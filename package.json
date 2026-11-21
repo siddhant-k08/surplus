@@ -9,7 +9,7 @@
         "test": "npm test -w @surplus/core && npm test -w @surplus/api",
         "test:core": "npm test -w @surplus/core",
         "test:api": "npm test -w @surplus/api",
-        "typecheck": "npm run typecheck -w @surplus/core && npm run typecheck -w @surplus/api && npm run typecheck -w @surplus/web",
+        "typecheck": "npm run typecheck -w @surplus/core && npm run typecheck -w @surplus/api && npm run typecheck -w @surplus/web && tsc -p api",
         "typecheck:scripts": "tsc -p scripts",
         "api": "npm start -w @surplus/api",
         "web": "npm run dev -w @surplus/web",

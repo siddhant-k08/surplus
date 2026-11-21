@@ -1,18 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
 import {
     researchBrief,
     budgetedLlm,
     estimateCostUsd,
     usdToUsdcMinor,
-    loadBriefs,
     type CandidateCompany,
     type DocProvider,
     type LlmClient,
     type SavedBrief,
     type ThemeSpec,
 } from "@surplus/core";
-import { join } from "node:path";
+import type { BriefBackend } from "./briefs";
 
 export const MAX_THEMES = 3;
 export const MAX_NAME = 80;
@@ -131,7 +129,8 @@ export function themesKey(themes: readonly ThemeSpec[]): string {
 }
 
 export interface ResearchDeps {
-    briefsDir: string;
+    /** Where a commissioned brief is stored and where the cache looks. Never the owner's catalogue. */
+    briefs: BriefBackend;
     companies: () => Promise<readonly CandidateCompany[]>;
     docs: () => DocProvider;
     llm: () => LlmClient;
@@ -189,12 +188,12 @@ export class ResearchService {
     }
 
     /** A brief for these themes that is young enough to serve, if one exists. */
-    findCached(themes: readonly ThemeSpec[]): SavedBrief | null {
+    async findCached(themes: readonly ThemeSpec[]): Promise<SavedBrief | null> {
         // a zero window means no reuse at all; without this an age of exactly zero reads as fresh
         if (this.deps.maxAgeSeconds <= 0) return null;
         const key = themesKey(themes);
         const oldest = this.now().getTime() - this.deps.maxAgeSeconds * 1000;
-        for (const saved of loadBriefs(this.deps.briefsDir)) {
+        for (const saved of await this.deps.briefs.list()) {
             if (saved.themesKey !== key) continue;
             if (Date.parse(saved.brief.createdAt) < oldest) continue;
             return saved;
@@ -209,7 +208,7 @@ export class ResearchService {
      * paying twice for the same work. They now share one in-flight promise.
      */
     async obtain(themes: readonly ThemeSpec[]): Promise<ResearchOutcome> {
-        const cached = this.findCached(themes);
+        const cached = await this.findCached(themes);
         if (cached !== null) {
             return { saved: cached, cached: true, costUsdcMinor: 0n, issues: 0, rejected: [] };
         }
@@ -268,27 +267,19 @@ export class ResearchService {
             themesKey: themesKey(themes),
         };
 
-        // written so a later request for the same themes can reuse it, and so the owner can audit it
-        mkdirSync(this.deps.briefsDir, { recursive: true });
-        writeFileSync(
-            join(this.deps.briefsDir, saved.file),
-            JSON.stringify(
-                {
-                    provider: saved.provider,
-                    model: saved.model,
-                    themesKey: saved.themesKey,
-                    themes,
-                    brief: saved.brief,
-                    issues: result.issues,
-                    rejected: result.rejected,
-                    usage: result.usage,
-                    costUsd,
-                    costUsdcMinor: costUsdcMinor.toString(),
-                },
-                null,
-                2,
-            ),
-        );
+        // stored so a later request for the same themes can reuse it, and so the owner can audit it
+        await this.deps.briefs.save(saved, {
+            provider: saved.provider,
+            model: saved.model,
+            themesKey: saved.themesKey,
+            themes,
+            brief: saved.brief,
+            issues: result.issues,
+            rejected: result.rejected,
+            usage: result.usage,
+            costUsd,
+            costUsdcMinor: costUsdcMinor.toString(),
+        });
 
         return { saved, cached: false, costUsdcMinor, issues: result.issues.length, rejected: result.rejected };
     }

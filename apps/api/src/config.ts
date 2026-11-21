@@ -53,6 +53,15 @@ export interface ApiConfig {
     /** Append-only JSONL file of what each buyer may come back to. */
     receiptsPath: string;
     /**
+     * Postgres connection string, or empty to keep the books in the JSONL files.
+     *
+     * Not a performance choice. The ledger, the mandate history, the receipts and a buyer's
+     * commissioned brief are all written while the agent runs, so a host that can replace the process
+     * (and its filesystem) between two requests needs a database or it loses settlements that really
+     * happened and resets the owner's constraints without saying so.
+     */
+    databaseUrl: string;
+    /**
      * Whether GET /ledger is public.
      *
      * The sales book carries every transaction hash, amount and brief sold, which is the operator's full
@@ -204,6 +213,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         publicLedger: (env.PUBLIC_LEDGER ?? "false").trim() === "true",
         mandatePath: fromRepoRoot((env.MANDATE_PATH ?? "data/mandate.jsonl").trim()),
         receiptsPath: fromRepoRoot((env.RECEIPTS_PATH ?? "data/receipts.jsonl").trim()),
+        databaseUrl: (env.DATABASE_URL ?? "").trim(),
         ownerToken,
         openingFloatUsdcMinor: openingFloat,
         researchPriceUsd,

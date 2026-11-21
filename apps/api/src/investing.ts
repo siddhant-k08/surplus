@@ -53,14 +53,22 @@ export interface InvestingDeps {
     openingFloat?: bigint;
     /** The owner's mandate, shared with the server so both see the same version. */
     mandates: MandateStore;
-    readBrief: () => SavedBrief;
+    /**
+     * The newest brief in the owner's catalogue.
+     *
+     * Allowed to return a promise: a brief may be stored in a database. A plain value is accepted too, so
+     * a test can hand over a fixture without ceremony.
+     */
+    readBrief: () => SavedBrief | Promise<SavedBrief>;
     /** Every brief the agent has produced, so each one's model cost is booked exactly once. */
-    allBriefs: () => readonly SavedBrief[];
+    allBriefs: () => readonly SavedBrief[] | Promise<readonly SavedBrief[]>;
     /**
      * Brief files that could not be read. Reported by `syncRevenue` because each one is a model cost
      * missing from the ledger, which understates what the agent actually spent.
      */
-    briefProblems?: () => readonly { file: string; error: string }[];
+    briefProblems?: () =>
+        | readonly { file: string; error: string }[]
+        | Promise<readonly { file: string; error: string }[]>;
     /** The paid endpoint's ledger, read only, as the source of real revenue. */
     salesLedger: () => readonly LedgerTx[];
     market: () => Promise<MarketData>;
@@ -231,7 +239,7 @@ export class InvestingEngine {
     async syncRevenue(): Promise<SyncResult> {
         // Every brief the agent produced cost real money, whether or not anyone bought it. Booking only
         // the newest one understated spending as soon as a second brief existed.
-        const briefs = this.deps.allBriefs();
+        const briefs = await this.deps.allBriefs();
         let costs = 0n;
         for (const saved of briefs) {
             this.treasury.accrueCost({
@@ -279,7 +287,7 @@ export class InvestingEngine {
         await this.flush();
         return {
             sales: sales.length,
-            unreadableBriefs: [...(this.deps.briefProblems?.() ?? [])],
+            unreadableBriefs: [...(await (this.deps.briefProblems?.() ?? []))],
             unattributedSales: unattributed,
             briefsCosted: briefs.length,
             revenue,
@@ -297,7 +305,7 @@ export class InvestingEngine {
         | { ok: true; view: ProposalView; toSign: unknown; warnings: string[] }
         | { ok: false; reasons: string[] }
     > {
-        const saved = this.deps.readBrief();
+        const saved = await this.deps.readBrief();
         const market = await this.deps.market();
         const eligible = new Set(market.trusted.map((t) => t.address.toLowerCase()));
 

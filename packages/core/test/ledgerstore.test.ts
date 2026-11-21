@@ -143,6 +143,16 @@ describe("reading the ledger file back", () => {
         });
         expect(() => parseLedgerFile(`${mk(1)}\n${mk(3)}\n`, "f")).toThrow(/ids jump from 1 to 3/);
     });
+
+    it("notices that the first entry is missing, not just a hole in the middle", () => {
+        // a file whose beginning was lost used to load as a shorter but apparently intact ledger, and
+        // replay would carry on from whatever id it found, with the missing money simply absent
+        const mk = (id: number) => JSON.stringify({
+            id, at: "2026-11-21T00:00:00.000Z", type: "PAYMENT_RECEIVED", mode: "testnet",
+            lines: [{ account: "cash.operating", amount: "1" }, { account: "revenue.research", amount: "-1" }],
+        });
+        expect(() => parseLedgerFile(`${mk(2)}\n${mk(3)}\n`, "f")).toThrow(/missing its beginning/);
+    });
 });
 
 describe("what the ledger proves was earned", () => {

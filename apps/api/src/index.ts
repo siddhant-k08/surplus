@@ -1,195 +1,33 @@
-import {
-    JsonlMandateStore,
-    openMandate,
-    parseUsdc as u,
-    BASE_REGISTRY,
-    JsonlLedgerStore,
-    openLedger,
-    formatUsdc,
-    loadAllTokens,
-    crossCheck,
-    loadLiquidityScores,
-    quoteLegs,
-    loadLatestBrief,
-    scanBriefs,
-    BASE_REGISTRY as REGISTRY,
-    EdgarClient,
-    EdgarDocProvider,
-    createAnthropicClient,
-    createGeminiClient,
-    type CandidateCompany,
-    type LlmClient,
-    type MandateTerms,
-} from "@surplus/core";
-import { InvestingEngine, type MarketData } from "./investing";
-import { ResearchService } from "./research";
-import { JsonlReceiptStore } from "./receipts";
-import { openExecutor } from "./executor";
-import { verifyApprovalSignature } from "./signature";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import express from "express";
+import { formatUsdc } from "@surplus/core";
 import { loadConfig } from "./config";
-import { buildServer, BRIEF_ROUTE } from "./server";
-import { loadRootEnv, fromRepoRoot } from "./paths";
+import { loadRootEnv } from "./paths";
+import { assemble } from "./app";
+import { BRIEF_ROUTE } from "./server";
+
+/**
+ * The long-running server: one process, a port, and a disk or a database behind it.
+ *
+ * Everything it serves is assembled by `assemble`, which the serverless entry point uses too. All this
+ * file adds is the listener, the banner that says exactly what is live, and a shutdown that finishes
+ * requests already in flight.
+ */
 
 const envPath = loadRootEnv();
 
-/**
- * The endpoint sells research; it does not invest. The treasury still settles against a real mandate, so the
- * terms are the same reserve and surplus rules the investing side uses, with the official registry as the
- * eligible set. The investing side runs in demo-live.ts against the same ledger rules.
- */
-/**
- * The mandate the agent starts with on a first run only. Once a mandate is stored, that one is
- * authoritative and these values are never applied again: see `openMandate`.
- */
-const initialTerms: MandateTerms = {
-    eligible: BASE_REGISTRY.map((r) => r.address),
-    themes: [
-        { id: "ai-compute", targetBps: 5000 },
-        { id: "platform-giants", targetBps: 3000 },
-        { id: "longevity-biotech", targetBps: 2000 },
-    ],
-    maxCompanyBps: 4000,
-    investShareBps: 5000,
-    maxTradeUsdc: u("1.00"),
-    minTradeUsdc: u("0.05"),
-    reserveTargetUsdc: u("2.00"),
-    maxSlippageBps: 100,
-    driftToleranceBps: 100,
-    approvalExpirySeconds: 600,
-    // A new deployment starts cautious. An existing stored mandate is untouched by this.
-    investOnlyWhenAhead: true,
-};
-
-function env(name: string): string {
-    const v = process.env[name];
-    if (v === undefined || v.trim() === "") throw new Error(`${name} is not set; on-demand research needs it`);
-    return v.trim();
-}
-
 async function main(): Promise<void> {
     const config = loadConfig();
-    const salesStore = new JsonlLedgerStore(config.ledgerPath);
-    const salesLedgerLoaded = await openLedger(salesStore);
-    const investStore = new JsonlLedgerStore(config.investLedgerPath);
-    const investLedger = await openLedger(investStore);
-
-    // One mandate, shared by the sales treasury and the investing engine, so both always see the same
-    // version. Two stores would drift apart the moment the owner changed a term.
-    const mandateStore = new JsonlMandateStore(config.mandatePath);
-    const { mandates, created } = openMandate(mandateStore, initialTerms);
-    const terms = mandates.current().terms;
-
-    // Market data is fetched per call rather than cached: a quote older than 25 s is refused by the gates,
-    // and the trusted token set can change under us.
-    const market = async (): Promise<MarketData> => {
-        const { tokens } = await loadAllTokens();
-        const trusted = crossCheck(tokens).trusted;
-        const liquidity = await loadLiquidityScores(trusted.map((t) => t.address));
-        const decimals = new Map(trusted.map((t) => [t.address, t.decimals]));
-        return {
-            trusted,
-            liquidity: liquidity.scores,
-            quote: (legs) => quoteLegs(legs, decimals, { slippageBps: terms.maxSlippageBps }),
-        };
-    };
-
-    // On-demand research. The model client and SEC provider are built once; the spend cap is applied per
-    // brief inside the service, and the config refuses to let the cap exceed the sale price.
-    const research = new ResearchService({
-        // buyer-commissioned work lives apart from the owner's catalogue
-        briefsDir: config.customBriefsDir,
-        companies: async (): Promise<readonly CandidateCompany[]> => {
-            const { tokens } = await loadAllTokens();
-            const names = new Map(REGISTRY.map((r) => [r.address.toLowerCase(), r.name]));
-            return crossCheck(tokens).trusted.map((t) => ({
-                asset: t.address.toLowerCase(),
-                symbol: t.symbol,
-                name: names.get(t.address.toLowerCase()) ?? t.name,
-            }));
-        },
-        docs: () => new EdgarDocProvider(new EdgarClient({ userAgent: env("SEC_USER_AGENT") })),
-        llm: (): LlmClient =>
-            env("LLM_PROVIDER") === "anthropic"
-                ? createAnthropicClient({ apiKey: env("ANTHROPIC_API_KEY"), model: env("RESEARCH_MODEL") })
-                : createGeminiClient({ apiKey: env("GEMINI_API_KEY"), model: env("RESEARCH_MODEL") }),
-        provider: env("LLM_PROVIDER"),
-        model: env("RESEARCH_MODEL"),
-        priceInputPerMTokUsd: Number(env("PRICE_INPUT_PER_MTOK_USD")),
-        priceOutputPerMTokUsd: Number(env("PRICE_OUTPUT_PER_MTOK_USD")),
-        maxSpendUsd: config.researchMaxUsd,
-        totalMaxSpendUsd: config.researchTotalMaxUsd,
-        maxAgeSeconds: config.briefMaxAgeSeconds,
-    });
-
-    /** Only the owner route reaches this. A new version is appended, never rewritten. */
-    const updateMandate = (next: MandateTerms) => {
-        const created = mandates.create(next);
-        mandateStore.append(created);
-        return created;
-    };
-
-    // Real fills are off unless mainnet is deliberately enabled, a cap is set and a key is present.
-    const execution = openExecutor({
-        mainnetEnabled: process.env.MAINNET_ENABLED === "true",
-        rpcUrl: process.env.BASE_RPC_URL ?? "",
-        privateKey: process.env.EXECUTION_PRIVATE_KEY ?? "",
-        ...(process.env.MAINNET_SPEND_CAP_USDC !== undefined && process.env.MAINNET_SPEND_CAP_USDC !== ""
-            ? { spendCapUsdcMinor: u(process.env.MAINNET_SPEND_CAP_USDC) }
-            : {}),
-    });
-
-    const engine = new InvestingEngine({
-        mode: config.investMode,
-        openingFloat: config.openingFloatUsdcMinor,
-        mandates,
-        // Proposals are built from the owner's catalogue only: a buyer's themes are not funded by the
-        // mandate. Cost accounting covers both, because a buyer's brief cost the agent real money too.
-        readBrief: () => loadLatestBrief(config.briefsDir),
-        allBriefs: () => [...scanBriefs(config.briefsDir).briefs, ...scanBriefs(config.customBriefsDir).briefs],
-        briefProblems: () => [
-            ...scanBriefs(config.briefsDir).problems,
-            ...scanBriefs(config.customBriefsDir).problems,
-        ],
-        salesLedger: () => salesLedgerLoaded.all(),
-        market,
-        ledger: investLedger,
-        sink: investStore,
-        chainId: config.approvalChainId,
-        verifyApproval: ({ approval, signature }) =>
-            verifyApprovalSignature({
-                approval,
-                signature,
-                chainId: config.approvalChainId,
-                ownerAddress: config.ownerAddress,
-            }),
-    });
-
-    const receipts = new JsonlReceiptStore(config.receiptsPath);
-    const { app, treasury, sales } = buildServer({
-        config, mandates, ledger: salesLedgerLoaded, sink: salesStore,
-        engine, research, updateMandate, receipts,
-    });
-
-    // The built owner desk and storefront, served by the same process that serves the API. Mounted last
-    // so a route added above always wins over a file with the same name.
-    const webDist = fromRepoRoot("apps/web/dist");
-    if (existsSync(webDist)) {
-        app.use(express.static(webDist, { index: "index.html" }));
-        // a single page app: anything unmatched that is not an API path falls back to index.html
-        app.get(/^(?!\/(?:health|brief|research|ledger|mandate|invest|auth|receipt)\b).*/, (_req, res) => {
-            res.sendFile(join(webDist, "index.html"));
-        });
-    }
+    const a = await assemble(config);
+    const { app, backends, mandates, treasury, sales, books } = a;
 
     const server = app.listen(config.port, () => {
         console.log(`Surplus research endpoint on http://localhost:${config.port}`);
         console.log(`  env         ${envPath ?? "no .env found at the repo root; using the process environment"}`);
+        console.log(`  storage     ${backends.kind === "postgres" ? "postgres (DATABASE_URL)" : "append-only JSONL files"}`);
+        for (const line of backends.lines) console.log(line);
         console.log(
-            `  mandate     ${config.mandatePath} v${mandates.current().version} ` +
-            `${mandates.current().hash.slice(0, 12)} ${created ? "(created from the initial terms)" : "(loaded; stored terms are authoritative)"}`,
+            `  mandate     v${mandates.current().version} ` +
+            `${mandates.current().hash.slice(0, 12)} ` +
+            `${a.createdMandate ? "(created from the initial terms)" : "(loaded; stored terms are authoritative)"}`,
         );
         console.log(`  mode        ${config.mode}  (ledger entries are tagged ${config.mode})`);
         console.log(`  network     ${config.network}`);
@@ -200,20 +38,19 @@ async function main(): Promise<void> {
             `(cap $${config.researchMaxUsd} per brief, $${config.researchTotalMaxUsd} total, reuse within ${config.briefMaxAgeSeconds}s)`,
         );
         console.log(`  catalogue   ${config.briefsDir} (served by GET /brief, funded by the mandate)`);
-        console.log(`  custom      ${config.customBriefsDir} (buyer-commissioned, never served to another buyer)`);
         console.log(
-            `  ledger      ${config.ledgerPath} ` +
+            `  ledger      ${books.sales} ` +
             `(${treasury.ledger.all().length} entries restored, ${sales.length} sales, ` +
             `cash ${formatUsdc(treasury.ledger.balance("cash.operating"))} USDC)`,
         );
         console.log(`  free        GET /health, GET /ledger`);
-        console.log(`  web         ${existsSync(webDist) ? webDist : "not built yet; run npm run build:web"}`);
-        console.log(`  receipts    ${config.receiptsPath} (${receipts.size} issued)`);
+        console.log(`  web         ${a.webDist ?? "not built yet; run npm run build:web"}`);
+        console.log(`  issued      ${a.receiptCount} receipt(s)`);
         console.log(`  owner       POST /invest/sync|propose|approve|execute, GET /invest/ledger|proposals, GET /mandate`);
         console.log(`  approvals   EIP-712 signed by ${config.ownerAddress} on chain ${config.approvalChainId}`);
-        console.log(`  invest book ${config.investLedgerPath} [${config.investMode}]${config.investMode === "mainnet" ? "" : " (fills simulated)"}`);
+        console.log(`  invest book ${books.invest} [${config.investMode}]${config.investMode === "mainnet" ? "" : " (fills simulated)"}`);
         console.log(`  float       ${formatUsdc(config.openingFloatUsdcMinor)} USDC owner-provided working capital`);
-        console.log(`  execution   ${execution.executor === null ? `simulated (${execution.why})` : `REAL, from ${execution.executor.address}`}`);
+        console.log(`  execution   ${a.execution.executor === null ? `simulated (${a.execution.why})` : `REAL, from ${a.execution.executor.address}`}`);
     });
 
     // Finish the request in flight before going away. A deploy that cuts a paid request in half would
@@ -221,7 +58,9 @@ async function main(): Promise<void> {
     for (const signal of ["SIGTERM", "SIGINT"] as const) {
         process.on(signal, () => {
             console.log(`\n${signal} received, finishing open requests before stopping.`);
-            server.close(() => process.exit(0));
+            server.close(() => {
+                void backends.close().then(() => process.exit(0));
+            });
             // a request that will not finish must not hold the process open for ever
             setTimeout(() => process.exit(1), 10_000).unref();
         });

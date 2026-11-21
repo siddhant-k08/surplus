@@ -86,6 +86,12 @@ export function parseLedgerFile(text: string, where = "ledger"): LedgerTx[] {
         if (line.trim() === "") continue;
         const tx = parseTxLine(line, `${where} line ${i + 1}`);
         const prev = out[out.length - 1];
+        // Ids are assigned from 1 in order and never reused, so the first entry must be 1 and each one
+        // must follow the last. A missing first entry is as much a hole in the books as a missing middle
+        // one, and replay would quietly carry on from whatever id it did find.
+        if (prev === undefined && tx.id !== 1) {
+            throw new Error(`${where} line ${i + 1}: the first entry has id ${tx.id}, not 1; the file is missing its beginning`);
+        }
         if (prev && tx.id !== prev.id + 1) {
             throw new Error(`${where} line ${i + 1}: entry ids jump from ${prev.id} to ${tx.id}; the file is not intact`);
         }

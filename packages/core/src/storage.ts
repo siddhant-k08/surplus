@@ -1,5 +1,5 @@
 import { Ledger, type LedgerTx } from "./ledger";
-import type { MandateVersion } from "./mandate";
+import type { MandateTerms, MandateVersion } from "./mandate";
 import { restoreMandateStore, MandateStore } from "./mandate";
 
 /**
@@ -29,9 +29,16 @@ export interface LedgerSink {
 
 export type LedgerStore = LedgerSource & LedgerSink;
 
+/**
+ * The owner's mandate history.
+ *
+ * Sync or async: the file-backed store is synchronous because loading the mandate has to happen before
+ * the server will start at all, and a database is not. Callers await either way.
+ */
 export interface MandateBackend {
-    load(): Promise<MandateVersion[]>;
-    append(version: MandateVersion): Promise<void>;
+    /** Stored versions in order. Empty means no mandate has been set yet. */
+    load(): MandateVersion[] | Promise<MandateVersion[]>;
+    append(version: MandateVersion): void | Promise<void>;
 }
 
 /**
@@ -49,6 +56,25 @@ export async function openMandateStore(backend: MandateBackend): Promise<Mandate
     const versions = await backend.load();
     if (versions.length === 0) return null;
     return restoreMandateStore(versions);
+}
+
+/**
+ * The stored mandate, or a first version created from `initial` when storage holds none.
+ *
+ * A stored mandate is authoritative: the terms in code only ever create version 1. A later deployment
+ * shipping different defaults must not quietly reset what the owner set, so `created` says which
+ * happened and nothing is written when a mandate already exists.
+ */
+export async function openMandateFrom(
+    backend: MandateBackend,
+    initial: MandateTerms,
+    at: Date = new Date(),
+): Promise<{ mandates: MandateStore; created: boolean }> {
+    const existing = await openMandateStore(backend);
+    if (existing !== null) return { mandates: existing, created: false };
+    const mandates = new MandateStore();
+    await backend.append(mandates.create(initial, at));
+    return { mandates, created: true };
 }
 
 /**

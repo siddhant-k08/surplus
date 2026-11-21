@@ -26,6 +26,23 @@ export interface Receipt {
     at: string;
 }
 
+/**
+ * Where receipts live.
+ *
+ * A port, not a class, because the same guarantees (issue once per settlement, find only by the secret)
+ * have to hold whether the rows are lines in a file or in a database. Async because a database is.
+ */
+export interface ReceiptStore {
+    /** Stores a receipt. Must be idempotent on the receipt id, so a replayed settlement writes one row. */
+    issue(receipt: Receipt): Promise<void>;
+    /** The receipt with this secret, or null. The only way in. */
+    find(id: string): Promise<Receipt | null>;
+    /** A receipt already written for a settlement, so one payment never issues two. */
+    forTransaction(transaction: string): Promise<Receipt | null>;
+    /** How many have been issued. For the startup banner, not for the buyer's path. */
+    count(): Promise<number>;
+}
+
 export function newReceiptId(): string {
     return randomBytes(24).toString("base64url");
 }
@@ -55,7 +72,7 @@ export function parseReceiptLine(line: string, where: string): Receipt {
     };
 }
 
-export class JsonlReceiptStore {
+export class JsonlReceiptStore implements ReceiptStore {
     /** Read once and kept, because a receipt lookup is on the buyer's path and must not stat the disk. */
     private cache: Map<string, Receipt> | null = null;
 
@@ -77,7 +94,7 @@ export class JsonlReceiptStore {
         return map;
     }
 
-    issue(receipt: Receipt): void {
+    async issue(receipt: Receipt): Promise<void> {
         const map = this.load();
         if (map.has(receipt.id)) return; // a replayed settlement must not write a second line
         mkdirSync(dirname(this.path), { recursive: true });
@@ -85,19 +102,18 @@ export class JsonlReceiptStore {
         map.set(receipt.id, receipt);
     }
 
-    find(id: string): Receipt | null {
+    async find(id: string): Promise<Receipt | null> {
         return this.load().get(id) ?? null;
     }
 
-    /** Receipts already written for a settlement, so one payment never issues two. */
-    forTransaction(transaction: string): Receipt | null {
+    async forTransaction(transaction: string): Promise<Receipt | null> {
         for (const r of this.load().values()) {
             if (r.transaction.toLowerCase() === transaction.toLowerCase()) return r;
         }
         return null;
     }
 
-    get size(): number {
+    async count(): Promise<number> {
         return this.load().size;
     }
 }

@@ -21,13 +21,13 @@ import {
 } from "@surplus/core";
 import type { ApiConfig } from "./config";
 import {
-    SessionStore, requireOwnerAccess, verifyLogin, loginPayload,
-    SESSION_COOKIE, SESSION_TTL_MS, readCookie,
+    MemorySessionStore, requireOwnerAccess, verifyLogin, loginPayload,
+    SESSION_COOKIE, SESSION_TTL_MS, readCookie, type SessionStore,
 } from "./session";
 import { UNATTRIBUTED, type InvestingEngine } from "./investing";
 import { normalizeThemes, type ResearchService } from "./research";
 import { parseTermsUpdate, changedTerms } from "./terms";
-import { JsonlReceiptStore, newReceiptId } from "./receipts";
+import { newReceiptId, type ReceiptStore } from "./receipts";
 
 export const BRIEF_ROUTE = "/brief";
 
@@ -135,8 +135,12 @@ export interface ServerDeps {
     config: ApiConfig;
     /** The owner's mandate. Shared with the investing engine so both see the same version. */
     mandates: MandateStore;
-    /** Overridable so tests can run without the docs/briefs directory. */
-    readBrief?: () => SavedBrief;
+    /**
+     * The newest brief in the owner's catalogue. Overridable so tests can run without the directory.
+     *
+     * Allowed to return a promise, because a brief may be stored in a database rather than a file.
+     */
+    readBrief?: () => SavedBrief | Promise<SavedBrief>;
     /** Already loaded, because storage is async and `buildServer` is not. */
     ledger?: Ledger;
     /** Where new entries go. Absent means nothing is persisted. */
@@ -148,21 +152,32 @@ export interface ServerDeps {
     /** Shared so tests can drive sign-in; one is made per server otherwise. */
     sessions?: SessionStore;
     /** When given, a paid request returns a receipt the buyer can come back to. */
-    receipts?: JsonlReceiptStore;
+    receipts?: ReceiptStore;
+    /**
+     * Which storage is live, reported by `GET /health`.
+     *
+     * Worth a field of its own because it is the one deployment mistake that does not announce itself:
+     * on a host that replaces the process between requests, the files keep working right up to the
+     * moment an instance is recycled and a settlement turns out to be missing. A monitor can see this.
+     */
+    storage?: "files" | "postgres";
     /**
      * Finds a brief by id for a receipt lookup.
      *
      * A receipt can name any brief ever sold, not just the newest, so this scans rather than reusing
      * `readBrief`. Injectable because the directories are the server's business, not a test's.
      */
-    findBrief?: (briefId: string, source: "catalogue" | "custom") => SavedBrief | null;
+    findBrief?: (
+        briefId: string,
+        source: "catalogue" | "custom",
+    ) => SavedBrief | null | Promise<SavedBrief | null>;
     /**
      * Creates and persists a new mandate version from the owner's terms.
      *
      * Passed in rather than done here so the server never holds the means to change a user constraint on
      * its own: without this the update route refuses.
      */
-    updateMandate?: (terms: MandateTerms) => MandateVersion;
+    updateMandate?: (terms: MandateTerms) => MandateVersion | Promise<MandateVersion>;
 }
 
 /**
@@ -228,6 +243,10 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         const dir = source === "custom" ? config.customBriefsDir : config.briefsDir;
         return scanBriefs(dir).briefs.find((b) => b.brief.id === briefId) ?? null;
     });
+    // storage may be async; these two are the only places a brief is read on a request's path
+    const newestBrief = async (): Promise<SavedBrief> => readBrief();
+    const briefById = async (id: string, source: "catalogue" | "custom"): Promise<SavedBrief | null> =>
+        findBrief(id, source);
 
     // Replaying the stored entries restores the balances and, importantly, the dedup index: a settlement
     // that arrives again after a restart is refused by the ledger rather than booked a second time.
@@ -265,7 +284,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 const amount = BigInt(result.amount ?? requirements.amount);
                 const served = servedStore.getStore();
                 if (deps.receipts !== undefined && served?.receiptId !== undefined && served.briefId !== undefined) {
-                    deps.receipts.issue({
+                    await deps.receipts.issue({
                         id: served.receiptId,
                         briefId: served.briefId,
                         source: served.source ?? "catalogue",
@@ -289,7 +308,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
     // a small cap: these bodies carry an id, never a document
     app.use(express.json({ limit: "16kb" }));
 
-    const sessions = deps.sessions ?? new SessionStore();
+    const sessions = deps.sessions ?? new MemorySessionStore();
     const owner = requireOwnerAccess({ token: config.ownerToken, sessions });
 
     // ---- sign in with the owner wallet ----
@@ -297,8 +316,8 @@ export function buildServer(deps: ServerDeps): BuiltServer {
     // The nonce is single use and expires, the signature is EIP-712 bound to the chain, and the
     // recovered address must equal the configured owner. The session rides in an httpOnly,
     // SameSite=Strict cookie so another origin cannot use it, and it never contains the owner token.
-    app.post("/auth/nonce", (_req: Request, res: Response) => {
-        const { nonce, issuedAt } = sessions.issueNonce();
+    app.post("/auth/nonce", async (_req: Request, res: Response) => {
+        const { nonce, issuedAt } = await sessions.issueNonce();
         const payload = loginPayload({
             address: config.ownerAddress, nonce, issuedAt, chainId: config.approvalChainId,
         });
@@ -314,7 +333,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         if (typeof body?.signature !== "string" || typeof body.nonce !== "string") {
             return void res.status(400).json({ error: "signature and nonce are required" });
         }
-        const issuedAt = sessions.consumeNonce(body.nonce);
+        const issuedAt = await sessions.consumeNonce(body.nonce);
         if (issuedAt === null) {
             return void res.status(400).json({ error: "that sign-in request expired or was already used" });
         }
@@ -327,7 +346,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         });
         if (!verdict.ok) return void res.status(401).json({ error: verdict.reason });
 
-        const { token, expiresAt } = sessions.open(verdict.address);
+        const { token, expiresAt } = await sessions.open(verdict.address);
         res.cookie(SESSION_COOKIE, token, {
             httpOnly: true,
             sameSite: "strict",
@@ -338,16 +357,16 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         res.json({ address: verdict.address, expiresAt });
     });
 
-    app.post("/auth/logout", (req: Request, res: Response) => {
+    app.post("/auth/logout", async (req: Request, res: Response) => {
         const cookie = readCookie(req.header("cookie"), SESSION_COOKIE);
-        if (cookie !== null) sessions.close(cookie);
+        if (cookie !== null) await sessions.close(cookie);
         res.clearCookie(SESSION_COOKIE, { path: "/" });
         res.json({ signedOut: true });
     });
 
-    app.get("/auth/me", (req: Request, res: Response) => {
+    app.get("/auth/me", async (req: Request, res: Response) => {
         const cookie = readCookie(req.header("cookie"), SESSION_COOKIE);
-        const address = cookie === null ? null : sessions.whoIs(cookie);
+        const address = cookie === null ? null : await sessions.whoIs(cookie);
         res.json({ signedIn: address !== null, address });
     });
 
@@ -386,11 +405,11 @@ export function buildServer(deps: ServerDeps): BuiltServer {
     );
 
     // free: enough to see what the endpoint sells and on which network, without paying
-    app.get("/health", (_req: Request, res: Response) => {
+    app.get("/health", async (_req: Request, res: Response) => {
         let briefId: string | null = null;
         let createdAt: string | null = null;
         try {
-            const saved = readBrief();
+            const saved = await newestBrief();
             briefId = saved.brief.id;
             createdAt = saved.brief.createdAt;
         } catch {
@@ -399,6 +418,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         res.json({
             ok: true,
             mode: config.mode,
+            storage: deps.storage ?? "none",
             network: config.network,
             facilitator: config.facilitatorUrl,
             payTo: config.payTo,
@@ -412,8 +432,8 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         });
     });
 
-    app.get(BRIEF_ROUTE, (_req: Request, res: Response) => {
-        const saved = readBrief();
+    app.get(BRIEF_ROUTE, async (_req: Request, res: Response) => {
+        const saved = await newestBrief();
         const receiptId = noteServedBrief(saved.brief.id, "catalogue");
         res.json({
             brief: saved.brief,
@@ -486,15 +506,15 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         const receipts = deps.receipts;
         // The data route. `/r/<id>` is the page the buyer visits; the single-page app serves that and
         // fetches this. Sharing one path would mean the browser got JSON instead of the page.
-        app.get("/receipt/:id", (req: Request, res: Response) => {
+        app.get("/receipt/:id", async (req: Request, res: Response) => {
             const raw: unknown = req.params.id;
             const id = typeof raw === "string" ? raw : "";
-            const receipt = /^[A-Za-z0-9_-]{10,64}$/.test(id) ? receipts.find(id) : null;
+            const receipt = /^[A-Za-z0-9_-]{10,64}$/.test(id) ? await receipts.find(id) : null;
             if (receipt === null) {
                 // one answer for a malformed id and an unknown one, so this cannot be probed
                 return void res.status(404).json({ error: "no receipt with that link" });
             }
-            const found = findBrief(receipt.briefId, receipt.source);
+            const found = await briefById(receipt.briefId, receipt.source);
             if (found === null) {
                 return void res.status(410).json({
                     error: "that brief is no longer on this server",
@@ -515,10 +535,10 @@ export function buildServer(deps: ServerDeps): BuiltServer {
     }
 
     // What the storefront can say without anyone paying: the shape of a brief, never its claims.
-    app.get("/catalogue", (_req: Request, res: Response) => {
+    app.get("/catalogue", async (_req: Request, res: Response) => {
         let latest: { id: string; createdAt: string; themes: string[]; sources: number; facts: number } | null = null;
         try {
-            const saved = readBrief();
+            const saved = await newestBrief();
             latest = {
                 id: saved.brief.id,
                 createdAt: saved.brief.createdAt,
@@ -564,12 +584,12 @@ export function buildServer(deps: ServerDeps): BuiltServer {
 
         // The owner changes their own constraints here. The agent never calls this: a new version is only
         // ever created from the owner's request, and the response says what changed so a mistake is visible.
-        app.post("/mandate", owner, (req: Request, res: Response) => {
+        app.post("/mandate", owner, async (req: Request, res: Response) => {
             const before = mandates.current();
             const parsed = parseTermsUpdate(req.body, before.terms);
             if (!parsed.ok) return void res.status(400).json({ error: "terms were not accepted", details: parsed.errors });
             try {
-                const created = deps.updateMandate?.(parsed.terms);
+                const created = await deps.updateMandate?.(parsed.terms);
                 if (created === undefined) {
                     return void res.status(409).json({ error: "this server cannot change the mandate" });
                 }
@@ -666,9 +686,9 @@ export function buildServer(deps: ServerDeps): BuiltServer {
 
         // The brief the proposal was built from, so the desk can show the quote under each leg.
         // The owner must not have to pay their own paid route to see their own catalogue.
-        app.get("/invest/brief", owner, (_req: Request, res: Response) => {
+        app.get("/invest/brief", owner, async (_req: Request, res: Response) => {
             try {
-                const saved = readBrief();
+                const saved = await newestBrief();
                 res.json({
                     id: saved.brief.id,
                     createdAt: saved.brief.createdAt,
