@@ -444,6 +444,37 @@ describe("the owner routes", () => {
         expect(res.body.terms.reserveTargetUsdc).toBe(u("0.50").toString());
     });
 
+    it("says how much more revenue a trade would need, not just that there is none", async () => {
+        // "nothing to invest" is the agent behaving correctly, and on its own it does not tell an owner
+        // whether that is one sale away or a hundred
+        const { app } = await build();
+        const poor = await auth(request(app).post("/invest/sync"));
+        expect(poor.status).toBe(200);
+
+        const engine = await engineFor("0.01"); // a cent earned against a brief that cost more
+        const { app: thin } = buildServer({ config: signedConfig, mandates: mandateFor(terms), readBrief: savedBrief, engine });
+        const res = await auth(request(thin).post("/invest/sync"));
+        expect(res.body.investableUsdcMinor).toBe("0");
+        expect(res.body.gap.canInvest).toBe(false);
+        expect(BigInt(res.body.gap.revenueNeededUsdcMinor)).toBeGreaterThan(0n);
+        // the parts have to add up to the total, or the explanation is not the same arithmetic
+        expect(BigInt(res.body.gap.revenueNeededUsdcMinor)).toBe(
+            BigInt(res.body.gap.shortfallUsdcMinor)
+            + BigInt(res.body.gap.reserveGapUsdcMinor)
+            + BigInt(res.body.gap.surplusNeededUsdcMinor),
+        );
+
+        const ledger = await auth(request(thin).get("/invest/ledger"));
+        expect(ledger.body.gap.revenueNeededUsdcMinor).toBe(res.body.gap.revenueNeededUsdcMinor);
+    });
+
+    it("reports that a trade is possible once there is enough investable", async () => {
+        const { app } = await build(); // 3.00 of revenue, well past the reserve and the minimum trade
+        const res = await auth(request(app).post("/invest/sync"));
+        expect(res.body.gap.canInvest).toBe(true);
+        expect(res.body.gap.revenueNeededUsdcMinor).toBe("0");
+    });
+
     it("walks sync, propose, approve, execute over HTTP", async () => {
         const { app } = await build();
         const sync = await auth(request(app).post("/invest/sync"));

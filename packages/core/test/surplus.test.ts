@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { computeSurplus, bookSurplus } from "../src/surplus";
+import { computeSurplus, bookSurplus, investmentGap } from "../src/surplus";
 import { Ledger } from "../src/ledger";
-import { parseUsdc as u } from "../src/money";
+import { parseUsdc as u, mulBps } from "../src/money";
 
 const base = {
     revenue: u("3"),
@@ -108,5 +108,56 @@ describe("surplus", () => {
         bookSurplus(l, r, { mode: "sim", at, key: "brief-2" });
         expect(l.balance("surplus.investable")).toBe(u("1.50"));
         expect(l.all()).toHaveLength(2);
+    });
+});
+describe("how far the agent is from being able to invest", () => {
+    const base = {
+        revenue: u("0.02"),
+        costs: u("0.1476"),
+        reserveBalance: u("0.02"),
+        reserveTarget: u("0.50"),
+        investShareBps: 5000,
+        minTrade: u("0.05"),
+        investable: 0n,
+    };
+
+    it("adds up the costs, the reserve and the surplus the share has to come from", () => {
+        const g = investmentGap(base);
+        expect(g.canInvest).toBe(false);
+        expect(g.shortfall).toBe(u("0.1276"));      // costs not yet covered by revenue
+        expect(g.reserveGap).toBe(u("0.48"));       // the protected reserve, still short
+        expect(g.surplusNeeded).toBe(u("0.10"));    // half of which is the 0.05 minimum trade
+        expect(g.revenueNeeded).toBe(u("0.1276") + u("0.48") + u("0.10"));
+    });
+
+    it("says a trade is possible once investable clears the minimum", () => {
+        const g = investmentGap({ ...base, investable: u("0.05") });
+        expect(g).toEqual({ canInvest: true, shortfall: 0n, reserveGap: 0n, surplusNeeded: 0n, revenueNeeded: 0n });
+    });
+
+    it("counts investable money that is there but too small to place", () => {
+        // 0.04 sitting investable, 0.05 needed: only the missing 0.01 has to be earned through the share
+        const g = investmentGap({ ...base, revenue: u("1.00"), costs: 0n, reserveBalance: u("0.50"), investable: u("0.04") });
+        expect(g.shortfall).toBe(0n);
+        expect(g.reserveGap).toBe(0n);
+        expect(g.surplusNeeded).toBe(u("0.02"));
+        expect(g.revenueNeeded).toBe(u("0.02"));
+    });
+
+    it("rounds the surplus up, because the invest share rounds down", () => {
+        // a third of the surplus, needing 1 unit: a third of 3 units is 1, a third of 2 is 0
+        const g = investmentGap({
+            revenue: u("1.00"), costs: 0n, reserveBalance: u("1.00"), reserveTarget: u("1.00"),
+            investShareBps: 3333, minTrade: 1n, investable: 0n,
+        });
+        expect(g.surplusNeeded).toBe(4n);
+        expect(mulBps(g.surplusNeeded, 3333)).toBeGreaterThanOrEqual(1n);
+    });
+
+    it("reports no reachable amount when the owner invests none of the surplus", () => {
+        const g = investmentGap({ ...base, investShareBps: 0 });
+        expect(g.canInvest).toBe(false);
+        expect(g.revenueNeeded).toBe(0n); // no amount of revenue changes a zero share; the term has to
+        expect(g.shortfall).toBe(u("0.1276"));
     });
 });

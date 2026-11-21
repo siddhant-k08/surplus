@@ -131,6 +131,20 @@ export async function migrate(sql: Sql): Promise<void> {
         )
     `;
     await sql`
+        create table if not exists research_reservations (
+            id                text primary key,
+            amount_usdc_minor text not null,
+            at                timestamptz not null
+        )
+    `;
+    await sql`
+        create table if not exists rate_limits (
+            key          text primary key,
+            window_start timestamptz not null,
+            count        integer not null
+        )
+    `;
+    await sql`
         create table if not exists login_nonces (
             nonce      text primary key,
             issued_at  bigint not null,

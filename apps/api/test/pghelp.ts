@@ -24,6 +24,9 @@ export const hasDatabase = DATABASE_URL !== "";
  * problem, not an application one, so it is handled here rather than in `pg.ts`: production connects
  * with the connection string exactly as given.
  */
+const isLocal = (host: string): boolean =>
+    host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost");
+
 async function connect(url: string, schema: string): Promise<Sql> {
     const u = new URL(url);
     // The provider's pooler reuses one server connection across clients and does not reliably reset
@@ -31,6 +34,9 @@ async function connect(url: string, schema: string): Promise<Sql> {
     // schema, which means it needs a real session: connect to the direct endpoint instead of the pooled
     // one. Production uses the pooled string as given and never sets `search_path`.
     const host = u.hostname.replace("-pooler", "");
+    // A database on this machine (CI's service container, or a local one) speaks plain TCP; a hosted one
+    // requires TLS. Asking for TLS where there is none fails the handshake, so this follows the host.
+    const wantsTls = !isLocal(host) && u.searchParams.get("sslmode") !== "disable";
     // The schema travels as a startup parameter, so it survives a reconnect. The two alternatives both
     // fail quietly: `connection: { search_path }` is dropped on the floor, and a `set search_path`
     // statement is lost the moment the driver reopens the socket, after which every table resolves to
@@ -51,7 +57,12 @@ async function connect(url: string, schema: string): Promise<Sql> {
     };
 
     const attempt = async (host_: string, servername: string): Promise<Sql> => {
-        const sql = postgres({ ...options, ...credentials, host: host_, ssl: { servername } });
+        const sql = postgres({
+            ...options,
+            ...credentials,
+            host: host_,
+            ...(wantsTls ? { ssl: { servername } } : {}),
+        });
         await sql`select 1`;
         return sql;
     };
@@ -59,6 +70,7 @@ async function connect(url: string, schema: string): Promise<Sql> {
     try {
         return await attempt(host, host);
     } catch (first) {
+        if (isLocal(host)) throw first; // nothing to resolve differently; the database is right here
         // Two local network faults have each broken this, and neither is the application's problem: a
         // resolver that answers REFUSED for the provider's name, and a network where the provider's
         // IPv4 addresses time out while IPv6 works. So the addresses are resolved explicitly and tried
@@ -81,7 +93,12 @@ async function connect(url: string, schema: string): Promise<Sql> {
                 continue;
             }
         }
-        throw first;
+        // Loud on purpose. A database that was configured and cannot be reached is a failure, and the
+        // suites that need it report as "skipped", which reads exactly like "none configured".
+        throw new Error(
+            `DATABASE_URL is set but ${host} could not be reached, so the Postgres suites cannot run: ` +
+            `${first instanceof Error ? first.message : String(first)}`,
+        );
     }
 }
 

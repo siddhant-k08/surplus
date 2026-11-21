@@ -106,6 +106,19 @@ export interface Mandate {
     };
 }
 
+/** What stands between the books as they are and the smallest trade the mandate allows. */
+export interface InvestmentGap {
+    canInvest: boolean;
+    /** Costs revenue has not covered yet. Nothing reaches the reserve until this is zero. */
+    shortfallUsdcMinor: string;
+    /** What the protected reserve still needs. */
+    reserveGapUsdcMinor: string;
+    /** Surplus needed after that, so the invest share clears the minimum trade. */
+    surplusNeededUsdcMinor: string;
+    /** Revenue that would have to arrive before a trade is possible. */
+    revenueNeededUsdcMinor: string;
+}
+
 export interface SyncResult {
     sales: number;
     unattributedSales: number;
@@ -115,6 +128,7 @@ export interface SyncResult {
     costsUsdcMinor: string;
     investableUsdcMinor: string;
     settled: { briefId: string; investableUsdcMinor: string }[];
+    gap: InvestmentGap;
 }
 
 export interface ProposalLeg {
@@ -207,6 +221,7 @@ export interface InvestLedger {
     balances: Record<string, string>;
     entries: LedgerEntry[];
     reconcile: { ok: boolean; issues: string[] };
+    gap: InvestmentGap;
 }
 
 export interface ExecuteResult {

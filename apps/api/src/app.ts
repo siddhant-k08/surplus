@@ -167,6 +167,7 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
         model: env("RESEARCH_MODEL"),
         priceInputPerMTokUsd: Number(env("PRICE_INPUT_PER_MTOK_USD")),
         priceOutputPerMTokUsd: Number(env("PRICE_OUTPUT_PER_MTOK_USD")),
+        reservations: backends.reservations,
         maxSpendUsd: config.researchMaxUsd,
         totalMaxSpendUsd: config.researchTotalMaxUsd,
         maxAgeSeconds: config.briefMaxAgeSeconds,
@@ -217,7 +218,9 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
     const { app, treasury, sales } = buildServer({
         config, mandates, ledger: salesLedgerLoaded, sink: salesStore,
         engine, research, updateMandate, receipts, sessions: backends.sessions,
+        throttle: backends.throttle,
         storage: backends.kind,
+        storageCheck: () => backends.check(),
         readBrief: newestCatalogueBrief, findBrief: briefById,
     });
 

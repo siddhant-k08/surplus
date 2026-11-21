@@ -17,6 +17,7 @@ import {
     type MandateStore,
     type MandateTerms,
     type MandateVersion,
+    type InvestmentGap,
     type SavedBrief,
 } from "@surplus/core";
 import type { ApiConfig } from "./config";
@@ -27,6 +28,7 @@ import {
 import { UNATTRIBUTED, type InvestingEngine } from "./investing";
 import { normalizeThemes, type ResearchService } from "./research";
 import { recoveryPayload, verifyRecovery } from "./recovery";
+import { MemoryThrottle, limit, type Throttle } from "./throttle";
 import { parseTermsUpdate, changedTerms } from "./terms";
 import { newReceiptId, type ReceiptStore } from "./receipts";
 
@@ -210,6 +212,20 @@ export interface ServerDeps {
     research?: ResearchService;
     /** Shared so tests can drive sign-in; one is made per server otherwise. */
     sessions?: SessionStore;
+    /**
+     * Whether storage is answering. Absent means the question is not asked and health says so.
+     *
+     * Checked on every health request rather than cached from start-up: a process that started fine and
+     * has since lost its database is exactly the state a monitor needs to catch.
+     */
+    storageCheck?: () => Promise<{ ok: boolean; detail?: string }>;
+    /**
+     * The ceiling on the free routes that do work. One is made per server otherwise.
+     *
+     * Shared across instances in a real deployment: a per-process limiter on a host that runs many
+     * instances is a limit multiplied by however many happen to be running.
+     */
+    throttle?: Throttle;
     /** When given, a paid request returns a receipt the buyer can come back to. */
     receipts?: ReceiptStore;
     /**
@@ -254,6 +270,22 @@ export function salesFromLedger(entries: readonly LedgerTx[]): BookedSale[] {
         briefId: s.briefId ?? "unknown", // older entries predate the structured field
         at: s.at,
     }));
+}
+
+/**
+ * How far the agent is from a trade, as JSON.
+ *
+ * Worth returning rather than leaving the desk to work out: "nothing to invest" is the agent behaving
+ * correctly, and an owner still needs to know whether that is one sale away or a hundred.
+ */
+export function gapView(g: InvestmentGap) {
+    return {
+        canInvest: g.canInvest,
+        shortfallUsdcMinor: g.shortfall.toString(),
+        reserveGapUsdcMinor: g.reserveGap.toString(),
+        surplusNeededUsdcMinor: g.surplusNeeded.toString(),
+        revenueNeededUsdcMinor: g.revenueNeeded.toString(),
+    };
 }
 
 /** Mandate version as JSON, with every limit as a decimal string of minor units. */
@@ -356,19 +388,48 @@ export function buildServer(deps: ServerDeps): BuiltServer {
 
     const app = express();
     app.disable("x-powered-by");
+
+    // Headers every response carries. The app is same-origin and has no third-party anything, so the
+    // policy can be strict: no framing, no sniffing, no referrer leaking a receipt link to another site.
+    // Fonts are the one exception, because the page loads them from Google's host.
+    app.use((_req, res, next) => {
+        res.setHeader("x-content-type-options", "nosniff");
+        res.setHeader("x-frame-options", "DENY");
+        res.setHeader("referrer-policy", "no-referrer");
+        res.setHeader("cross-origin-opener-policy", "same-origin");
+        res.setHeader(
+            "content-security-policy",
+            [
+                "default-src 'self'",
+                "script-src 'self'",
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+                "font-src 'self' https://fonts.gstatic.com",
+                "img-src 'self' data:",
+                "connect-src 'self'",
+                "frame-ancestors 'none'",
+                "base-uri 'none'",
+                "form-action 'self'",
+            ].join("; "),
+        );
+        next();
+    });
     app.use((_req, _res, next) => servedStore.run({}, next));
     // a small cap: these bodies carry an id, never a document
     app.use(express.json({ limit: "16kb" }));
 
     const sessions = deps.sessions ?? new MemorySessionStore();
     const owner = requireOwnerAccess({ token: config.ownerToken, sessions });
+    const throttle = deps.throttle ?? new MemoryThrottle();
+    // Generous for a person, pointless for a script. The nonce routes write a row per call, so these
+    // are what stops an anonymous caller growing a table in someone else's database.
+    const slow = (name: string, max = 20) => limit({ throttle, name, max, windowMs: 60_000 });
 
     // ---- sign in with the owner wallet ----
     //
     // The nonce is single use and expires, the signature is EIP-712 bound to the chain, and the
     // recovered address must equal the configured owner. The session rides in an httpOnly,
     // SameSite=Strict cookie so another origin cannot use it, and it never contains the owner token.
-    app.post("/auth/nonce", async (_req: Request, res: Response) => {
+    app.post("/auth/nonce", slow("auth-nonce"), async (_req: Request, res: Response) => {
         const { nonce, issuedAt } = await sessions.issueNonce();
         const payload = loginPayload({
             address: config.ownerAddress, nonce, issuedAt, chainId: config.approvalChainId,
@@ -380,7 +441,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         });
     });
 
-    app.post("/auth/verify", async (req: Request, res: Response) => {
+    app.post("/auth/verify", slow("auth-verify"), async (req: Request, res: Response) => {
         const body = req.body as { signature?: unknown; nonce?: unknown } | undefined;
         if (typeof body?.signature !== "string" || typeof body.nonce !== "string") {
             return void res.status(400).json({ error: "signature and nonce are required" });
@@ -467,10 +528,28 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         } catch {
             briefId = null;
         }
-        res.json({
-            ok: true,
+
+        // The three things that can be wrong while every route still answers: storage gone since
+        // start-up, books that no longer reconcile, and nothing to sell. The first two make this
+        // unhealthy, because both mean the agent cannot do its job correctly. An empty catalogue is
+        // reported but is not a fault: a new deployment has one until the first brief is written.
+        const storage = deps.storageCheck === undefined
+            ? { ok: true, detail: "not checked" }
+            : await deps.storageCheck();
+        const books = reconcileInternal(treasury.ledger);
+        const healthy = storage.ok && books.ok;
+
+        res.status(healthy ? 200 : 503).json({
+            ok: healthy,
             mode: config.mode,
             storage: deps.storage ?? "none",
+            checks: {
+                storage: storage.ok ? "ok" : "unreachable",
+                ...(storage.detail !== undefined && { storageDetail: storage.detail }),
+                books: books.ok ? "reconciled" : "unreconciled",
+                ...(books.ok ? {} : { bookIssues: books.issues }),
+                catalogue: briefId === null ? "empty" : "ok",
+            },
             network: config.network,
             facilitator: config.facilitatorUrl,
             payTo: config.payTo,
@@ -590,7 +669,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         // The id travels once, in the paid response. A buyer whose response was lost has paid and has
         // nothing; the wallet that paid is the one thing they can still prove. The nonce is single use
         // and short lived, so a captured signature cannot be replayed by whoever captured it.
-        app.post("/receipt/nonce", async (req: Request, res: Response) => {
+        app.post("/receipt/nonce", slow("receipt-nonce"), async (req: Request, res: Response) => {
             const body = req.body as { address?: unknown } | undefined;
             if (typeof body?.address !== "string") {
                 return void res.status(400).json({ error: "an address is required" });
@@ -611,7 +690,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             });
         });
 
-        app.post("/receipt/recover", async (req: Request, res: Response) => {
+        app.post("/receipt/recover", slow("receipt-recover"), async (req: Request, res: Response) => {
             const body = req.body as { address?: unknown; nonce?: unknown; signature?: unknown } | undefined;
             if (typeof body?.address !== "string" || typeof body.nonce !== "string" || typeof body.signature !== "string") {
                 return void res.status(400).json({ error: "address, nonce and signature are required" });
@@ -730,6 +809,8 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                     lines: e.lines.map((l) => ({ account: l.account, amount: l.amount.toString() })),
                 })),
                 reconcile: reconcileInternal(engine.treasury.ledger),
+                // what stands between the books as they are and the smallest trade the mandate allows
+                gap: gapView(engine.gap()),
             });
         });
 
@@ -744,6 +825,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 costsUsdcMinor: r.costs.toString(),
                 investableUsdcMinor: r.investable.toString(),
                 settled: r.settled.map((x) => ({ briefId: x.briefId, investableUsdcMinor: x.investable.toString() })),
+                gap: gapView(r.gap),
             });
         });
 
@@ -825,6 +907,20 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             });
         });
     }
+
+    /**
+     * The last word on any request that threw.
+     *
+     * Express 5 forwards a rejected promise from an async handler here, which is the case that matters:
+     * a database that goes away mid-request would otherwise answer with Express's default HTML error
+     * page, carrying a stack trace that names paths and packages. The caller gets one sentence; the
+     * detail goes to the logs, where it belongs.
+     */
+    app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+        console.error(`unhandled error on ${req.method} ${req.path}:`, err);
+        if (res.headersSent) return;
+        res.status(500).json({ error: "the agent could not complete that request" });
+    });
 
     return { app, treasury, sales, sessions };
 }

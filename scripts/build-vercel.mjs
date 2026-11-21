@@ -61,6 +61,29 @@ writeFileSync(
         {
             version: 3,
             routes: [
+                // The same headers the function sets, for the files the platform serves itself.
+                // Without this the API is protected and the page it serves is not.
+                {
+                    src: "/(.*)",
+                    headers: {
+                        "x-content-type-options": "nosniff",
+                        "x-frame-options": "DENY",
+                        "referrer-policy": "no-referrer",
+                        "cross-origin-opener-policy": "same-origin",
+                        "content-security-policy": [
+                            "default-src 'self'",
+                            "script-src 'self'",
+                            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+                            "font-src 'self' https://fonts.gstatic.com",
+                            "img-src 'self' data:",
+                            "connect-src 'self'",
+                            "frame-ancestors 'none'",
+                            "base-uri 'none'",
+                            "form-action 'self'",
+                        ].join("; "),
+                    },
+                    continue: true,
+                },
                 // the API, served by the one function. Everything else is the single-page app.
                 {
                     src: "^/(?:health|brief|research|ledger|catalogue|mandate|invest|auth|receipt)(?:/.*)?$",

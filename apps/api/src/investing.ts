@@ -7,12 +7,14 @@ import {
     swapPlan,
     swapPlanTotal,
     realizedSales,
+    investmentGap,
     preTradeChecks,
     blockReasons,
     warnings,
     proposalHash,
     approvalTypedDataJson,
     formatUsdc,
+    type InvestmentGap,
     type LedgerTx,
     type Leg,
     type Approval,
@@ -97,6 +99,8 @@ export interface SyncResult {
     costs: bigint;
     investable: bigint;
     settled: { briefId: string; investable: bigint }[];
+    /** How far the agent is from being able to place its smallest allowed trade. */
+    gap: InvestmentGap;
 }
 
 export interface ProposalView {
@@ -286,6 +290,7 @@ export class InvestingEngine {
 
         await this.flush();
         return {
+            gap: this.gap(),
             sales: sales.length,
             unreadableBriefs: [...(await (this.deps.briefProblems?.() ?? []))],
             unattributedSales: unattributed,
@@ -295,6 +300,26 @@ export class InvestingEngine {
             investable: this.treasury.ledger.balance("surplus.investable"),
             settled,
         };
+    }
+
+    /**
+     * How far the books are from allowing a trade, by the same rules settlement uses.
+     *
+     * "Nothing to invest" is the agent behaving correctly, but on its own it does not say whether that
+     * is one sale away or a hundred. This is the number.
+     */
+    gap(): InvestmentGap {
+        const terms = this.deps.mandates.current().terms;
+        const ledger = this.treasury.ledger;
+        return investmentGap({
+            revenue: ledger.balance("revenue.research") < 0n ? -ledger.balance("revenue.research") : 0n,
+            costs: ledger.balance("expense.llm"),
+            reserveBalance: ledger.balance("reserve"),
+            reserveTarget: terms.reserveTargetUsdc,
+            investShareBps: terms.investShareBps,
+            minTrade: terms.minTradeUsdc,
+            investable: ledger.balance("surplus.investable"),
+        });
     }
 
     /**

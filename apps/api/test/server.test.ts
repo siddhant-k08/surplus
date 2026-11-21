@@ -255,7 +255,71 @@ describe("writing a settled sale down", () => {
     });
 });
 
+describe("when a handler throws", () => {
+    it("does not leak the reason a route failed", async () => {
+        const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const dying = {
+                issue: async (): Promise<void> => {},
+                find: async (): Promise<never> => { throw new Error("DATABASE_URL points at a dead host"); },
+                forTransaction: async () => null,
+                forPayer: async () => [],
+                count: async () => 0,
+            };
+            const { app } = buildServer({
+                config, mandates: mandateFor(terms), readBrief: () => saved,
+                receipts: dying, storageCheck: async () => ({ ok: true }),
+            });
+            const res = await request(app).get(`/receipt/${"a".repeat(32)}`);
+            expect(res.status).toBe(500);
+            expect(res.body).toEqual({ error: "the agent could not complete that request" });
+            expect(res.text).not.toContain("DATABASE_URL");
+            expect(spy).toHaveBeenCalled();
+        } finally {
+            spy.mockRestore();
+        }
+    });
+});
+
 describe("what /health reports", () => {
+    it("fails the check when storage has gone away since start-up", async () => {
+        // a process that started fine and has since lost its database still answers every route; this
+        // is the state a monitor has to be able to catch
+        const down = buildServer({
+            config, mandates: mandateFor(terms), readBrief: () => saved, storage: "postgres",
+            storageCheck: async () => ({ ok: false, detail: "connection terminated" }),
+        });
+        const res = await request(down.app).get("/health");
+        expect(res.status).toBe(503);
+        expect(res.body.ok).toBe(false);
+        expect(res.body.checks.storage).toBe("unreachable");
+        expect(res.body.checks.storageDetail).toBe("connection terminated");
+    });
+
+    it("passes when storage answers and the books reconcile", async () => {
+        const up = buildServer({
+            config, mandates: mandateFor(terms), readBrief: () => saved, storage: "postgres",
+            storageCheck: async () => ({ ok: true }),
+        });
+        const res = await request(up.app).get("/health");
+        expect(res.status).toBe(200);
+        expect(res.body.ok).toBe(true);
+        expect(res.body.checks).toMatchObject({ storage: "ok", books: "reconciled", catalogue: "ok" });
+    });
+
+    it("reports an empty catalogue without calling itself unhealthy", async () => {
+        // a new deployment has nothing to sell until the first brief is written; that is not a fault
+        const bare = buildServer({
+            config, mandates: mandateFor(terms),
+            readBrief: () => { throw new Error("no briefs yet"); },
+            storageCheck: async () => ({ ok: true }),
+        });
+        const res = await request(bare.app).get("/health");
+        expect(res.status).toBe(200);
+        expect(res.body.checks.catalogue).toBe("empty");
+        expect(res.body.latestBrief).toBe(null);
+    });
+
     it("names the storage that is live, because the wrong one does not announce itself", async () => {
         const withDb = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, storage: "postgres" });
         const res = await request(withDb.app).get("/health");

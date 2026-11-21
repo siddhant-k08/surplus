@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { InvestmentGap } from "./api";
 import {
     api, formatUsdc, ApiError,
     type Mandate, type OwnerBrief, type Proposal, type SyncResult, type InvestLedger, type ExecuteResult,
@@ -82,7 +83,7 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
                 title: "Nothing to invest, and that is correct",
                 lines: [
                     `Earned ${formatUsdc(r.revenueUsdcMinor)} across ${r.sales} sale(s), spent ${formatUsdc(r.costsUsdcMinor)} on ${r.briefsCosted} brief(s).`,
-                    "Sell more briefs, raise the price, or lower the reserve target to free up surplus.",
+                    ...gapLines(r.gap),
                     ...r.unreadableBriefs.map((b) => `Brief file ${b.file} could not be read, so its cost is missing: ${b.error}`),
                 ],
             };
@@ -399,6 +400,27 @@ function labelFor(what: Busy): string {
 
 const expirySeconds = (m: Mandate | null): number => m?.terms.approvalExpirySeconds ?? 600;
 
+/**
+ * What is actually in the way, in money rather than advice.
+ *
+ * "Sell more briefs" is true and useless. An owner needs to know whether this is one sale away or a
+ * hundred, and the agent can say so exactly, by the same rules it settles with.
+ */
+export function gapLines(gap: InvestmentGap | undefined): string[] {
+    if (gap === undefined || gap.canInvest) return [];
+    if (gap.revenueNeededUsdcMinor === "0") {
+        return ["The mandate invests none of the surplus, so no amount of revenue would change this. Raise the invest share to change it."];
+    }
+    const parts: string[] = [];
+    if (gap.shortfallUsdcMinor !== "0") parts.push(`${formatUsdc(gap.shortfallUsdcMinor)} to cover what it has already spent`);
+    if (gap.reserveGapUsdcMinor !== "0") parts.push(`${formatUsdc(gap.reserveGapUsdcMinor)} to fill the protected reserve`);
+    if (gap.surplusNeededUsdcMinor !== "0") parts.push(`${formatUsdc(gap.surplusNeededUsdcMinor)} of surplus so the invest share clears the smallest allowed trade`);
+    return [
+        `${formatUsdc(gap.revenueNeededUsdcMinor)} USDC more revenue would make a trade possible: ${parts.join(", then ")}.`,
+        "Selling another brief also costs something to produce, so that figure is a floor, not a forecast.",
+    ];
+}
+
 function headline(p: Proposal | null, investable: string): string {
     if (p === null) {
         return BigInt(investable) > 0n
@@ -418,6 +440,10 @@ function subhead(p: Proposal | null, investable: string, sync: SyncResult | null
         return `${formatUsdc(investable)} USDC is investable. Ask for a proposal and the agent will quote it live.`;
     }
     if (sync !== null) {
+        const gap = sync.gap;
+        if (gap !== undefined && !gap.canInvest && gap.revenueNeededUsdcMinor !== "0") {
+            return `Nothing is investable yet. ${formatUsdc(gap.revenueNeededUsdcMinor)} USDC more revenue would change that. The agent not investing money it has not earned is the rule working, not a failure.`;
+        }
         return "The agent has not earned more than it spent, so there is nothing to invest. That is the rule working, not a failure.";
     }
     return "Sync the books to see what the agent has earned and what, if anything, is investable.";

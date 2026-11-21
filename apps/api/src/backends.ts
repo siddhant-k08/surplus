@@ -8,6 +8,8 @@ import type { ApiConfig } from "./config";
 import { DirBriefBackend, type BriefBackend } from "./briefs";
 import { JsonlReceiptStore, type ReceiptStore } from "./receipts";
 import { MemorySessionStore, type SessionStore } from "./session";
+import { MemoryThrottle, PgThrottle, type Throttle } from "./throttle";
+import { MemoryReservations, PgReservations, type Reservations } from "./reservations";
 import {
     migrate, openSql,
     PgBriefBackend, PgLedgerStore, PgMandateBackend, PgReceiptStore, PgSessionStore,
@@ -38,8 +40,19 @@ export interface Backends {
     /** Buyer-commissioned briefs, written while the agent runs. */
     custom: BriefBackend;
     sessions: SessionStore;
+    /** The ceiling on the free routes that do work. Shared across instances when there is a database. */
+    throttle: Throttle;
+    /** Money committed to a brief being generated right now, so the spend cap holds across instances. */
+    reservations: Reservations;
     /** Where each kind of record lives, for the banner. */
     lines: string[];
+    /**
+     * Whether storage is answering right now.
+     *
+     * A health check that only proves the process is running is worth very little: this agent's job is
+     * to write money down, and it cannot do that if the database has gone away since it started.
+     */
+    check: () => Promise<{ ok: boolean; detail?: string }>;
     close: () => Promise<void>;
 }
 
@@ -54,12 +67,25 @@ export function fileBackends(config: ApiConfig): Backends {
         catalogue: new DirBriefBackend(config.briefsDir),
         custom: new DirBriefBackend(config.customBriefsDir),
         sessions: new MemorySessionStore(),
+        throttle: new MemoryThrottle(),
+        reservations: new MemoryReservations(),
         lines: [
             `                mandate   ${config.mandatePath}`,
             `                receipts  ${config.receiptsPath}`,
             `                custom    ${config.customBriefsDir} (buyer-commissioned, never served to another buyer)`,
             `                sessions  in memory (a restart signs the owner out)`,
+            `                limits    in memory (one process, so the ceiling is the real one)`,
         ],
+        check: async () => {
+            // The files are written in the same place they are read from; if the process can see the
+            // directory it can write. Anything deeper would be inventing a failure mode.
+            try {
+                await new JsonlLedgerStore(config.ledgerPath).load();
+                return { ok: true };
+            } catch (e) {
+                return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+            }
+        },
         close: async () => {},
     };
 }
@@ -82,12 +108,24 @@ export function pgBackends(config: ApiConfig, sql: Sql): Backends {
         catalogue: new DirBriefBackend(config.briefsDir),
         custom: new PgBriefBackend(sql, "custom"),
         sessions: new PgSessionStore(sql),
+        throttle: new PgThrottle(sql),
+        reservations: new PgReservations(sql),
         lines: [
             `                mandate   table mandate_versions`,
             `                receipts  table receipts`,
             `                custom    table briefs, collection "custom"`,
             `                sessions  tables sessions and login_nonces`,
+            `                limits    table rate_limits, shared by every instance`,
+            `                research  table research_reservations, so the spend cap is one cap`,
         ],
+        check: async () => {
+            try {
+                await sql`select 1`;
+                return { ok: true };
+            } catch (e) {
+                return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+            }
+        },
         close: async () => {
             await sql.end({ timeout: 5 });
         },

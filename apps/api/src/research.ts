@@ -11,6 +11,7 @@ import {
     type ThemeSpec,
 } from "@surplus/core";
 import type { BriefBackend } from "./briefs";
+import { MemoryReservations, type Reservations } from "./reservations";
 
 export const MAX_THEMES = 3;
 export const MAX_NAME = 80;
@@ -148,6 +149,13 @@ export interface ResearchDeps {
      * `maxSpendUsd` caps one brief; without a total, N concurrent requests could spend N times that.
      */
     totalMaxSpendUsd: number;
+    /**
+     * Where money committed to a generation in flight is held.
+     *
+     * Shared in a real deployment, so instances see each other's. In memory by default, which is right
+     * for one process and is all a test needs.
+     */
+    reservations?: Reservations;
     now?: () => Date;
 }
 
@@ -174,16 +182,17 @@ export class ResearchService {
     /** Generations in flight, keyed by theme request, so identical requests share one. */
     private readonly inFlight = new Map<string, Promise<ResearchOutcome>>();
     /**
-     * What this instance has committed to spend on generations that have not been stored yet.
+     * Money committed to generations that have not been stored yet.
      *
      * Spending is counted from the stored briefs, which is the durable record, but a generation in
      * flight has cost money and is not stored yet. Without this, two requests arriving together would
      * each see the same spent total and each believe there was room.
      */
-    private reservedUsdcMinor = 0n;
+    private readonly reservations: Reservations;
 
     constructor(private readonly deps: ResearchDeps) {
         this.now = deps.now ?? (() => new Date());
+        this.reservations = deps.reservations ?? new MemoryReservations();
         if (deps.totalMaxSpendUsd < deps.maxSpendUsd) {
             throw new Error(
                 `totalMaxSpendUsd (${deps.totalMaxSpendUsd}) must be at least maxSpendUsd (${deps.maxSpendUsd})`,
@@ -202,7 +211,7 @@ export class ResearchService {
      */
     async budget(): Promise<{ spentUsd: number; remainingUsd: number; spentUsdcMinor: bigint }> {
         const stored = await this.deps.briefs.totalCostUsdcMinor();
-        const spentUsdcMinor = stored + this.reservedUsdcMinor;
+        const spentUsdcMinor = stored + (await this.reservations.outstanding());
         // display only; the comparison below is done in exact minor units
         const spentUsd = Number(spentUsdcMinor) / 1e6;
         return {
@@ -248,29 +257,40 @@ export class ResearchService {
     }
 
     private async generate(themes: readonly ThemeSpec[]): Promise<ResearchOutcome> {
-        const stored = await this.deps.briefs.totalCostUsdcMinor();
-
-        // From here to the reservation there is deliberately no `await`. Reading the reservations and
-        // taking one has to be a single step: with a hop in between, two requests arriving together
-        // both read the same total, both decide there is room, and both spend it. Calling `budget()`
-        // here would reintroduce exactly that hop, which is why the stored total is read directly.
+        // Reserve first, then check, rather than the other way round. Checking first leaves a gap
+        // between deciding there is room and taking it, and two instances arriving together both pass.
+        // Taking the money first means a request that turns out not to fit gives it straight back, and
+        // the worst case is a refusal that could have been allowed, which is the right way to be wrong
+        // about spending.
         const reservation = usdToUsdcMinor(this.deps.maxSpendUsd);
-        const spentUsdcMinor = stored + this.reservedUsdcMinor;
-        const spentUsd = Number(spentUsdcMinor) / 1e6;
-        if (this.deps.totalMaxSpendUsd - spentUsd < this.deps.maxSpendUsd) {
+        const held = await this.reservations.open(reservation);
+
+        let spentUsd = 0;
+        try {
+            const stored = await this.deps.briefs.totalCostUsdcMinor();
+            const ahead = await this.reservations.outstandingBefore(held);
+            spentUsd = Number(stored + ahead + reservation) / 1e6;
+        } catch (e) {
+            await this.reservations.close(held);
+            throw e;
+        }
+
+        // the reservation just taken is inside that total, so the comparison is against the cap itself
+        if (spentUsd > this.deps.totalMaxSpendUsd) {
+            await this.reservations.close(held);
             throw new Error(
-                `research budget exhausted: $${spentUsd.toFixed(4)} of $${this.deps.totalMaxSpendUsd} spent, ` +
-                `which leaves less than the $${this.deps.maxSpendUsd} a brief may cost`,
+                `research budget exhausted: $${(spentUsd - this.deps.maxSpendUsd).toFixed(4)} of ` +
+                `$${this.deps.totalMaxSpendUsd} spent, which leaves less than the ` +
+                `$${this.deps.maxSpendUsd} a brief may cost`,
             );
         }
-        this.reservedUsdcMinor += reservation;
 
         // Released whatever happens: a generation that threw must not hold the budget for ever. Once the
         // brief is stored, its real cost takes the reservation's place in the total.
         try {
             return await this.generateReserved(themes);
         } finally {
-            this.reservedUsdcMinor -= reservation;
+            await this.reservations.close(held);
         }
     }
 

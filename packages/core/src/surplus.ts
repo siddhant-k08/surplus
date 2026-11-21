@@ -72,6 +72,77 @@ export function computeSurplus(i: SurplusInput): SurplusResult {
     return { net, shortfall, ...swept };
 }
 
+export interface InvestmentGapInput {
+    /** Lifetime revenue the books prove. */
+    revenue: bigint;
+    /** Lifetime costs booked. */
+    costs: bigint;
+    reserveBalance: bigint;
+    reserveTarget: bigint;
+    investShareBps: number;
+    /** The smallest trade the mandate allows. Investable money below this cannot be placed. */
+    minTrade: bigint;
+    /** Money already sitting as investable. */
+    investable: bigint;
+}
+
+export interface InvestmentGap {
+    /** True when a trade could be proposed right now. */
+    canInvest: boolean;
+    /** Costs not yet covered by revenue. Nothing reaches the reserve until this is zero. */
+    shortfall: bigint;
+    /** What the protected reserve still needs before any surplus exists. */
+    reserveGap: bigint;
+    /** Surplus still needed on top of that, so the invest share clears the minimum trade. */
+    surplusNeeded: bigint;
+    /** Revenue that would have to arrive before the agent could place its smallest allowed trade. */
+    revenueNeeded: bigint;
+}
+
+/**
+ * How much more the agent must earn before it could invest anything, and what is in the way.
+ *
+ * The agent refusing to invest is the design working, but "nothing to invest" on its own tells an owner
+ * nothing about whether that is one sale away or a hundred. This turns the same rules settlement uses
+ * into the number: cover the costs, fill the reserve, then earn enough surplus that the invest share
+ * clears the smallest trade the mandate allows.
+ *
+ * It describes the state as it stands. Selling another brief also costs something to produce, so the
+ * real figure moves; this is the floor, not a forecast.
+ */
+export function investmentGap(i: InvestmentGapInput): InvestmentGap {
+    if (i.investShareBps <= 0) {
+        // the owner has told the agent to invest none of the surplus; no amount of revenue changes that
+        return {
+            canInvest: false,
+            shortfall: i.costs > i.revenue ? i.costs - i.revenue : 0n,
+            reserveGap: i.reserveTarget > i.reserveBalance ? i.reserveTarget - i.reserveBalance : 0n,
+            surplusNeeded: 0n,
+            revenueNeeded: 0n,
+        };
+    }
+    if (i.investable >= i.minTrade) {
+        return { canInvest: true, shortfall: 0n, reserveGap: 0n, surplusNeeded: 0n, revenueNeeded: 0n };
+    }
+
+    const shortfall = i.costs > i.revenue ? i.costs - i.revenue : 0n;
+    const reserveGap = i.reserveTarget > i.reserveBalance ? i.reserveTarget - i.reserveBalance : 0n;
+
+    // How much surplus the invest share has to be taken from for the result to reach the minimum trade.
+    // Rounded up, because the share rounds down: asking for exactly the quotient can land a unit short.
+    const missing = i.minTrade - i.investable;
+    const bps = BigInt(i.investShareBps);
+    const surplusNeeded = (missing * 10_000n + bps - 1n) / bps;
+
+    return {
+        canInvest: false,
+        shortfall,
+        reserveGap,
+        surplusNeeded,
+        revenueNeeded: shortfall + reserveGap + surplusNeeded,
+    };
+}
+
 /** Book the reserve top-up and the surplus split. Assumes revenue and costs are already booked.*/
 export function bookSurplus(
     ledger: Ledger,

@@ -13,6 +13,8 @@ import {
 import {
     PgLedgerStore, PgMandateBackend, PgReceiptStore, PgBriefBackend, PgSessionStore,
 } from "../src/pg";
+import { PgThrottle } from "../src/throttle";
+import { PgReservations } from "../src/reservations";
 import { newReceiptId, type Receipt } from "../src/receipts";
 import type { BriefDocument } from "../src/briefs";
 import { scratchSchema, hasDatabase, type Scratch } from "./pghelp";
@@ -69,6 +71,13 @@ const baseTerms = (over: Partial<MandateTerms> = {}): MandateTerms => ({
     driftToleranceBps: 100,
     approvalExpirySeconds: 600,
     ...over,
+});
+
+describeDb("the configured database", () => {
+    it("is reachable, so a connection failure is a failed test and not a skipped one", async () => {
+        const [row] = await scratch.sql<{ ok: number }[]>`select 1 as ok`;
+        expect(row?.ok).toBe(1);
+    }, 60_000);
 });
 
 describeDb("the ledger in Postgres", () => {
@@ -413,6 +422,77 @@ describeDb("briefs in Postgres", () => {
         expect(problems.map((p) => p.file)).toContain("brief-broken.json");
         expect((await custom.list()).map((b) => b.brief.id)).not.toContain("brief-broken");
     });
+});
+
+describeDb("the rate limit in Postgres", () => {
+    it("is one allowance across every instance, not one each", async () => {
+        // the point of putting it in the database: a per-process limiter on a host that runs many
+        // instances is the limit multiplied by however many happen to be running
+        const only = await scratchSchema();
+        try {
+            let now = Date.parse("2026-11-22T00:00:00Z");
+            const a = new PgThrottle(only.sql, () => now);
+            const b = new PgThrottle(only.sql, () => now);
+
+            expect(await a.allow("k", 3, 60_000)).toBe(true);
+            expect(await b.allow("k", 3, 60_000)).toBe(true);
+            expect(await a.allow("k", 3, 60_000)).toBe(true);
+            expect(await b.allow("k", 3, 60_000)).toBe(false); // the fourth, wherever it came from
+
+            expect(await a.allow("someone-else", 3, 60_000)).toBe(true);
+
+            now += 60_001;
+            expect(await b.allow("k", 3, 60_000)).toBe(true); // a fresh window
+        } finally {
+            await only.drop();
+        }
+    }, 60_000);
+});
+
+describeDb("research reservations in Postgres", () => {
+    it("lets the first instance through and makes the second stand down", async () => {
+        // the residual race the in-process reservation could not close: two instances starting a
+        // generation in the same instant, each blind to the other's commitment
+        const only = await scratchSchema();
+        try {
+            let now = Date.parse("2026-11-22T00:00:00Z");
+            const a = new PgReservations(only.sql, () => now);
+            const b = new PgReservations(only.sql, () => now);
+
+            const first = await a.open(1_000_000n);
+            now += 1; // b reserves a moment later
+            const second = await b.open(1_000_000n);
+
+            // each asks what was committed ahead of it, and they agree on the order
+            expect(await a.outstandingBefore(first)).toBe(0n);
+            expect(await b.outstandingBefore(second)).toBe(1_000_000n);
+            expect(await a.outstanding()).toBe(2_000_000n);
+
+            await b.close(second);
+            expect(await a.outstanding()).toBe(1_000_000n);
+        } finally {
+            await only.drop();
+        }
+    }, 60_000);
+
+    it("forgets a reservation an instance died holding", async () => {
+        // a budget permanently consumed by a crash would be a worse failure than the overspend this
+        // guards against
+        const only = await scratchSchema();
+        try {
+            let now = Date.parse("2026-11-22T00:00:00Z");
+            const r = new PgReservations(only.sql, () => now);
+            await r.open(1_000_000n);
+            expect(await r.outstanding()).toBe(1_000_000n);
+
+            now += 10 * 60_000 + 1;
+            expect(await r.outstanding()).toBe(0n);
+            const [row] = await only.sql<{ n: string }[]>`select count(*)::text as n from research_reservations`;
+            expect(row!.n).toBe("0"); // swept, not merely ignored
+        } finally {
+            await only.drop();
+        }
+    }, 60_000);
 });
 
 describeDb("sessions in Postgres", () => {

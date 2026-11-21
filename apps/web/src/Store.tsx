@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Recover } from "./Recover";
 import { formatUsdc } from "./api";
-import { connect, hasWallet, describeWalletError } from "./wallet";
+import { connect, hasWallet, describeWalletError, ensureChain, chainIdFromCaip } from "./wallet";
 
 interface Catalogue {
     briefPriceUsd: string;
@@ -42,11 +42,15 @@ export function Store() {
         setBought(null);
         try {
             const address = await connect();
+            // before anything is signed: a wallet on the wrong chain fails in a way nobody can read
+            const network = cat?.network ?? "eip155:84532";
+            const wanted = chainIdFromCaip(network);
+            if (wanted !== null) await ensureChain(wanted);
             const { buy } = await import("./buy"); // the payment stack, only now
             const result = await buy({
                 path: kind === "brief" ? "/brief" : "/research",
                 address,
-                network: cat?.network ?? "eip155:84532",
+                network,
                 ...(kind === "research" && { body: { themes: parseThemes(themes) } }),
             });
             setBought({ receipt: result.receipt });
@@ -88,7 +92,11 @@ export function Store() {
                             </p>
 
                             <div className="cta">
-                                <button className="btn" onClick={() => void purchase("brief")} disabled={busy !== null || !hasWallet()}>
+                                <button
+                                    className="btn"
+                                    onClick={() => void purchase("brief")}
+                                    disabled={busy !== null || !hasWallet() || (cat !== null && cat.latest === null)}
+                                >
                                     {busy === "brief" ? "Waiting for your wallet…" : `Buy the latest brief, ${price}`}{" "}
                                     <span aria-hidden="true">↗</span>
                                 </button>
@@ -97,9 +105,18 @@ export function Store() {
                                 </a>
                             </div>
 
+                            {cat !== null && cat.latest === null && (
+                                // nothing to sell is a real state, and saying so is better than a button
+                                // that takes a payment for a brief that is not there
+                                <p className="lede" style={{ color: "var(--coral)" }}>
+                                    The agent has no brief on offer right now. Commission your own themes
+                                    below, or come back shortly.
+                                </p>
+                            )}
                             {!hasWallet() && (
                                 <p className="lede" style={{ color: "var(--coral)" }}>
                                     You need a browser wallet holding USDC on Base Sepolia to buy here.
+                                    You do not need ETH: the facilitator pays the gas.
                                 </p>
                             )}
                             {error !== null && (
