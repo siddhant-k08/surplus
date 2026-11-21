@@ -8,6 +8,8 @@ import {
     flushNewEntries,
     parseLedgerFile,
     parseTxLine,
+    realizedRevenue,
+    realizedSales,
     serializeTx,
 } from "../src/ledgerstore";
 import { parseUsdc as u } from "../src/money";
@@ -140,5 +142,59 @@ describe("reading the ledger file back", () => {
             lines: [{ account: "cash.operating", amount: "1" }, { account: "revenue.research", amount: "-1" }],
         });
         expect(() => parseLedgerFile(`${mk(1)}\n${mk(3)}\n`, "f")).toThrow(/ids jump from 1 to 3/);
+    });
+});
+
+describe("what the ledger proves was earned", () => {
+    const mk = (l: Ledger) => {
+        l.post({
+            type: "PAYMENT_RECEIVED", mode: "testnet", at: new Date("2026-11-21T00:00:00Z"),
+            idempotencyKey: "pay:a", txHash: "0xaaa", briefId: "brief-1",
+            lines: [{ account: "cash.operating", amount: u("0.01") }, { account: "revenue.research", amount: u("-0.01") }],
+        });
+        l.post({
+            type: "PAYMENT_RECEIVED", mode: "testnet", at: new Date("2026-11-21T00:00:01Z"),
+            idempotencyKey: "pay:b", txHash: "0xbbb", briefId: "brief-1",
+            lines: [{ account: "cash.operating", amount: u("0.01") }, { account: "revenue.research", amount: u("-0.01") }],
+        });
+        return l;
+    };
+
+    it("totals the sales and keeps their transactions, briefs and mode", () => {
+        const l = mk(new Ledger());
+        const sales = realizedSales(l.all());
+        expect(sales.length).toBe(2);
+        expect(sales.map((s) => s.transaction)).toEqual(["0xaaa", "0xbbb"]);
+        expect(sales[0]!.briefId).toBe("brief-1");
+        expect(sales[0]!.mode).toBe("testnet");
+        expect(realizedRevenue(l.all())).toBe(u("0.02"));
+    });
+
+    it("ignores a payment with no settlement transaction", () => {
+        // a payment the agent recorded but that never landed onchain is not proven revenue
+        const l = new Ledger();
+        l.post({
+            type: "PAYMENT_RECEIVED", mode: "sim", at: new Date("2026-11-21T00:00:00Z"), idempotencyKey: "pay:sim",
+            lines: [{ account: "cash.operating", amount: u("3") }, { account: "revenue.research", amount: u("-3") }],
+        });
+        expect(realizedSales(l.all())).toEqual([]);
+        expect(realizedRevenue(l.all())).toBe(0n);
+    });
+
+    it("ignores costs and other entry types", () => {
+        const l = mk(new Ledger());
+        l.post({
+            type: "COST_ACCRUED", mode: "testnet", at: new Date("2026-11-21T00:00:02Z"), briefId: "brief-1",
+            lines: [{ account: "expense.llm", amount: u("0.02") }, { account: "cash.operating", amount: u("-0.02") }],
+        });
+        expect(realizedRevenue(l.all())).toBe(u("0.02")); // unchanged by the cost
+    });
+
+    it("survives a round trip through the file", () => {
+        const l = mk(new Ledger());
+        const store = new JsonlLedgerStore(path);
+        store.append(l.all());
+        expect(realizedRevenue(store.load())).toBe(u("0.02"));
+        expect(realizedSales(store.load())[0]!.briefId).toBe("brief-1");
     });
 });

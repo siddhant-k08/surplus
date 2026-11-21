@@ -246,8 +246,17 @@ export class Treasury {
         return { ok: true };
     }
 
-    /** The Owner's wallet signature is added in the wallet milestone; until then `by` is just a label. */
-    approve(id: string, by: string): ApproveResult {
+    /**
+     * Records the owner's approval of a proposal.
+     *
+     * `maxUsdcIn` and both hashes are always computed here from the proposal and the current mandate, never
+     * taken from the caller: those are the facts the owner's signature is supposed to be about, so letting
+     * a caller supply them would let a forged approval authorize more than the owner agreed to.
+     *
+     * `expiresAt` may be supplied so it can match a signature the owner already made, but it is clamped to
+     * the mandate's `approvalExpirySeconds`: a signature cannot widen the window the user set.
+     */
+    approve(id: string, by: string, opts: { expiresAt?: string; signature?: string } = {}): ApproveResult {
         const rec = this.get(id);
         if (rec.machine.state !== "PROPOSED") {
             throw new Error(`Proposal ${id} is ${rec.machine.state}, expected PROPOSED`);
@@ -260,7 +269,19 @@ export class Treasury {
             return { ok: false, reasons };
         }
 
-        const expiresAt = new Date(this.now().getTime() + mandate.terms.approvalExpirySeconds * 1000).toISOString();
+        const latest = this.now().getTime() + mandate.terms.approvalExpirySeconds * 1000;
+        let expiresAt = new Date(latest).toISOString();
+        if (opts.expiresAt !== undefined) {
+            const asked = Date.parse(opts.expiresAt);
+            if (Number.isNaN(asked)) throw new Error(`expiresAt is not a date: ${opts.expiresAt}`);
+            if (asked > latest) {
+                throw new Error(
+                    `expiresAt ${opts.expiresAt} is beyond the mandate's approval window of ${mandate.terms.approvalExpirySeconds}s`,
+                );
+            }
+            if (asked <= this.now().getTime()) throw new Error(`expiresAt ${opts.expiresAt} is already past`);
+            expiresAt = new Date(asked).toISOString();
+        }
         const approval: Approval = {
             proposalHash: proposalHash(rec.proposal, mandate.hash),
             mandateVersion: mandate.version,
@@ -270,7 +291,11 @@ export class Treasury {
         };
         rec.approval = approval;
         rec.machine.transition("APPROVED", this.now());
-        this.event("APPROVAL_RECORDED", `proposal ${id} approved by ${by}, expires ${expiresAt}`);
+        this.event(
+            "APPROVAL_RECORDED",
+            `proposal ${id} approved by ${by}, expires ${expiresAt}` +
+            (opts.signature === undefined ? "" : `, signature ${opts.signature.slice(0, 18)}...`),
+        );
         return { ok: true, approval };
     }
 

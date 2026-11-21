@@ -524,3 +524,34 @@ export function usdToUsdcMinor(usd: number): bigint {
     if (!Number.isFinite(usd) || usd < 0) throw new Error("usd must be a non-negative finite number");
     return BigInt(Math.ceil(Number((usd * 1e6).toFixed(6))));
 }
+/**
+ * Wraps a model client with a hard spend cap, refusing a call that could carry spending past it.
+ *
+ * The estimate before the call is deliberately pessimistic: Anthropic documents about 2.5 characters per
+ * token, and this assumes 2, so it errs towards refusing. Spending is tracked from what each call actually
+ * reported, not from the estimate.
+ */
+export function budgetedLlm(
+    inner: LlmClient,
+    capUsd: number,
+    inPerMTokUsd: number,
+    outPerMTokUsd: number,
+    maxOutputTokens = 16_000,
+): LlmClient & { spentUsd: () => number } {
+    if (capUsd <= 0) throw new Error("spend cap must be positive");
+    let spent = 0;
+    return {
+        spentUsd: () => spent,
+        async complete(system, user) {
+            const worst = (((system.length + user.length) / 2) * inPerMTokUsd + maxOutputTokens * outPerMTokUsd) / 1_000_000;
+            if (spent + worst > capUsd) {
+                throw new Error(
+                    `budget: next call could cost up to $${worst.toFixed(3)}, spent $${spent.toFixed(3)} of $${capUsd}`,
+                );
+            }
+            const r = await inner.complete(system, user);
+            spent += (r.inputTokens * inPerMTokUsd + r.outputTokens * outPerMTokUsd) / 1_000_000;
+            return r;
+        },
+    };
+}

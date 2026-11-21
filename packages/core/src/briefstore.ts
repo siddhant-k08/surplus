@@ -10,6 +10,8 @@ export interface SavedBrief {
     brief: Brief;
     costUsdcMinor: bigint;
     costUsd: number;
+    /** Stable key of the theme request this brief answers, when it was generated for one. */
+    themesKey?: string;
 }
 
 /**
@@ -35,6 +37,7 @@ export function parseSavedBrief(file: string, text: string): SavedBrief {
         brief,
         costUsdcMinor: BigInt(r.costUsdcMinor),
         costUsd: typeof r.costUsd === "number" ? r.costUsd : 0,
+        ...(typeof r.themesKey === "string" && { themesKey: r.themesKey }),
     };
 }
 

@@ -1,4 +1,3 @@
-import { check } from "fast-check";
 import { createHash } from "node:crypto";
 
 export interface ThemeTarget {
@@ -131,6 +130,34 @@ export class MandateStore {
         return this.versions;
     }
 
+    /**
+     * Takes stored versions as this store's history after checking them.
+     *
+     * Terms are re-validated and the hash chain recomputed, so a tampered or truncated file is refused.
+     * This never creates a version: only the owner path does that.
+     */
+    adopt(versions: readonly MandateVersion[]): void {
+        if (this.versions.length > 0) throw new Error("this store already holds versions");
+        let prevHash: string | null = null;
+        versions.forEach((v, i) => {
+            const expectedVersion = i + 1;
+            if (v.version !== expectedVersion) {
+                throw new Error(`mandate history is not contiguous: expected version ${expectedVersion}, got ${v.version}`);
+            }
+            if (v.prevHash !== prevHash) {
+                throw new Error(`mandate version ${v.version} does not chain to the previous one`);
+            }
+            const normalized = normalizeTerms(v.terms);
+            validateTerms(normalized);
+            const recomputed = hashMandate(v.version, v.prevHash, normalized);
+            if (recomputed !== v.hash) {
+                throw new Error(`mandate version ${v.version} hash does not match its terms; the stored mandate was altered`);
+            }
+            prevHash = v.hash;
+            this.versions.push(Object.freeze({ ...v, terms: Object.freeze(normalized) }));
+        });
+    }
+
     verifyChain(): boolean {
         let prevHash: string | null = null;
         for (const v of this.versions) {
@@ -140,4 +167,18 @@ export class MandateStore {
         }
         return true;
     }
+}
+
+/**
+ * Rebuilds a store from stored versions, refusing a chain that does not verify.
+ *
+ * The mandate is the user's constraint set, so a stored file is exactly what an attacker would edit to
+ * loosen a limit. Every version's hash covers its own terms, its version number and the previous hash, so
+ * recomputing the chain detects both an altered term and a removed or reordered version. A store that does
+ * not verify is refused rather than used: better to stop than to trade under constraints nobody set.
+ */
+export function restoreMandateStore(versions: readonly MandateVersion[]): MandateStore {
+    const store = new MandateStore();
+    store.adopt(versions);
+    return store;
 }

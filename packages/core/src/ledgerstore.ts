@@ -127,3 +127,40 @@ export function flushNewEntries(ledger: Ledger, store: JsonlLedgerStore, lastPer
     store.append(pending);
     return pending.length > 0 ? pending[pending.length - 1]!.id : lastPersistedId;
 }
+
+/** A sale the ledger actually records: a payment entry carrying its settlement transaction. */
+export interface RealizedSale {
+    transaction: string;
+    amountUsdcMinor: bigint;
+    briefId: string | undefined;
+    at: string;
+    mode: Mode;
+}
+
+/**
+ * The sales a ledger proves, read back from its entries.
+ *
+ * This is the single answer to "what did the agent actually earn", so the paid endpoint and the investing
+ * loop cannot disagree about it. Only `PAYMENT_RECEIVED` entries that carry a settlement transaction count:
+ * a payment with no transaction did not arrive onchain.
+ */
+export function realizedSales(entries: readonly LedgerTx[]): RealizedSale[] {
+    const out: RealizedSale[] = [];
+    for (const e of entries) {
+        if (e.type !== "PAYMENT_RECEIVED" || e.txHash === undefined) continue;
+        const cash = e.lines.find((l) => l.account === "cash.operating");
+        if (cash === undefined || cash.amount <= 0n) continue;
+        out.push({
+            transaction: e.txHash,
+            amountUsdcMinor: cash.amount,
+            briefId: e.briefId,
+            at: e.at,
+            mode: e.mode,
+        });
+    }
+    return out;
+}
+
+/** Total USDC minor units the ledger proves were received. */
+export const realizedRevenue = (entries: readonly LedgerTx[]): bigint =>
+    realizedSales(entries).reduce((a, s) => a + s.amountUsdcMinor, 0n);
