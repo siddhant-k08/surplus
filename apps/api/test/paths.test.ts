@@ -17,7 +17,7 @@ describe("paths", () => {
     });
 
     it("gives the config an absolute briefs directory whatever the cwd is", () => {
-        const c = loadConfig({ X402_PAY_TO: "0x" + "a".repeat(40) });
+        const c = loadConfig({ X402_PAY_TO: "0x" + "a".repeat(40), OWNER_TOKEN: "owner-token-for-tests-only", OWNER_ADDRESS: "0x" + "9".repeat(40) });
         expect(isAbsolute(c.briefsDir)).toBe(true);
         expect(c.briefsDir).toBe(resolve(REPO_ROOT, "docs/briefs"));
     });

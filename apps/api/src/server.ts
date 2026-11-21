@@ -1,21 +1,29 @@
-import express, { type Express, type Request, type Response } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { paymentMiddleware, x402ResourceServer } from "@x402/express";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import {
     Treasury,
-    MandateStore,
     JsonlLedgerStore,
     flushNewEntries,
+    realizedSales,
+    reconcileInternal,
     loadLatestBrief,
     formatUsdc,
     type LedgerTx,
+    type MandateStore,
     type MandateTerms,
+    type MandateVersion,
     type SavedBrief,
 } from "@surplus/core";
 import type { ApiConfig } from "./config";
+import { requireOwner } from "./owner";
+import type { InvestingEngine } from "./investing";
+import { normalizeThemes, type ResearchService } from "./research";
+import { parseTermsUpdate, changedTerms } from "./terms";
 
 export const BRIEF_ROUTE = "/brief";
+export const RESEARCH_ROUTE = "/research";
 
 export interface BookedSale {
     transaction: string;
@@ -83,34 +91,62 @@ export function bookSettlement(args: {
 
 export interface ServerDeps {
     config: ApiConfig;
-    terms: MandateTerms;
+    /** The owner's mandate. Shared with the investing engine so both see the same version. */
+    mandates: MandateStore;
     /** Overridable so tests can run without the docs/briefs directory. */
     readBrief?: () => SavedBrief;
     /** When given, the ledger is loaded from this file on boot and appended to after every sale. */
     store?: JsonlLedgerStore;
+    /** When given, the owner-gated investing routes are mounted. */
+    engine?: InvestingEngine;
+    /** When given, the paid on-demand research route is mounted. */
+    research?: ResearchService;
+    /**
+     * Creates and persists a new mandate version from the owner's terms.
+     *
+     * Passed in rather than done here so the server never holds the means to change a user constraint on
+     * its own: without this the update route refuses.
+     */
+    updateMandate?: (terms: MandateTerms) => MandateVersion;
 }
 
 /**
  * Rebuilds the sales list from ledger entries rather than storing it twice.
  *
- * A booked sale is a PAYMENT_RECEIVED entry carrying the settlement transaction, so the ledger already
- * holds everything the list shows. Deriving it keeps the two from disagreeing after a restart.
+ * Delegates to core's `realizedSales`, which is the single answer to what the agent actually earned, so
+ * this endpoint and the investing loop cannot disagree about it. The payer is not kept in the ledger; it
+ * lives in the settlement record, so a restored sale has none.
  */
 export function salesFromLedger(entries: readonly LedgerTx[]): BookedSale[] {
-    const out: BookedSale[] = [];
-    for (const e of entries) {
-        if (e.type !== "PAYMENT_RECEIVED" || e.txHash === undefined) continue;
-        const cash = e.lines.find((l) => l.account === "cash.operating");
-        if (cash === undefined) continue;
-        out.push({
-            transaction: e.txHash,
-            payer: undefined, // the payer is not kept in the ledger; it lives in the settlement record
-            amountUsdcMinor: cash.amount,
-            briefId: e.memo ?? "unknown",
-            at: e.at,
-        });
-    }
-    return out;
+    return realizedSales(entries).map((s) => ({
+        transaction: s.transaction,
+        payer: undefined,
+        amountUsdcMinor: s.amountUsdcMinor,
+        briefId: s.briefId ?? "unknown", // older entries predate the structured field
+        at: s.at,
+    }));
+}
+
+/** Mandate version as JSON, with every limit as a decimal string of minor units. */
+export function mandateView(m: MandateVersion) {
+    return {
+        version: m.version,
+        hash: m.hash,
+        prevHash: m.prevHash,
+        createdAt: m.createdAt,
+        terms: {
+            eligible: m.terms.eligible,
+            themes: m.terms.themes,
+            maxCompanyBps: m.terms.maxCompanyBps,
+            investShareBps: m.terms.investShareBps,
+            maxSlippageBps: m.terms.maxSlippageBps,
+            driftToleranceBps: m.terms.driftToleranceBps,
+            approvalExpirySeconds: m.terms.approvalExpirySeconds,
+            maxTradeUsdc: m.terms.maxTradeUsdc.toString(),
+            minTradeUsdc: m.terms.minTradeUsdc.toString(),
+            reserveTargetUsdc: m.terms.reserveTargetUsdc.toString(),
+        },
+    };
 }
 
 export interface BuiltServer {
@@ -130,11 +166,8 @@ export interface BuiltServer {
  * every claim carries the quote it came from so a reader can check it.
  */
 export function buildServer(deps: ServerDeps): BuiltServer {
-    const { config, terms, store } = deps;
+    const { config, store, mandates } = deps;
     const readBrief = deps.readBrief ?? ((): SavedBrief => loadLatestBrief(config.briefsDir));
-
-    const mandates = new MandateStore();
-    mandates.create(terms);
 
     // Replaying the stored entries restores the balances and, importantly, the dedup index: a settlement
     // that arrives again after a restart is refused by the ledger rather than booked a second time.
@@ -179,6 +212,8 @@ export function buildServer(deps: ServerDeps): BuiltServer {
 
     const app = express();
     app.disable("x-powered-by");
+    // a small cap: these bodies carry an id, never a document
+    app.use(express.json({ limit: "16kb" }));
 
     app.use(
         paymentMiddleware(
@@ -195,6 +230,20 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                     description: "Cited, multi-theme tokenized-stock research brief. Informational only, not investment advice.",
                     mimeType: "application/json",
                 },
+                ...(deps.research === undefined ? {} : {
+                    [`POST ${RESEARCH_ROUTE}`]: {
+                        accepts: [
+                            {
+                                scheme: "exact",
+                                price: config.researchPriceUsd,
+                                network: config.network,
+                                payTo: config.payTo,
+                            },
+                        ],
+                        description: "A brief generated for the themes you send. Informational only, not investment advice.",
+                        mimeType: "application/json",
+                    },
+                }),
             },
             resourceServer,
         ),
@@ -236,6 +285,41 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         });
     });
 
+    // Paid, on demand: a brief for the buyer's own themes.
+    //
+    // The scheme's flow is `authorization`: the payment is verified before this handler runs and settled
+    // after it returns, and a handler that throws cancels the verified payment (`handler_threw`). So a
+    // failed generation must propagate rather than be swallowed: the buyer is then not charged for a brief
+    // they never received. Invalid themes are refused the same way, before any model call is made.
+    if (deps.research !== undefined) {
+        const research = deps.research;
+        app.post(RESEARCH_ROUTE, async (req: Request, res: Response, next: NextFunction) => {
+            const parsed = normalizeThemes((req.body as { themes?: unknown } | undefined)?.themes);
+            if (!parsed.ok) {
+                res.status(400).json({ error: "themes were not accepted", details: parsed.errors });
+                return;
+            }
+            try {
+                const outcome = await research.obtain(parsed.themes);
+                res.json({
+                    brief: outcome.saved.brief,
+                    provider: outcome.saved.provider,
+                    model: outcome.saved.model,
+                    cached: outcome.cached,
+                    disclaimer: outcome.saved.brief.disclaimer,
+                    generation: {
+                        costUsdcMinor: outcome.costUsdcMinor.toString(),
+                        validationIssues: outcome.issues,
+                        droppedByVerification: outcome.rejected,
+                    },
+                });
+            } catch (e) {
+                // let the SDK cancel the verified payment rather than charging for nothing
+                next(e instanceof Error ? e : new Error(String(e)));
+            }
+        });
+    }
+
     // free, read-only: the chronological ledger, so a buyer can see the sale was booked
     app.get("/ledger", (_req: Request, res: Response) => {
         res.json({
@@ -252,6 +336,134 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             sales: sales.map((s) => ({ ...s, amountUsdcMinor: s.amountUsdcMinor.toString() })),
         });
     });
+
+    // ---- owner routes ----
+    //
+    // These read or decide what to do with money, so they are gated. The bearer token only proves the
+    // caller holds a secret; it is not the owner's signature on a trade. Nothing here ever approves on the
+    // owner's behalf: propose, approve and execute are three separate calls on purpose.
+    const owner = requireOwner(config.ownerToken);
+
+    // The mandate is the owner's own constraint set, not an investing feature, so these are mounted
+    // whether or not an investing engine is wired in.
+    {
+        app.get("/mandate", owner, (_req: Request, res: Response) => {
+            res.json(mandateView(mandates.current()));
+        });
+
+        app.get("/mandate/history", owner, (_req: Request, res: Response) => {
+            res.json({
+                chainVerified: mandates.verifyChain(),
+                versions: mandates.history().map(mandateView),
+            });
+        });
+
+        // The owner changes their own constraints here. The agent never calls this: a new version is only
+        // ever created from the owner's request, and the response says what changed so a mistake is visible.
+        app.post("/mandate", owner, (req: Request, res: Response) => {
+            const before = mandates.current();
+            const parsed = parseTermsUpdate(req.body, before.terms);
+            if (!parsed.ok) return void res.status(400).json({ error: "terms were not accepted", details: parsed.errors });
+            try {
+                const created = deps.updateMandate?.(parsed.terms);
+                if (created === undefined) {
+                    return void res.status(409).json({ error: "this server cannot change the mandate" });
+                }
+                res.json({
+                    ...mandateView(created),
+                    changed: changedTerms(before.terms, created.terms),
+                    note: "outstanding approvals are bound to the previous version and now need reapproval",
+                });
+            } catch (e) {
+                res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+            }
+        });
+
+    }
+
+    const engine = deps.engine;
+    if (engine !== undefined) {
+        app.get("/invest/ledger", owner, (_req: Request, res: Response) => {
+            res.json({
+                mode: engine.treasury.ledger.all()[0]?.mode ?? config.investMode,
+                simulatedFills: config.investMode !== "mainnet",
+                balances: Object.fromEntries(
+                    [...engine.treasury.ledger.balances()].map(([a, v]) => [a, v.toString()]),
+                ),
+                entries: engine.treasury.ledger.all().map((e) => ({
+                    id: e.id, type: e.type, mode: e.mode, at: e.at,
+                    memo: e.memo ?? null, briefId: e.briefId ?? null,
+                    lines: e.lines.map((l) => ({ account: l.account, amount: l.amount.toString() })),
+                })),
+                reconcile: reconcileInternal(engine.treasury.ledger),
+            });
+        });
+
+        app.post("/invest/sync", owner, (_req: Request, res: Response) => {
+            const r = engine.syncRevenue();
+            res.json({
+                sales: r.sales,
+                unattributedSales: r.unattributedSales,
+                briefsCosted: r.briefsCosted,
+                revenueUsdcMinor: r.revenue.toString(),
+                costsUsdcMinor: r.costs.toString(),
+                investableUsdcMinor: r.investable.toString(),
+                settled: r.settled.map((x) => ({ briefId: x.briefId, investableUsdcMinor: x.investable.toString() })),
+            });
+        });
+
+        app.post("/invest/propose", owner, async (req: Request, res: Response) => {
+            const id = typeof req.body?.id === "string" && req.body.id !== "" ? req.body.id : `p-${Date.now()}`;
+            try {
+                const r = await engine.propose(id);
+                res.status(r.ok ? 200 : 409).json(r.ok ? { ...r.view, toSign: r.toSign, warnings: r.warnings } : { id, refused: r.reasons });
+            } catch (e) {
+                res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+            }
+        });
+
+        // The owner's EIP-712 signature over the payload /invest/propose returned. There is no unsigned
+        // path: the bearer token decides who may reach this route, the signature authorizes the spend.
+        app.post("/invest/approve", owner, async (req: Request, res: Response) => {
+            const id = req.body?.id;
+            const signature = req.body?.signature;
+            if (typeof id !== "string" || id === "") return void res.status(400).json({ error: "id is required" });
+            if (typeof signature !== "string" || signature === "") {
+                return void res.status(400).json({ error: "signature is required; sign the toSign payload from /invest/propose" });
+            }
+            try {
+                const r = await engine.approve(id, signature);
+                res.status(r.ok ? 200 : 409).json(
+                    r.ok ? { id, approved: true, expiresAt: r.expiresAt, signer: r.signer } : { id, refused: r.reasons },
+                );
+            } catch (e) {
+                res.status(409).json({ error: e instanceof Error ? e.message : String(e) });
+            }
+        });
+
+        app.post("/invest/execute", owner, async (req: Request, res: Response) => {
+            const id = req.body?.id;
+            if (typeof id !== "string" || id === "") return void res.status(400).json({ error: "id is required" });
+            try {
+                const r = await engine.execute(id);
+                res.status(r.ok ? 200 : 409).json(r.ok ? { id, ...r } : { id, stopped: r.reasons, outcome: r.outcome ?? null });
+            } catch (e) {
+                res.status(409).json({ error: e instanceof Error ? e.message : String(e) });
+            }
+        });
+
+        app.get("/invest/proposals", owner, (_req: Request, res: Response) => {
+            res.json({
+                proposals: engine.ids().map((id) => {
+                    try {
+                        return engine.view(id);
+                    } catch {
+                        return { id, state: "unknown" };
+                    }
+                }),
+            });
+        });
+    }
 
     return { app, treasury, sales };
 }

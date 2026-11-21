@@ -7,21 +7,22 @@
         "start": "tsx src/index.ts",
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
-        "buy": "tsx src/buy.ts"
+        "buy": "tsx src/buy.ts",
+        "approve": "tsx src/sign-approval.ts"
     },
     "dependencies": {
         "@surplus/core": "*",
         "@x402/core": "2.32.0",
         "@x402/evm": "2.32.0",
         "@x402/express": "2.32.0",
-        "express": "5.3.0"
+        "express": "5.3.0",
+        "viem": "^2.58.2"
     },
     "devDependencies": {
         "@types/express": "5.0.0",
         "supertest": "7.1.1",
         "@types/supertest": "6.0.2",
         "vitest": "^2.1.0",
-        "@x402/fetch": "2.32.0",
-        "viem": "^2.58.2"
+        "@x402/fetch": "2.32.0"
     }
 }

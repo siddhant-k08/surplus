@@ -1,4 +1,4 @@
-import type { Mode } from "@surplus/core";
+import { parseUsdc, type Mode } from "@surplus/core";
 import { fromRepoRoot, REPO_ROOT } from "./paths";
 
 /** CAIP-2 network ids. The free x402.org facilitator serves Base Sepolia only (checked 21 Nov 2026). */
@@ -28,6 +28,26 @@ export interface ApiConfig {
     expectedAsset: string;
     /** Append-only JSONL file the ledger is persisted to. */
     ledgerPath: string;
+    /** Where the investing book lives. Separate from the sales book so simulated fills never mix in. */
+    investLedgerPath: string;
+    /** Mode of the investing book. `sim` while fills are simulated. */
+    investMode: Mode;
+    /** Shared secret for the owner routes. Decides who may reach them, not what is authorized. */
+    ownerToken: string;
+    /** The address whose EIP-712 signature authorizes an approval. */
+    ownerAddress: string;
+    /** Chain id bound into the signed approval domain. */
+    approvalChainId: number;
+    /** Append-only JSONL file the owner's mandate history lives in. */
+    mandatePath: string;
+    /** Owner-provided working capital for the investing book, in USDC minor units. */
+    openingFloatUsdcMinor: bigint;
+    /** Price of an on-demand brief generated for the buyer's own themes. */
+    researchPriceUsd: string;
+    /** Hard cap on what one generated brief may cost. Never above the research price. */
+    researchMaxUsd: number;
+    /** A cached brief for the same themes younger than this is served instead of generating again. */
+    briefMaxAgeSeconds: number;
     /** Ledger mode tag. Never "sim": money really moves on a testnet. */
     mode: Mode;
 }
@@ -71,6 +91,68 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     const expectedAsset = (env.X402_EXPECTED_ASSET ?? USDC[network] ?? "").trim();
     if (!/^0x[0-9a-fA-F]{40}$/.test(expectedAsset)) throw new Error("X402_EXPECTED_ASSET must be a 20 byte hex address");
 
+    // Fills are simulated until mainnet investing is explicitly authorized. The investing book's mode says
+    // which it is, so a reader never has to guess whether a position was really bought.
+    const investRaw = (env.INVEST_MODE ?? "sim").trim();
+    if (investRaw !== "sim" && investRaw !== "testnet" && investRaw !== "mainnet") {
+        throw new Error(`INVEST_MODE must be sim, testnet or mainnet, got ${investRaw}`);
+    }
+    if (investRaw === "mainnet" && env.MAINNET_ENABLED !== "true") {
+        throw new Error("Refusing to invest on mainnet: set MAINNET_ENABLED=true to authorize it");
+    }
+    const investMode: Mode = investRaw;
+
+    // Model costs are paid before any revenue arrives, so the investing book needs the owner's working
+    // capital on record; without it operating cash goes negative and reconciliation rightly objects.
+    const floatRaw = (env.OPENING_FLOAT_USDC ?? "1.00").trim();
+    if (!/^\d+(\.\d{1,6})?$/.test(floatRaw)) {
+        throw new Error(`OPENING_FLOAT_USDC must be a plain amount like "1.00", got ${floatRaw}`);
+    }
+    const openingFloat = parseUsdc(floatRaw);
+
+    // On-demand research costs real money per request, so the price must cover the cap. Refusing at startup
+    // is the only place this can be caught before a buyer has already paid for a brief sold at a loss.
+    const researchPriceUsd = (env.RESEARCH_PRICE_USD ?? "$2.00").trim();
+    if (!/^\$\d+(\.\d{1,6})?$/.test(researchPriceUsd)) {
+        throw new Error(`RESEARCH_PRICE_USD must look like "$2.00", got ${researchPriceUsd}`);
+    }
+    const researchMaxRaw = (env.RESEARCH_MAX_USD ?? "1.50").trim();
+    const researchMaxUsd = Number(researchMaxRaw);
+    if (!Number.isFinite(researchMaxUsd) || researchMaxUsd <= 0) {
+        throw new Error(`RESEARCH_MAX_USD must be a positive number, got ${researchMaxRaw}`);
+    }
+    if (researchMaxUsd > Number(researchPriceUsd.slice(1))) {
+        throw new Error(
+            `RESEARCH_MAX_USD (${researchMaxUsd}) must not exceed RESEARCH_PRICE_USD (${researchPriceUsd}): ` +
+            "a generated brief must never be able to cost more than the buyer paid",
+        );
+    }
+
+    const ageRaw = (env.BRIEF_MAX_AGE_SECONDS ?? "86400").trim();
+    const briefMaxAgeSeconds = Number(ageRaw);
+    if (!Number.isInteger(briefMaxAgeSeconds) || briefMaxAgeSeconds < 0) {
+        throw new Error(`BRIEF_MAX_AGE_SECONDS must be a non-negative integer, got ${ageRaw}`);
+    }
+
+    // Approvals are authorized by the owner's signature, so the address is required: without it there is
+    // no way to tell an owner's approval from anyone else's, and the server must not start half-secured.
+    const ownerAddress = (env.OWNER_ADDRESS ?? "").trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(ownerAddress)) {
+        throw new Error("OWNER_ADDRESS must be the 20 byte hex address whose signature approves trades");
+    }
+    // Defaults to the network being sold on, so a signature is bound to the chain actually in use.
+    const chainRaw = (env.APPROVAL_CHAIN_ID ?? (network === BASE_MAINNET ? "8453" : "84532")).trim();
+    const approvalChainId = Number(chainRaw);
+    if (!Number.isInteger(approvalChainId) || approvalChainId <= 0) {
+        throw new Error(`APPROVAL_CHAIN_ID must be a positive integer, got ${chainRaw}`);
+    }
+
+    // The owner routes move money, so there is no default and no open mode: an unset token is a refusal.
+    const ownerToken = (env.OWNER_TOKEN ?? "").trim();
+    if (ownerToken.length < 16) {
+        throw new Error("OWNER_TOKEN must be set to at least 16 characters; the owner routes propose, approve and execute trades");
+    }
+
     return {
         port,
         network,
@@ -80,6 +162,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         briefsDir: fromRepoRoot((env.BRIEFS_DIR ?? "docs/briefs").trim()),
         // one file per mode: a testnet ledger and a mainnet ledger must never share a file
         ledgerPath: fromRepoRoot((env.LEDGER_PATH ?? `data/ledger-${network === BASE_MAINNET ? "mainnet" : "testnet"}.jsonl`).trim()),
+        investLedgerPath: fromRepoRoot((env.INVEST_LEDGER_PATH ?? `data/ledger-invest-${investMode}.jsonl`).trim()),
+        investMode,
+        ownerAddress,
+        approvalChainId,
+        mandatePath: fromRepoRoot((env.MANDATE_PATH ?? "data/mandate.jsonl").trim()),
+        ownerToken,
+        openingFloatUsdcMinor: openingFloat,
+        researchPriceUsd,
+        researchMaxUsd,
+        briefMaxAgeSeconds,
         expectedAsset,
         mode: network === BASE_MAINNET ? "mainnet" : "testnet",
     };

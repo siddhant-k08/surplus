@@ -3,12 +3,12 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import request from "supertest";
-import { parseUsdc as u, BASE_REGISTRY, JsonlLedgerStore, flushNewEntries, Ledger, type MandateTerms, type SavedBrief, type Brief } from "@surplus/core";
+import { parseUsdc as u, BASE_REGISTRY, JsonlLedgerStore, flushNewEntries, Ledger, MandateStore, type MandateTerms, type SavedBrief, type Brief } from "@surplus/core";
 import { buildServer, bookSettlement, salesFromLedger, BRIEF_ROUTE, type BookedSale } from "../src/server";
 import { loadConfig, USDC, BASE_SEPOLIA } from "../src/config";
 
 const PAY_TO = "0x" + "a".repeat(40);
-const config = loadConfig({ X402_PAY_TO: PAY_TO, BRIEF_PRICE_USD: "$3.00" });
+const config = loadConfig({ X402_PAY_TO: PAY_TO, BRIEF_PRICE_USD: "$3.00", OWNER_TOKEN: "owner-token-for-tests-only", OWNER_ADDRESS: "0x" + "9".repeat(40) } as NodeJS.ProcessEnv);
 const ASSET = USDC[BASE_SEPOLIA]!;
 
 const terms: MandateTerms = {
@@ -23,6 +23,14 @@ const terms: MandateTerms = {
     driftToleranceBps: 100,
     approvalExpirySeconds: 600,
 };
+
+/** A mandate store holding exactly these terms, as the server and engine now share one. */
+function mandateFor(t: MandateTerms): MandateStore {
+    const m = new MandateStore();
+    m.create(t);
+    return m;
+}
+
 
 const brief: Brief = {
     id: "brief-test",
@@ -39,7 +47,7 @@ const saved: SavedBrief = {
     costUsdcMinor: 21188n,
     costUsd: 0.0212,
 };
-const build = () => buildServer({ config, terms, readBrief: () => saved });
+const build = () => buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved });
 
 const facts = (over: Partial<Parameters<typeof bookSettlement>[0]["facts"]> = {}) => ({
     success: true,
@@ -147,7 +155,7 @@ describe("persistence", () => {
     afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
     const bookOne = (tx: string) => {
-        const built = buildServer({ config, terms, readBrief: () => saved, store });
+        const built = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, store });
         const verdict = bookSettlement({
             treasury: built.treasury,
             sales: built.sales,
@@ -164,7 +172,7 @@ describe("persistence", () => {
         // the server flushes inside the settle hook, so flush here the way the hook does
         flushNewEntries(first.built.treasury.ledger, store, 0);
 
-        const restarted = buildServer({ config, terms, readBrief: () => saved, store });
+        const restarted = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, store });
         expect(restarted.treasury.ledger.balance("cash.operating")).toBe(u("0.01"));
         expect(restarted.sales.length).toBe(1);
         expect(restarted.sales[0]!.transaction).toBe("0xaaa");
@@ -176,7 +184,7 @@ describe("persistence", () => {
         const first = bookOne("0xaaa");
         flushNewEntries(first.built.treasury.ledger, store, 0);
 
-        const restarted = buildServer({ config, terms, readBrief: () => saved, store });
+        const restarted = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, store });
         const again = bookSettlement({
             treasury: restarted.treasury,
             sales: restarted.sales,
@@ -191,13 +199,13 @@ describe("persistence", () => {
     });
 
     it("starts clean when there is no ledger file yet", () => {
-        const built = buildServer({ config, terms, readBrief: () => saved, store });
+        const built = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved, store });
         expect(built.treasury.ledger.all()).toEqual([]);
         expect(built.sales).toEqual([]);
     });
 
     it("works with no store at all, keeping everything in memory", () => {
-        const built = buildServer({ config, terms, readBrief: () => saved });
+        const built = buildServer({ config, mandates: mandateFor(terms), readBrief: () => saved });
         expect(built.sales).toEqual([]);
         expect(existsSync(join(dir, "ledger.jsonl"))).toBe(false);
     });
