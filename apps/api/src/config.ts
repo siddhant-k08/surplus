@@ -50,6 +50,8 @@ export interface ApiConfig {
     approvalChainId: number;
     /** Append-only JSONL file the owner's mandate history lives in. */
     mandatePath: string;
+    /** Append-only JSONL file of what each buyer may come back to. */
+    receiptsPath: string;
     /**
      * Whether GET /ledger is public.
      *
@@ -201,6 +203,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         cookieSecure,
         publicLedger: (env.PUBLIC_LEDGER ?? "false").trim() === "true",
         mandatePath: fromRepoRoot((env.MANDATE_PATH ?? "data/mandate.jsonl").trim()),
+        receiptsPath: fromRepoRoot((env.RECEIPTS_PATH ?? "data/receipts.jsonl").trim()),
         ownerToken,
         openingFloatUsdcMinor: openingFloat,
         researchPriceUsd,

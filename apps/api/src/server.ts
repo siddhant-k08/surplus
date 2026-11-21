@@ -5,12 +5,14 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import {
     Treasury,
-    JsonlLedgerStore,
     flushNewEntries,
     realizedSales,
     reconcileInternal,
+    scanBriefs,
     loadLatestBrief,
     formatUsdc,
+    type Ledger,
+    type LedgerSink,
     type LedgerTx,
     type MandateStore,
     type MandateTerms,
@@ -25,6 +27,7 @@ import {
 import { UNATTRIBUTED, type InvestingEngine } from "./investing";
 import { normalizeThemes, type ResearchService } from "./research";
 import { parseTermsUpdate, changedTerms } from "./terms";
+import { JsonlReceiptStore, newReceiptId } from "./receipts";
 
 export const BRIEF_ROUTE = "/brief";
 
@@ -38,13 +41,29 @@ export const BRIEF_ROUTE = "/brief";
  */
 interface ServedContext {
     briefId?: string;
+    /** Where the served brief lives, so a receipt can find it again. */
+    source?: "catalogue" | "custom";
+    /**
+     * The receipt secret handed to the buyer in this response.
+     *
+     * Minted in the handler because settlement happens after the handler returns, so the response has to
+     * carry it before the transaction exists. The hook binds the two once the payment settles; if it
+     * never settles, the id was never stored and looking it up simply finds nothing.
+     */
+    receiptId?: string;
 }
 const servedStore = new AsyncLocalStorage<ServedContext>();
 
 /** Records the brief this request served, so settlement can attribute the sale to it. */
-export function noteServedBrief(briefId: string): void {
+export function noteServedBrief(briefId: string, source: "catalogue" | "custom" = "catalogue"): string {
     const ctx = servedStore.getStore();
-    if (ctx !== undefined) ctx.briefId = briefId;
+    const receiptId = newReceiptId();
+    if (ctx !== undefined) {
+        ctx.briefId = briefId;
+        ctx.source = source;
+        ctx.receiptId = receiptId;
+    }
+    return receiptId;
 }
 export const RESEARCH_ROUTE = "/research";
 
@@ -118,14 +137,25 @@ export interface ServerDeps {
     mandates: MandateStore;
     /** Overridable so tests can run without the docs/briefs directory. */
     readBrief?: () => SavedBrief;
-    /** When given, the ledger is loaded from this file on boot and appended to after every sale. */
-    store?: JsonlLedgerStore;
+    /** Already loaded, because storage is async and `buildServer` is not. */
+    ledger?: Ledger;
+    /** Where new entries go. Absent means nothing is persisted. */
+    sink?: LedgerSink;
     /** When given, the owner-gated investing routes are mounted. */
     engine?: InvestingEngine;
     /** When given, the paid on-demand research route is mounted. */
     research?: ResearchService;
     /** Shared so tests can drive sign-in; one is made per server otherwise. */
     sessions?: SessionStore;
+    /** When given, a paid request returns a receipt the buyer can come back to. */
+    receipts?: JsonlReceiptStore;
+    /**
+     * Finds a brief by id for a receipt lookup.
+     *
+     * A receipt can name any brief ever sold, not just the newest, so this scans rather than reusing
+     * `readBrief`. Injectable because the directories are the server's business, not a test's.
+     */
+    findBrief?: (briefId: string, source: "catalogue" | "custom") => SavedBrief | null;
     /**
      * Creates and persists a new mandate version from the owner's terms.
      *
@@ -192,12 +222,16 @@ export interface BuiltServer {
  * every claim carries the quote it came from so a reader can check it.
  */
 export function buildServer(deps: ServerDeps): BuiltServer {
-    const { config, store, mandates } = deps;
+    const { config, mandates } = deps;
     const readBrief = deps.readBrief ?? ((): SavedBrief => loadLatestBrief(config.briefsDir));
+    const findBrief = deps.findBrief ?? ((briefId: string, source: "catalogue" | "custom"): SavedBrief | null => {
+        const dir = source === "custom" ? config.customBriefsDir : config.briefsDir;
+        return scanBriefs(dir).briefs.find((b) => b.brief.id === briefId) ?? null;
+    });
 
     // Replaying the stored entries restores the balances and, importantly, the dedup index: a settlement
     // that arrives again after a restart is refused by the ledger rather than booked a second time.
-    const ledger = store?.loadLedger();
+    const ledger = deps.ledger;
     const treasury = new Treasury({ mode: config.mode, mandates, ...(ledger && { ledger }) });
     const sales: BookedSale[] = ledger ? salesFromLedger(ledger.all()) : [];
     let persistedId = ledger ? (ledger.all().at(-1)?.id ?? 0) : 0;
@@ -229,10 +263,21 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 );
             } else if (verdict === "booked") {
                 const amount = BigInt(result.amount ?? requirements.amount);
-                if (store !== undefined) {
-                    // flush straight after booking: a crash before this loses the entry, and the onchain
-                    // payment would then have to be reconciled by hand
-                    persistedId = flushNewEntries(treasury.ledger, store, persistedId);
+                const served = servedStore.getStore();
+                if (deps.receipts !== undefined && served?.receiptId !== undefined && served.briefId !== undefined) {
+                    deps.receipts.issue({
+                        id: served.receiptId,
+                        briefId: served.briefId,
+                        source: served.source ?? "catalogue",
+                        transaction: result.transaction,
+                        amountUsdcMinor: amount.toString(),
+                        at: new Date().toISOString(),
+                    });
+                }
+                if (deps.sink !== undefined) {
+                    // flushed before this hook returns, so the settlement is durable before the SDK is
+                    // told the payment is done; a crash in between would leave money received unrecorded
+                    persistedId = await flushNewEntries(treasury.ledger, deps.sink, persistedId);
                 }
                 console.log(`booked ${formatUsdc(amount)} USDC (tx ${result.transaction})`);
             }
@@ -369,12 +414,13 @@ export function buildServer(deps: ServerDeps): BuiltServer {
 
     app.get(BRIEF_ROUTE, (_req: Request, res: Response) => {
         const saved = readBrief();
-        noteServedBrief(saved.brief.id);
+        const receiptId = noteServedBrief(saved.brief.id, "catalogue");
         res.json({
             brief: saved.brief,
             provider: saved.provider,
             model: saved.model,
             disclaimer: saved.brief.disclaimer,
+            receipt: { id: receiptId, url: `/r/${receiptId}` },
         });
     });
 
@@ -394,8 +440,9 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             }
             try {
                 const outcome = await research.obtain(parsed.themes);
-                noteServedBrief(outcome.saved.brief.id);
+                const receiptId = noteServedBrief(outcome.saved.brief.id, "custom");
                 res.json({
+                    receipt: { id: receiptId, url: `/r/${receiptId}` },
                     brief: outcome.saved.brief,
                     provider: outcome.saved.provider,
                     model: outcome.saved.model,
@@ -430,6 +477,68 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 lines: e.lines.map((l) => ({ account: l.account, amount: l.amount.toString() })),
             })),
             sales: sales.map((s) => ({ ...s, amountUsdcMinor: s.amountUsdcMinor.toString() })),
+        });
+    });
+
+    // A buyer comes back to what they bought. The id is the secret; the transaction beside it is proof
+    // they can check on Base, never the way in.
+    if (deps.receipts !== undefined) {
+        const receipts = deps.receipts;
+        // The data route. `/r/<id>` is the page the buyer visits; the single-page app serves that and
+        // fetches this. Sharing one path would mean the browser got JSON instead of the page.
+        app.get("/receipt/:id", (req: Request, res: Response) => {
+            const raw: unknown = req.params.id;
+            const id = typeof raw === "string" ? raw : "";
+            const receipt = /^[A-Za-z0-9_-]{10,64}$/.test(id) ? receipts.find(id) : null;
+            if (receipt === null) {
+                // one answer for a malformed id and an unknown one, so this cannot be probed
+                return void res.status(404).json({ error: "no receipt with that link" });
+            }
+            const found = findBrief(receipt.briefId, receipt.source);
+            if (found === null) {
+                return void res.status(410).json({
+                    error: "that brief is no longer on this server",
+                    receipt: { transaction: receipt.transaction, at: receipt.at },
+                });
+            }
+            res.json({
+                receipt: {
+                    transaction: receipt.transaction,
+                    amountUsdcMinor: receipt.amountUsdcMinor,
+                    at: receipt.at,
+                },
+                brief: found.brief,
+                provider: found.provider,
+                model: found.model,
+            });
+        });
+    }
+
+    // What the storefront can say without anyone paying: the shape of a brief, never its claims.
+    app.get("/catalogue", (_req: Request, res: Response) => {
+        let latest: { id: string; createdAt: string; themes: string[]; sources: number; facts: number } | null = null;
+        try {
+            const saved = readBrief();
+            latest = {
+                id: saved.brief.id,
+                createdAt: saved.brief.createdAt,
+                themes: saved.brief.themes.map((t) => t.themeId),
+                sources: saved.brief.sources.length,
+                facts: saved.brief.themes.reduce((a, t) => a + t.claims.length, 0),
+            };
+        } catch {
+            latest = null;
+        }
+        res.json({
+            briefPriceUsd: config.priceUsd,
+            researchPriceUsd: config.researchPriceUsd,
+            network: config.network,
+            asset: config.expectedAsset,
+            payTo: config.payTo,
+            salesBooked: sales.length,
+            revenueUsdcMinor: sales.reduce((a, s) => a + s.amountUsdcMinor, 0n).toString(),
+            maxThemes: 3,
+            latest,
         });
     });
 
@@ -494,8 +603,8 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             });
         });
 
-        app.post("/invest/sync", owner, (_req: Request, res: Response) => {
-            const r = engine.syncRevenue();
+        app.post("/invest/sync", owner, async (_req: Request, res: Response) => {
+            const r = await engine.syncRevenue();
             res.json({
                 sales: r.sales,
                 unattributedSales: r.unattributedSales,
@@ -552,6 +661,25 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 res.status(r.ok ? 200 : 409).json(r.ok ? { id, ...r } : { id, stopped: r.reasons, outcome: r.outcome ?? null });
             } catch (e) {
                 res.status(409).json({ error: e instanceof Error ? e.message : String(e) });
+            }
+        });
+
+        // The brief the proposal was built from, so the desk can show the quote under each leg.
+        // The owner must not have to pay their own paid route to see their own catalogue.
+        app.get("/invest/brief", owner, (_req: Request, res: Response) => {
+            try {
+                const saved = readBrief();
+                res.json({
+                    id: saved.brief.id,
+                    createdAt: saved.brief.createdAt,
+                    provider: saved.provider,
+                    model: saved.model,
+                    costUsdcMinor: saved.costUsdcMinor.toString(),
+                    themes: saved.brief.themes,
+                    sources: saved.brief.sources,
+                });
+            } catch (e) {
+                res.status(404).json({ error: e instanceof Error ? e.message : String(e) });
             }
         });
 

@@ -21,6 +21,7 @@ export function parseTermsUpdate(
     const known = new Set([
         "eligible", "themes", "maxCompanyBps", "investShareBps", "maxSlippageBps",
         "driftToleranceBps", "approvalExpirySeconds", "maxTradeUsdc", "minTradeUsdc", "reserveTargetUsdc",
+        "investOnlyWhenAhead",
     ]);
     for (const key of Object.keys(b)) {
         // a typo in a limit name would otherwise be accepted and silently change nothing
@@ -77,6 +78,12 @@ export function parseTermsUpdate(
         }
     }
 
+    let investOnlyWhenAhead = current.investOnlyWhenAhead;
+    if (b.investOnlyWhenAhead !== undefined) {
+        if (typeof b.investOnlyWhenAhead !== "boolean") errors.push("investOnlyWhenAhead must be true or false");
+        else investOnlyWhenAhead = b.investOnlyWhenAhead;
+    }
+
     const terms: MandateTerms = {
         eligible,
         themes,
@@ -88,6 +95,7 @@ export function parseTermsUpdate(
         maxTradeUsdc: amountField("maxTradeUsdc", current.maxTradeUsdc),
         minTradeUsdc: amountField("minTradeUsdc", current.minTradeUsdc),
         reserveTargetUsdc: amountField("reserveTargetUsdc", current.reserveTargetUsdc),
+        ...(investOnlyWhenAhead === undefined ? {} : { investOnlyWhenAhead }),
     };
 
     if (errors.length > 0) return { ok: false, errors };

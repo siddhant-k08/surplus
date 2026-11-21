@@ -1,0 +1,103 @@
+import { randomBytes } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
+
+/**
+ * What a buyer keeps after paying.
+ *
+ * The obvious key is the settlement transaction, but that is the wrong choice: settlements are public on
+ * Base, so anyone watching the seller's address could harvest hashes and read briefs they never bought.
+ * The key is therefore a secret issued at purchase time and returned only in the paid response. The
+ * transaction is stored alongside it as proof the buyer can check, never as the way in.
+ *
+ * Append-only JSONL, like the ledger, so a receipt survives a restart and nothing is ever rewritten.
+ */
+
+export interface Receipt {
+    /** The secret in the buyer's link. Not derivable from anything public. */
+    id: string;
+    /** Which brief they bought. */
+    briefId: string;
+    /** Where that brief lives, so the catalogue and custom directories stay distinct. */
+    source: "catalogue" | "custom";
+    /** The settlement that paid for it, shown as proof. */
+    transaction: string;
+    amountUsdcMinor: string;
+    at: string;
+}
+
+export function newReceiptId(): string {
+    return randomBytes(24).toString("base64url");
+}
+
+export function parseReceiptLine(line: string, where: string): Receipt {
+    let raw: unknown;
+    try {
+        raw = JSON.parse(line);
+    } catch {
+        throw new Error(`${where}: not valid JSON`);
+    }
+    if (typeof raw !== "object" || raw === null) throw new Error(`${where}: not an object`);
+    const r = raw as Record<string, unknown>;
+    const str = (k: string): string => {
+        const v = r[k];
+        if (typeof v !== "string" || v === "") throw new Error(`${where}: ${k} is missing`);
+        return v;
+    };
+    const source = r.source === "custom" ? "custom" : "catalogue";
+    return {
+        id: str("id"),
+        briefId: str("briefId"),
+        source,
+        transaction: str("transaction"),
+        amountUsdcMinor: str("amountUsdcMinor"),
+        at: str("at"),
+    };
+}
+
+export class JsonlReceiptStore {
+    /** Read once and kept, because a receipt lookup is on the buyer's path and must not stat the disk. */
+    private cache: Map<string, Receipt> | null = null;
+
+    constructor(readonly path: string) {}
+
+    private load(): Map<string, Receipt> {
+        if (this.cache !== null) return this.cache;
+        const map = new Map<string, Receipt>();
+        if (existsSync(this.path)) {
+            readFileSync(this.path, "utf8")
+                .split("\n")
+                .forEach((line, i) => {
+                    if (line.trim() === "") return;
+                    const receipt = parseReceiptLine(line, `${this.path} line ${i + 1}`);
+                    map.set(receipt.id, receipt);
+                });
+        }
+        this.cache = map;
+        return map;
+    }
+
+    issue(receipt: Receipt): void {
+        const map = this.load();
+        if (map.has(receipt.id)) return; // a replayed settlement must not write a second line
+        mkdirSync(dirname(this.path), { recursive: true });
+        appendFileSync(this.path, JSON.stringify(receipt) + "\n");
+        map.set(receipt.id, receipt);
+    }
+
+    find(id: string): Receipt | null {
+        return this.load().get(id) ?? null;
+    }
+
+    /** Receipts already written for a settlement, so one payment never issues two. */
+    forTransaction(transaction: string): Receipt | null {
+        for (const r of this.load().values()) {
+            if (r.transaction.toLowerCase() === transaction.toLowerCase()) return r;
+        }
+        return null;
+    }
+
+    get size(): number {
+        return this.load().size;
+    }
+}

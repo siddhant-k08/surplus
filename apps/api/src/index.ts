@@ -4,6 +4,7 @@ import {
     parseUsdc as u,
     BASE_REGISTRY,
     JsonlLedgerStore,
+    openLedger,
     formatUsdc,
     loadAllTokens,
     crossCheck,
@@ -22,6 +23,8 @@ import {
 } from "@surplus/core";
 import { InvestingEngine, type MarketData } from "./investing";
 import { ResearchService } from "./research";
+import { JsonlReceiptStore } from "./receipts";
+import { openExecutor } from "./executor";
 import { verifyApprovalSignature } from "./signature";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -56,6 +59,8 @@ const initialTerms: MandateTerms = {
     maxSlippageBps: 100,
     driftToleranceBps: 100,
     approvalExpirySeconds: 600,
+    // A new deployment starts cautious. An existing stored mandate is untouched by this.
+    investOnlyWhenAhead: true,
 };
 
 function env(name: string): string {
@@ -64,9 +69,12 @@ function env(name: string): string {
     return v.trim();
 }
 
-function main(): void {
+async function main(): Promise<void> {
     const config = loadConfig();
-    const store = new JsonlLedgerStore(config.ledgerPath);
+    const salesStore = new JsonlLedgerStore(config.ledgerPath);
+    const salesLedgerLoaded = await openLedger(salesStore);
+    const investStore = new JsonlLedgerStore(config.investLedgerPath);
+    const investLedger = await openLedger(investStore);
 
     // One mandate, shared by the sales treasury and the investing engine, so both always see the same
     // version. Two stores would drift apart the moment the owner changed a term.
@@ -123,6 +131,16 @@ function main(): void {
         return created;
     };
 
+    // Real fills are off unless mainnet is deliberately enabled, a cap is set and a key is present.
+    const execution = openExecutor({
+        mainnetEnabled: process.env.MAINNET_ENABLED === "true",
+        rpcUrl: process.env.BASE_RPC_URL ?? "",
+        privateKey: process.env.EXECUTION_PRIVATE_KEY ?? "",
+        ...(process.env.MAINNET_SPEND_CAP_USDC !== undefined && process.env.MAINNET_SPEND_CAP_USDC !== ""
+            ? { spendCapUsdcMinor: u(process.env.MAINNET_SPEND_CAP_USDC) }
+            : {}),
+    });
+
     const engine = new InvestingEngine({
         mode: config.investMode,
         openingFloat: config.openingFloatUsdcMinor,
@@ -135,9 +153,10 @@ function main(): void {
             ...scanBriefs(config.briefsDir).problems,
             ...scanBriefs(config.customBriefsDir).problems,
         ],
-        salesLedger: () => store.load(),
+        salesLedger: () => salesLedgerLoaded.all(),
         market,
-        store: new JsonlLedgerStore(config.investLedgerPath),
+        ledger: investLedger,
+        sink: investStore,
         chainId: config.approvalChainId,
         verifyApproval: ({ approval, signature }) =>
             verifyApprovalSignature({
@@ -148,7 +167,11 @@ function main(): void {
             }),
     });
 
-    const { app, treasury, sales } = buildServer({ config, mandates, store, engine, research, updateMandate });
+    const receipts = new JsonlReceiptStore(config.receiptsPath);
+    const { app, treasury, sales } = buildServer({
+        config, mandates, ledger: salesLedgerLoaded, sink: salesStore,
+        engine, research, updateMandate, receipts,
+    });
 
     // The built owner desk and storefront, served by the same process that serves the API. Mounted last
     // so a route added above always wins over a file with the same name.
@@ -161,7 +184,7 @@ function main(): void {
         });
     }
 
-    app.listen(config.port, () => {
+    const server = app.listen(config.port, () => {
         console.log(`Surplus research endpoint on http://localhost:${config.port}`);
         console.log(`  env         ${envPath ?? "no .env found at the repo root; using the process environment"}`);
         console.log(
@@ -185,11 +208,24 @@ function main(): void {
         );
         console.log(`  free        GET /health, GET /ledger`);
         console.log(`  web         ${existsSync(webDist) ? webDist : "not built yet; run npm run build:web"}`);
+        console.log(`  receipts    ${config.receiptsPath} (${receipts.size} issued)`);
         console.log(`  owner       POST /invest/sync|propose|approve|execute, GET /invest/ledger|proposals, GET /mandate`);
         console.log(`  approvals   EIP-712 signed by ${config.ownerAddress} on chain ${config.approvalChainId}`);
         console.log(`  invest book ${config.investLedgerPath} [${config.investMode}]${config.investMode === "mainnet" ? "" : " (fills simulated)"}`);
         console.log(`  float       ${formatUsdc(config.openingFloatUsdcMinor)} USDC owner-provided working capital`);
+        console.log(`  execution   ${execution.executor === null ? `simulated (${execution.why})` : `REAL, from ${execution.executor.address}`}`);
     });
+
+    // Finish the request in flight before going away. A deploy that cuts a paid request in half would
+    // leave a buyer charged by the facilitator with nothing written on this side.
+    for (const signal of ["SIGTERM", "SIGINT"] as const) {
+        process.on(signal, () => {
+            console.log(`\n${signal} received, finishing open requests before stopping.`);
+            server.close(() => process.exit(0));
+            // a request that will not finish must not hold the process open for ever
+            setTimeout(() => process.exit(1), 10_000).unref();
+        });
+    }
 }
 
-main();
+void main();

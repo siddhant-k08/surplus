@@ -791,3 +791,70 @@ describe("M2 regression: working capital is a total, not a per-amount entry", ()
         expect(() => withFloat(store, u("1.00"))).toThrow(/already booked/);
     });
 });
+
+describe("the mandate can forbid investing while behind", () => {
+    /**
+     * The real shape of the problem: one brief sold well and produced surplus, while other briefs cost
+     * money and never sold. A single brief cannot be both profitable and leave the agent behind.
+     */
+    const engineWith = (mandates: MandateStore, revenue: string, unsoldCost: bigint) => {
+        const sold: SavedBrief = { ...savedBrief(), costUsdcMinor: u("0.10") };
+        const unsold: SavedBrief = {
+            ...savedBrief(),
+            file: "unsold.json",
+            costUsdcMinor: unsoldCost,
+            brief: { ...savedBrief().brief, id: "brief-unsold" },
+        };
+        return new InvestingEngine({
+            mode: "sim", openingFloat: u("20.00"), mandates,
+            readBrief: () => sold, allBriefs: () => [sold, unsold],
+            salesLedger: () => salesLedger(revenue), market, chainId: CHAIN_ID,
+        });
+    };
+
+    it("refuses to propose while lifetime costs exceed lifetime revenue", async () => {
+        const mandates = new MandateStore();
+        mandates.create({ ...terms, reserveTargetUsdc: u("0"), investOnlyWhenAhead: true });
+        // the sold brief earns 5.00 against its 0.10 cost, so there is surplus to invest,
+        // but an unsold brief cost 6.00, leaving the agent 1.10 behind over its life
+        const e = engineWith(mandates, "5.00", u("6.00"));
+        e.syncRevenue();
+        expect(e.treasury.ledger.balance("surplus.investable")).toBeGreaterThan(0n);
+        expect(e.lifetime().behindBy).toBe(u("1.10"));
+
+        const r = await e.propose("p1");
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.reasons.join(" ")).toMatch(/forbids investing while behind.*behind by 1\.100000/);
+    });
+
+    it("proposes once the agent is ahead again", async () => {
+        const mandates = new MandateStore();
+        mandates.create({ ...terms, reserveTargetUsdc: u("0"), investOnlyWhenAhead: true });
+        const e = engineWith(mandates, "5.00", u("1.00"));
+        e.syncRevenue();
+        expect(e.lifetime().behindBy).toBe(0n);
+        const r = await e.propose("p1");
+        expect(r.ok).toBe(true);
+    });
+
+    it("leaves a mandate without the term behaving as before", async () => {
+        const mandates = new MandateStore();
+        mandates.create({ ...terms, reserveTargetUsdc: u("0") }); // term absent
+        const e = engineWith(mandates, "5.00", u("6.00"));
+        e.syncRevenue();
+        expect(e.lifetime().behindBy).toBeGreaterThan(0n);
+        const r = await e.propose("p1");
+        expect(r.ok).toBe(true); // behind, but nothing in this mandate forbids it
+    });
+
+    it("reports the lifetime position from its own book", () => {
+        const mandates = new MandateStore();
+        mandates.create({ ...terms, reserveTargetUsdc: u("0") });
+        const e = engineWith(mandates, "5.00", u("6.00"));
+        e.syncRevenue();
+        const l = e.lifetime();
+        expect(l.revenue).toBe(u("5.00"));
+        expect(l.costs).toBe(u("6.10")); // 0.10 for the sold brief, 6.00 for the unsold one
+        expect(l.behindBy).toBe(u("1.10"));
+    });
+});

@@ -1,6 +1,5 @@
 import {
     Treasury,
-    JsonlLedgerStore,
     flushNewEntries,
     allocate,
     toCandidates,
@@ -17,6 +16,8 @@ import {
     type LedgerTx,
     type Leg,
     type Approval,
+    type Ledger,
+    type LedgerSink,
     type MandateStore,
     type LegQuotes,
     type SavedBrief,
@@ -63,7 +64,10 @@ export interface InvestingDeps {
     /** The paid endpoint's ledger, read only, as the source of real revenue. */
     salesLedger: () => readonly LedgerTx[];
     market: () => Promise<MarketData>;
-    store?: JsonlLedgerStore;
+    /** Already loaded, because storage is async and a constructor is not. */
+    ledger?: Ledger;
+    /** Where new entries go. Absent means nothing is persisted. */
+    sink?: LedgerSink;
     now?: () => Date;
     /** Required to approve anything. Without it the engine refuses every approval. */
     verifyApproval?: ApprovalVerifier;
@@ -120,7 +124,7 @@ export class InvestingEngine {
     constructor(private readonly deps: InvestingDeps) {
         this.now = deps.now ?? (() => new Date());
         this.mandates = deps.mandates;
-        const ledger = deps.store?.loadLedger();
+        const ledger = deps.ledger;
         this.treasury = new Treasury({
             mode: deps.mode,
             mandates: this.mandates,
@@ -142,8 +146,7 @@ export class InvestingEngine {
                 throw new Error(
                     `This investing book holds a lumped revenue entry (${tx.idempotencyKey}) from before revenue was ` +
                     "attributed per sale, and which sales it covered cannot be recovered. The book is simulated and " +
-                    "rebuilds from the sales ledger and the saved briefs, so delete it and let it regenerate: " +
-                    (this.deps.store?.path ?? "the investing ledger file"),
+                    "rebuilds from the sales ledger and the saved briefs, so delete it and let it regenerate.",
                 );
             }
         }
@@ -176,8 +179,23 @@ export class InvestingEngine {
                     { account: "equity.opening", amount: -topUp },
                 ],
             });
-            this.flush();
+            void this.flush();
         }
+    }
+
+    /**
+     * What the agent has earned and spent over its whole life, from its own book.
+     *
+     * Per-brief settlement can hand one profitable brief some surplus while the business overall is
+     * behind, so the lifetime position is a separate question from any brief's.
+     */
+    lifetime(): { revenue: bigint; costs: bigint; behindBy: bigint } {
+        const ledger = this.treasury.ledger;
+        const revenue = -ledger.balance("revenue.research");
+        const costs =
+            ledger.balance("expense.llm") + ledger.balance("expense.search") + ledger.balance("expense.gas");
+        const behindBy = costs > revenue ? costs - revenue : 0n;
+        return { revenue, costs, behindBy };
     }
 
     /** Exposure per asset so far, in the USDC that bought it, read from the positions accounts. */
@@ -191,10 +209,16 @@ export class InvestingEngine {
         return out;
     }
 
-    private flush(): void {
-        if (this.deps.store !== undefined) {
-            this.persistedId = flushNewEntries(this.treasury.ledger, this.deps.store, this.persistedId);
-        }
+    /**
+     * Writes new entries to storage.
+     *
+     * Returns a promise the callers await. Storage is async now that it can be a database, and a flush
+     * that is not awaited would let a response claim money was booked before it was durable.
+     */
+    private async flush(): Promise<void> {
+        const sink = this.deps.sink;
+        if (sink === undefined) return;
+        this.persistedId = await flushNewEntries(this.treasury.ledger, sink, this.persistedId);
     }
 
     /**
@@ -204,7 +228,7 @@ export class InvestingEngine {
      * Revenue is mirrored as a total rather than per sale so the entry can name the transactions it stands
      * for. The real money and its onchain proof stay in the endpoint's own ledger.
      */
-    syncRevenue(): SyncResult {
+    async syncRevenue(): Promise<SyncResult> {
         // Every brief the agent produced cost real money, whether or not anyone bought it. Booking only
         // the newest one understated spending as soon as a second brief existed.
         const briefs = this.deps.allBriefs();
@@ -252,7 +276,7 @@ export class InvestingEngine {
             investable += r.investable;
         }
 
-        this.flush();
+        await this.flush();
         return {
             sales: sales.length,
             unreadableBriefs: [...(this.deps.briefProblems?.() ?? [])],
@@ -288,6 +312,22 @@ export class InvestingEngine {
             return { ok: false, reasons: ["nothing investable; sync revenue first or sell more briefs"] };
         }
 
+        // An owner can forbid investing while the agent is behind over its life. Without it a single
+        // profitable brief could fund trades out of a float that the rest of the work has been eating.
+        const terms = this.mandates.current().terms;
+        if (terms.investOnlyWhenAhead === true) {
+            const { revenue, costs, behindBy } = this.lifetime();
+            if (behindBy > 0n) {
+                return {
+                    ok: false,
+                    reasons: [
+                        `the mandate forbids investing while behind: earned ${formatUsdc(revenue)}, ` +
+                        `spent ${formatUsdc(costs)}, behind by ${formatUsdc(behindBy)} USDC`,
+                    ],
+                };
+            }
+        }
+
         // Only themes the mandate actually targets can be funded. A brief can legitimately carry others
         // (a custom request, or a theme the owner has since dropped); the allocator throws on those, so
         // they are filtered out here and reported rather than taking the whole proposal down.
@@ -318,7 +358,7 @@ export class InvestingEngine {
         const quoted = await market.quote(alloc.legs);
         const created = this.treasury.createProposal({ id, legs: alloc.legs, quotedPrices: quoted.prices, held });
         this.proposalIds.add(id);
-        this.flush();
+        await this.flush();
         if (!created.ok) return { ok: false, reasons: created.reasons };
 
         // Offer the owner the exact approval to sign, with an expiry this server chose. Recomputing it at
@@ -387,7 +427,7 @@ export class InvestingEngine {
             signature,
             expect: approval,
         });
-        this.flush();
+        await this.flush();
         if (!result.ok) return { ok: false, reasons: result.reasons };
         return { ok: true, expiresAt: result.approval.expiresAt, signer: verdict.signer };
     }
@@ -417,7 +457,7 @@ export class InvestingEngine {
         });
         const blocks = blockReasons(gates);
         const result = this.treasury.execute(id, { freshPrices: fresh.prices, decimals, blocks });
-        this.flush();
+        await this.flush();
 
         if (!result.ok) return { ok: false, reasons: result.reasons, outcome: result.outcome };
         return {
