@@ -38,6 +38,7 @@ npm run buy -w @surplus/api     # buy one brief from it (needs X402_BUYER_PRIVAT
 npm run web                     # the owner desk on :5173, proxying the API
 npm run build:web               # build it; the API then serves apps/web/dist
 npm run db:import -w @surplus/api       # copy the JSONL books into Postgres (add -- --apply to write)
+npm run db:export -w @surplus/api       # copy them back out as JSONL, for a backup you hold
 npx tsx scripts/demo-sim.ts             # fully simulated loop
 npx tsx scripts/demo-live.ts            # newest brief + REAL revenue from the endpoint ledger; simulated fills
 npx tsx scripts/demo-live.ts --simulate-revenue   # same, on a labelled simulated sale
@@ -46,7 +47,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 27 files, 256 tests. API 11 files, 163 tests. The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 27 files, 261 tests. API 12 files, 194 tests. The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -78,6 +79,8 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - Quotes come from the KyberSwap aggregator with the router address pinned. NAV is a reference value, never an execution price.
 - Real swaps live in `apps/api/src/executor.ts` and refuse to exist without `MAINNET_ENABLED`, a positive spend cap and a key. A fill is booked only from a confirmed receipt with status success; `parseBuiltSwap` refuses calldata that would spend more than was quoted. Deployment notes are in `docs/DEPLOY.md`.
 - Mainnet stays off (`MAINNET_ENABLED=false`) until Siddhant explicitly authorizes it, with a spend cap and a throwaway wallet. The API refuses to start on Base mainnet without that flag, and `INVEST_MODE=mainnet` needs it too.
+- The four routes that are neither paid for nor signed (the nonce routes and the two that spend a nonce) are capped per caller in the database, so the limit is one limit across every instance. A limiter that cannot answer lets the request through and logs it; it stops abuse, it is not a dependency of the API.
+- `GET /health` checks its dependencies and answers 503 when storage is unreachable or the books do not reconcile. An empty catalogue is reported, never a fault.
 - Owner routes (`/invest/*`, `/mandate`) are gated by `OWNER_TOKEN`, with no default and no open mode. That token is a shared secret, not the owner's signature on a trade; EIP-712 replaces it.
 - Two books: the sales book is real money tagged `testnet`; the investing book is tagged `sim` while fills are simulated. Simulated activity never enters the real book.
 - The free x402.org facilitator serves Base Sepolia (`eip155:84532`) only; it advertises no other EVM network. Mainnet needs a different facilitator. It submits the buyer's signed EIP-3009 authorization and pays the gas, so a buyer needs USDC but no ETH (verified onchain 21 Nov 2026).

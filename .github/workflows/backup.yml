@@ -1,0 +1,43 @@
+name: Backup the books
+
+# A copy of the ledgers, the mandate history and every receipt, held somewhere that is not the database.
+# The provider's own backups are theirs, retention on a small plan is short, and a dropped database is a
+# dropped database. The export is the same JSONL the file backend reads, so it can be replayed.
+on:
+  schedule:
+    # 03:00 UTC daily. The agent sells at human hours; this runs when it is quietest.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # Set this in the repository's secrets. Read-only use: the export never writes to the database.
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      X402_PAY_TO: "0x0000000000000000000000000000000000000001"
+      OWNER_ADDRESS: "0x0000000000000000000000000000000000000002"
+      OWNER_TOKEN: owner-token-for-the-backup-job
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Export
+        run: npm run db:export -w @surplus/api -- --out=data/backup
+
+      - name: Keep it
+        uses: actions/upload-artifact@v4
+        with:
+          name: books-${{ github.run_id }}
+          path: data/backup
+          retention-days: 90
+          if-no-files-found: error

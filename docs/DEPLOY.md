@@ -205,11 +205,62 @@ tar czf "/var/backups/surplus/data-$(date -u +%Y%m%dT%H%M%SZ).tar.gz" -C /opt/su
 Restoring is copying them back. The server verifies the mandate chain on load and refuses to start if it
 does not verify, so a corrupted restore announces itself instead of trading under constraints nobody set.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request: typecheck, the scripts typecheck, the
+whole test suite against a real Postgres service container, and a full build of the deployment. The
+money rules are the test suite, so nothing should reach the agent without passing it.
+
+The Postgres suites create and drop their own schema per test, so they are safe against any database
+the job can reach; in CI that is a throwaway container, never the live one.
+
+## Backups you hold yourself
+
+```bash
+npm run db:export -w @surplus/api                # data/export-<timestamp>/
+npm run db:export -w @surplus/api -- --out=path  # somewhere specific
+```
+
+Writes the ledgers, the mandate history and every receipt as the same JSONL the file backend reads, so
+a copy can be replayed rather than merely read. The export reads back what it wrote and refuses to
+claim success if it does not load.
+
+`.github/workflows/backup.yml` runs that nightly and keeps the result as an artifact for 90 days. It
+needs `DATABASE_URL` in the repository's secrets. The provider's own backups are theirs and retention
+on a small plan is short, which is the point of holding your own.
+
+## Limits on the open routes
+
+Four routes are neither paid for nor signed: the two nonce routes and the two that spend a nonce. Each
+is capped at 20 calls a minute per caller, counted in the database so the limit is one limit however
+many instances are running. The nonce routes write a row per call, so without this an anonymous caller
+could grow a table in your database for nothing.
+
+A limiter that cannot answer lets the request through and logs it. The ceiling exists to stop abuse,
+not to become a dependency that can take the API down.
+
 ## Checking it is alive
 
 `GET /health` answers without authentication and says the mode, which storage is live, the network, the
 price, the brief on offer and how many sales are booked. It is the right thing for a monitor to poll,
 and `"storage": "files"` on a serverless host is the one answer that means something is wrong.
+
+It also checks its dependencies rather than merely answering, and returns **503** when it cannot do its
+job:
+
+| Check | Meaning | Healthy? |
+|---|---|---|
+| `storage` | the database answered just now, not merely at start-up | 503 if not |
+| `books` | the ledger reconciles: balanced, replayable, no impossible negative | 503 if not |
+| `catalogue` | there is a brief to sell | reported, never a fault |
+
+Point an uptime monitor at it (Better Stack, UptimeRobot and the like are free at this size) and alert
+on the status code. That is the whole alerting story: the endpoint is honest about being unhealthy, so
+anything that watches HTTP status is enough.
+
+One log line deserves its own alert if your log drain can do it: `MONEY RECEIVED BUT NOT RECORDED`. It
+means a payment settled and storage then refused the write, and the line carries everything needed to
+reconcile against Base by hand.
 
 A deeper check needs the owner token:
 

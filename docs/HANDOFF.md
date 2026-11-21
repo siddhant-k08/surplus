@@ -672,6 +672,89 @@ would be, then running the built function the way the host does: it assembled on
 briefs and answered 200 and 402 on the right routes. The deployment from the CLI then did the same
 thing in production.
 
+## The agent says how far it is from investing, 22 Nov 2026
+
+"Nothing to invest, and that is correct" is true and not enough: it does not tell an owner whether that
+is one sale away or a hundred. `investmentGap` in `packages/core/src/surplus.ts` turns the same rules
+settlement uses into the number, and both `POST /invest/sync` and `GET /invest/ledger` return it.
+
+On the live deployment right now:
+
+```
+shortfall      0.127614   costs revenue has not covered yet
+reserve gap    0.480000   the protected reserve, still short
+surplus needed 0.100000   so the 50% invest share clears the 0.05 minimum trade
+REVENUE NEEDED 0.707614 USDC
+```
+
+One $2 commissioned brief covers all of it at once, which is the cheapest route to seeing the whole
+loop run. The desk now prints those lines instead of "sell more briefs, raise the price", and says
+plainly that the figure is a floor rather than a forecast, because selling another brief also costs
+something to produce. The surplus figure rounds up, since the invest share rounds down and asking for
+exactly the quotient lands a unit short; there is a test for that.
+
+Also on the buyer's side, both of which were first-use failures waiting to happen:
+
+- The wallet is put on the right chain before anything is signed (`ensureChain`), and offered the chain
+  if it has never seen it. Without it the first thing a buyer meets is a payment that fails for a
+  reason they cannot read.
+- An empty catalogue is a real state and now says so, rather than offering a button that would take
+  payment for a brief that is not there.
+- The storefront says you need USDC but no ETH, which is true here and surprising enough to be worth
+  saying: the facilitator pays the gas.
+
+Core 261, API 180.
+
+## Treating it as a product, 22 Nov 2026
+
+Siddhant's instruction: "I want everything to be product ready. Nothing should be just for a hackathon."
+What that turned into, in risk order.
+
+**A hole I had opened myself.** `POST /receipt/nonce` and `POST /auth/nonce` are unauthenticated and
+write a row per call, so anyone could grow a table in the database for nothing. The four routes that
+are neither paid for nor signed are now capped at 20 calls a minute per caller, counted in Postgres so
+the ceiling is one ceiling however many instances are running (`src/throttle.ts`). A limiter that
+cannot answer lets the request through and logs it: the limit exists to stop abuse, not to become a
+dependency that can take the API down. Verified against the deployment: the twenty-first call in a
+minute returns 429 with `retry-after`.
+
+**Nothing ran the tests before a deploy.** `.github/workflows/ci.yml` now runs typecheck, the scripts
+typecheck, the full suite against a real Postgres service container, and a complete build, on every
+push and pull request.
+
+**The suites lied when the database was unreachable.** A failed connection reported as "22 skipped",
+which reads exactly like "none configured". The helper now fails with a sentence naming the host, and
+the first test in the file is an explicit reachability assertion.
+
+**Health answered without checking anything.** `GET /health` now pings storage and reconciles the books
+on every call, and returns 503 when either fails. An empty catalogue is reported but is not a fault: a
+new deployment has one until the first brief is written. That makes any HTTP uptime monitor into the
+alerting story.
+
+**Errors could leak.** A rejected promise from an async route used to reach Express's default handler,
+which answers with an HTML stack trace naming paths and packages. There is now a handler that logs the
+detail and returns one sentence.
+
+**No headers.** CSP, `X-Frame-Options`, `nosniff`, `no-referrer` and `cross-origin-opener-policy`, both
+from the function and from the platform for the files it serves directly. Checked in a browser: no
+violations, fonts still load.
+
+**Backups were the provider's problem.** `npm run db:export -w @surplus/api` writes the ledgers, the
+mandate history and every receipt as the same JSONL the file backend reads, and a nightly GitHub
+Actions workflow keeps it as an artifact for 90 days (needs `DATABASE_URL` in the repository secrets).
+Proved by replaying an export through the file backend: 2 entries, 2 sales, 0.020000 USDC, and the
+dedup index restored.
+
+**The research spend cap could still be overshot across instances.** Reservations now live in Postgres
+(`src/reservations.ts`), so a generation in flight is visible to every instance. Reserve first and then
+check, rather than the other way round, because checking first leaves a gap between deciding there is
+room and taking it. The first version made both concurrent requests stand down, which is correct about
+the money and useless to anybody: `outstandingBefore` orders the queue by `(at, id)` so the first one
+through fits and the later one backs off. A reservation an instance died holding is swept after ten
+minutes, because a budget permanently consumed by a crash would be worse than the overspend it guards.
+
+Core 261, API 194.
+
 ### Still open on this
 
 - A real purchase against the deployed endpoint has not been made.

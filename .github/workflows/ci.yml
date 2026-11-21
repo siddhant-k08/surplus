@@ -1,0 +1,67 @@
+name: CI
+
+# The test suite is the specification for the money rules, so nothing reaches the deployed agent
+# without passing it. Pull requests and pushes to master both run the whole thing.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      # A real Postgres, not a fake. What these suites test is that the database keeps the same promises
+      # the files do, and only a real server can refuse a second write or answer a race the way one will.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: surplus-ci
+          POSTGRES_DB: surplus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Every suite that needs a database uses this, each in a schema it creates and drops.
+      DATABASE_URL: postgres://postgres:surplus-ci@localhost:5432/surplus
+      # Values the config insists on. None of them spend anything: execution stays off, and the research
+      # routes are never called here.
+      X402_PAY_TO: "0x0000000000000000000000000000000000000001"
+      OWNER_ADDRESS: "0x0000000000000000000000000000000000000002"
+      OWNER_TOKEN: owner-token-for-continuous-integration
+      MAINNET_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Typecheck the scripts
+        run: npm run typecheck:scripts
+
+      - name: Test
+        run: npm test
+
+      - name: Build the deployment
+        # Catches what typechecking cannot: a bundle that will not build is a deploy that fails after
+        # the commit has already landed.
+        run: npm run build
