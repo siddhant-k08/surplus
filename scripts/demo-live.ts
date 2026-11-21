@@ -105,7 +105,7 @@ async function main(): Promise<void> {
     // Revenue comes from the paid endpoint's own ledger when it has sales. The investing loop runs in its
     // own `sim` book so simulated fills can never be written into the real testnet book; the mirrored
     // revenue entry names the transactions it stands for, so the provenance is checkable.
-    const realSales = realizedSales(new JsonlLedgerStore(LEDGER_PATH).load());
+    const realSales = realizedSales(await new JsonlLedgerStore(LEDGER_PATH).load());
     const realRevenue = realSales.reduce((a, x) => a + x.amountUsdcMinor, 0n);
     const useReal = realRevenue > 0n && !process.argv.includes("--simulate-revenue");
 

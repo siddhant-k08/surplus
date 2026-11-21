@@ -454,6 +454,93 @@ Conclusion: the storefront transacts in-page as planned. The bundle is 657 kB ra
 2. Real swap execution is about three days and shares a phase with deployment. It is the piece to drop if anything slips; the application is still complete end-to-end without it provided simulated fills stay labelled everywhere, which they are.
 3. Mainnet may never be lawful for Siddhant to enable. The plan does not pretend to resolve that.
 
+## Pluggable persistence and Postgres, 21 Nov 2026
+
+Why: Siddhant asked whether this could deploy to Vercel. It could not. Six places write while the agent
+runs (the two ledger books, the mandate history, the receipts, a buyer's commissioned brief, and the
+owner's session), and a serverless instance can be replaced between any two requests. The failure is not
+a crash: a settlement written by one instance is simply absent for the next, the mandate quietly reverts
+to the terms in the code, and a buyer's receipt link stops working. He chose to make persistence
+pluggable rather than host it on a machine with a disk.
+
+What exists now:
+
+- `packages/core/src/storage.ts` holds the ports: `LedgerSource`, `LedgerSink`, `LedgerStore`,
+  `MandateBackend`, with `openLedger`, `openMandateStore`, `openMandateFrom` and `flushNewEntries`.
+  Everything above the port is async; the file implementations resolve immediately.
+- Ports for the rest, in the API: `ReceiptStore` (`src/receipts.ts`), `BriefBackend` (`src/briefs.ts`),
+  `SessionStore` (`src/session.ts`, with `MemorySessionStore` as the in-process implementation).
+- `apps/api/src/pg.ts`: Postgres behind every one of those ports. Money is stored as the exact line the
+  JSONL file would hold and read back through the same parser, so a row cannot mean something a line
+  could not. Amounts stay decimal strings of minor units. Appends are idempotent on the identifying key.
+  Nothing in the ledger or the mandate history is ever updated or deleted.
+- `apps/api/src/backends.ts`: `DATABASE_URL` is the entire switch, and the startup banner names which
+  storage is live. The owner's catalogue stays on disk in both modes; it is repository content and
+  nothing at runtime writes to it.
+- `apps/api/src/app.ts`: the assembly, extracted from `index.ts` so the long-running server and the
+  serverless entry build exactly the same thing. `index.ts` is now the listener, the banner and shutdown.
+- `api/index.ts` and `vercel.json`: the serverless deployment. One assembly per instance, not per
+  request; a failed assembly is not cached, so a database that was briefly unreachable does not leave an
+  instance serving errors until the host recycles it.
+- `npm run db:import -w @surplus/api` copies the existing books into Postgres, reads them back to check
+  the entry ids, settlement transactions and idempotency keys survived, and never modifies the files.
+  A dry run prints the plan; `-- --apply` writes.
+
+Verified against a real Neon Postgres 18.7, in a disposable schema that is dropped afterwards: 25 tests
+covering the ledger (round trip, string amounts, retried flush, two books kept apart, a hole in the ids,
+a row edited in the database), the mandate (chain verified, same version twice accepted, a different
+version at the same number refused, version 1 created only when nothing is stored), receipts, briefs,
+sessions, and the whole server restarted on the same database. Core 256 tests, API 163, typecheck clean,
+and both the long-running server and the serverless handler answer 200 / 402 / 401 / 404 on the routes
+that should.
+
+### Three things this turned up, worth keeping
+
+1. A ledger file or book whose *first* entry was missing used to load as a shorter but apparently intact
+   ledger, because the contiguity check only compared each entry with the one before it. Replay would
+   then carry on from whatever id it found, with the missing money simply absent. Both implementations
+   now require the first entry to be id 1. Fixed in `parseLedgerFile` as well, with a test.
+2. A transaction-mode connection pooler reuses one server connection across clients and does not reset
+   session state reliably: a `search_path` set by one client leaked into the next, which is how the first
+   test run wrote its tables into `public`. The app therefore never sets `search_path` and uses whatever
+   the role's default is. The tests pass the schema as a startup parameter (`-c search_path=...`) on the
+   direct, unpooled endpoint, because both alternatives fail silently: `connection: { search_path }` is
+   dropped by the driver, and a `set search_path` statement is lost the moment the driver reconnects.
+3. Tests that shared one schema were not independent, and the symptom was not a clear failure but wrong
+   counts. Each Postgres test now creates and drops its own schema.
+
+### The live database, 21 Nov 2026
+
+A Neon Postgres 18.7 is the agent's store now, and the books were imported into it:
+
+```
+sales:   2 entries, 2 settled sale(s), cash 0.020000 USDC -> book "sales-testnet"   verified
+invest:  9 entries                                        -> book "invest-sim"      verified
+mandate: 2 versions, current v2 87eb5288a3bd                                        verified
+```
+
+The JSONL files are untouched and are the backup of what was imported. Verified on the running server:
+`/health` reports `"storage": "postgres"` and 2 sales, `/catalogue` serves the brief, `/brief` answers
+402, `/mandate` loads v2 with the chain verified, `POST /invest/sync` books through Postgres, and after a
+full restart the investing book still holds exactly 9 entries with `reconcile.ok` true, with a repeated
+sync adding nothing. `GET /health` now names the storage, because that is the one deployment mistake
+that does not announce itself: the files keep working on a serverless host right up to the moment an
+instance is recycled and a settlement turns out to be missing.
+
+One environment note that cost an hour: `systemd-resolved` was returning REFUSED for the Neon endpoint
+because the active link was the iPhone hotspot, whose resolver refuses that name, while 1.1.1.1 answers
+it. Fixed by setting the Wi-Fi connection's DNS to 1.1.1.1 and 8.8.8.8. The tests carry their own
+resolver fallback; the application deliberately does not, because silently rerouting DNS in an app that
+holds database credentials is not a thing to do quietly.
+
+### Still open on this
+
+- The Vercel rewrites are assumed to leave the original path on the request, which is what lets one
+  Express app serve every route. Unverified until the first deploy; if a route 404s with the function
+  clearly running, that is the cause.
+- Nothing has been deployed. `DATABASE_URL` and every other variable have to go into the Vercel
+  project's environment variables, and the first-deploy checks are in `docs/DEPLOY.md`.
+
 ## Next milestones, in order
 
 1. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.

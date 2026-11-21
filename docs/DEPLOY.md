@@ -9,10 +9,80 @@ this is the list and the reasoning so none of it is guesswork at the wrong momen
 
 A small VPS is enough. One Node 22 process, a few hundred megabytes of memory, and a disk.
 
-**The disk is not optional.** The ledger, the mandate history and the receipts are append-only JSONL
-files whose integrity is the product. A filesystem that resets between deploys loses the agent's books
-and the hash chain that proves nobody edited them. That rules out most serverless hosting unless
-persistence moves to a database first, which is not a two-week change.
+**Either a disk or a database.** The ledger, the mandate history, the receipts and a buyer's
+commissioned brief are all written while the agent runs, and their integrity is the product. With the
+JSONL files, a filesystem that resets between deploys loses the agent's books and the hash chain that
+proves nobody edited them. Set `DATABASE_URL` and the same records become rows in Postgres instead,
+which is what makes serverless hosting possible: see "Postgres instead of files" below.
+
+## Postgres instead of files
+
+`DATABASE_URL` is the whole switch. Empty means the JSONL files; a connection string means Postgres,
+and the startup banner says which is live (`storage  postgres (DATABASE_URL)`). The schema is created
+on start when it is absent; every statement is `create ... if not exists`, so starting repeatedly is
+safe and nothing is ever dropped or rewritten.
+
+What moves, and what does not:
+
+| Record | With `DATABASE_URL` | Why |
+|---|---|---|
+| Sales ledger | `ledger_entries`, book `sales-<mode>` | written on every settlement |
+| Investing ledger | `ledger_entries`, book `invest-<mode>` | written on every sync, proposal and fill |
+| Mandate history | `mandate_versions` | written whenever the owner changes a term |
+| Receipts | `receipts` | written on every purchase |
+| Buyer-commissioned briefs | `briefs`, collection `custom` | generated and stored per paid request |
+| Sessions and sign-in nonces | `sessions`, `login_nonces` | a cookie issued by one instance must work on the next |
+| The owner's catalogue | still `BRIEFS_DIR` on disk | repository content, read-only at runtime |
+
+The money rules are unchanged, because the database keeps the same ones: amounts are stored as decimal
+strings of USDC minor units and parsed by the same parser the files use, appends are idempotent on the
+key that identifies the entry, and a book whose entry ids are not contiguous from 1 refuses to load.
+Nothing in the ledger or the mandate history is ever updated or deleted.
+
+Use the provider's pooled connection string if there is one. Note what pooling costs: a transaction-mode
+pooler reuses one server connection across clients and does not reliably reset session state, so the app
+never sets `search_path` and the tables live wherever the role's default puts them, normally `public`.
+
+### Moving the existing books in
+
+Run this once, after setting `DATABASE_URL`:
+
+```bash
+npm run db:import -w @surplus/api            # prints what it would copy, writes nothing
+npm run db:import -w @surplus/api -- --apply # copies it
+```
+
+It reads the JSONL files, writes each record to the database, and reads them back to check the entry
+ids, settlement transactions and idempotency keys survived. It never modifies the files, and running it
+twice writes nothing the second time. Keep the files afterwards: they are the backup of what was
+imported.
+
+## Serverless, on Vercel
+
+`vercel.json` and `api/index.ts` are the whole deployment. The function assembles the agent once per
+instance and serves every API route; `apps/web/dist` is served as static files by the platform, with
+anything unmatched falling back to `index.html` for the single-page app.
+
+What it needs, and why:
+
+- **`DATABASE_URL` is mandatory here.** A serverless instance may be replaced between any two requests.
+  With the JSONL files, a settlement written by one instance would not be there for the next, and the
+  mandate would come back as whatever the code shipped. `GET /health` and the startup log both say which
+  storage is live, so this is checkable rather than assumed.
+- Every other variable from the table above goes in the project's environment variables. There is no
+  `.env` on the host; the app falls back to the process environment, which is what Vercel provides.
+- `maxDuration` is 60 seconds because generating a brief calls SEC EDGAR and then a model. A paid request
+  that is cut off mid-generation is the one failure mode worth paying attention to after the first
+  deploy: the buyer's payment settles and their brief does not arrive.
+- `includeFiles: docs/briefs/**` ships the owner's catalogue with the function. Without it the catalogue
+  is empty on the host, and `GET /brief` has nothing to sell.
+- Checks worth making on the first deploy, in this order: `GET /health` reports `postgres`; `GET /brief`
+  answers 402 rather than 500; the owner desk loads; sign-in sticks across a page reload (this is the one
+  that proves sessions really are in the database); a receipt link opens the brief it paid for.
+
+One unverified assumption, stated as such: the rewrites select the function while leaving the original
+path in the request, which is what lets one Express app serve every route. If a route 404s on the first
+deploy with the function clearly running, that is the thing to check.
 
 ## Before the first start
 
@@ -35,6 +105,7 @@ persistence moves to a database first, which is not a two-week change.
 | `EXECUTION_PRIVATE_KEY` | Empty unless real swaps are deliberately on. Empty means simulated fills |
 | `MAINNET_SPEND_CAP_USDC` | The ceiling the executor refuses to pass. No default, on purpose |
 | `RESEARCH_TOTAL_MAX_USD` | Ceiling on model spend for the life of the process |
+| `DATABASE_URL` | Empty keeps the books in the JSONL files; a connection string moves them to Postgres |
 
 ## Keeping it running
 
@@ -73,7 +144,11 @@ rather than as a session cookie travelling in the clear.
 
 ## Backing up the books
 
-Everything that cannot be recomputed lives in `data/`:
+With `DATABASE_URL` set, this is the provider's job: take their backups or snapshots of the whole
+database, and keep the JSONL files from before the import as the record of everything up to that point.
+Nothing else in the deployment holds state that cannot be recomputed.
+
+With the files, everything that cannot be recomputed lives in `data/`:
 
 | File | What is lost without it |
 |---|---|
@@ -96,8 +171,9 @@ does not verify, so a corrupted restore announces itself instead of trading unde
 
 ## Checking it is alive
 
-`GET /health` answers without authentication and says the mode, the network, the price, the brief on
-offer and how many sales are booked. It is the right thing for a monitor to poll.
+`GET /health` answers without authentication and says the mode, which storage is live, the network, the
+price, the brief on offer and how many sales are booked. It is the right thing for a monitor to poll,
+and `"storage": "files"` on a serverless host is the one answer that means something is wrong.
 
 A deeper check needs the owner token:
 

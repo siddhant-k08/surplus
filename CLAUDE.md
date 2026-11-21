@@ -21,6 +21,7 @@ Full history, decisions, verified facts and open questions: read `docs/HANDOFF.m
 - `packages/core` (`@surplus/core`): all domain logic, TypeScript strict, ESM, tests in `packages/core/test` (vitest 2.x, pinned; do not upgrade to a newer major). `src/index.ts` re-exports every module.
 - `scripts/`: runnable demos and read-only spikes (`spike-*.mjs`, `survey-*.mjs`, `demo-sim.ts`, `demo-live.ts`, `demo-research.ts`), typechecked by `scripts/tsconfig.json`.
 - `apps/web` (`@surplus/web`): Vite, React and TS. Never import `@surplus/core` as a value here; it reaches for `node:fs` and `node:crypto` and will break the browser build. Use `import type` and keep small helpers local. Built with `npm run build:web`; the API serves `apps/web/dist`.
+- `api/index.ts`: the serverless entry point, used with `vercel.json`. It caches one assembly per instance and serves the same Express app the long-running server does. Typechecked by `api/tsconfig.json` (`tsc -p api`, part of `npm run typecheck`).
 - `apps/api` (`@surplus/api`): never resolve paths against the cwd here; npm runs workspace scripts from `apps/api`, so use `src/paths.ts` (`REPO_ROOT`, `loadRootEnv`, `fromRepoRoot`). The x402 paid research endpoint, Express 5 plus `@x402/*` 2.x, tests with vitest and supertest. See `apps/api/README.md`. The web UI is still not built.
 - `docs/briefs/`: research briefs saved by `demo-research.ts`.
 
@@ -36,6 +37,7 @@ X402_PAY_TO=0x... npm run api   # the x402 endpoint on Base Sepolia
 npm run buy -w @surplus/api     # buy one brief from it (needs X402_BUYER_PRIVATE_KEY, testnet only)
 npm run web                     # the owner desk on :5173, proxying the API
 npm run build:web               # build it; the API then serves apps/web/dist
+npm run db:import -w @surplus/api       # copy the JSONL books into Postgres (add -- --apply to write)
 npx tsx scripts/demo-sim.ts             # fully simulated loop
 npx tsx scripts/demo-live.ts            # newest brief + REAL revenue from the endpoint ledger; simulated fills
 npx tsx scripts/demo-live.ts --simulate-revenue   # same, on a labelled simulated sale
@@ -44,7 +46,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 27 files, 255 tests. API 10 files, 138 tests.
+Last known test count: core 27 files, 256 tests. API 11 files, 163 tests. The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -57,7 +59,8 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - Money is `bigint` USDC minor units (6 decimals). Percentages are basis points. Round down when allocating, round up when booking costs (`usdToUsdcMinor`). No floats for money except display and ranking.
 - Ledger is double-entry, append-only, idempotent by key, chronological, and every entry carries a mode tag: `sim`, `testnet` or `mainnet`.
 - Money entries carry a structured `briefId` saying what the movement was for; `Treasury` rebuilds its per-brief tallies, seen-id sets and settled results from it on construction. Never attribute money by parsing a memo.
-- Persistence is append-only JSONL (`src/ledgerstore.ts`), amounts as decimal strings of minor units, one file per mode. Replaying must restore `idempotencyKey` and `txHash`, not just balances: the restored dedup index is what stops a settlement booking twice after a restart. Reading money back off disk fails loudly rather than skipping a bad line.
+- Persistence is a port (`packages/core/src/storage.ts`), with two implementations: append-only JSONL (`src/ledgerstore.ts`, `src/mandatestore.ts`) and Postgres (`apps/api/src/pg.ts`), chosen by `DATABASE_URL` alone in `apps/api/src/backends.ts`. Both store amounts as decimal strings of minor units, parse them with the same parser, append idempotently on the key that identifies the entry, and refuse a book whose entry ids are not contiguous from 1. Replaying must restore `idempotencyKey` and `txHash`, not just balances: the restored dedup index is what stops a settlement booking twice after a restart. Reading money back fails loudly rather than skipping a bad line.
+- A database is not optional on a host that can replace the process between two requests. The ledger, the mandate history, the receipts, the buyer-commissioned briefs and the owner's session are all written at runtime; the owner's catalogue (`BRIEFS_DIR`) is repository content and stays on disk in both modes.
 - Mandates are versioned and hashed; the agent never changes user constraints. Unplaceable money stays uninvested with a stated reason.
 - The mandate persists to `MANDATE_PATH` as a hash-chained JSONL history, verified on load: an altered or truncated file makes the server refuse to start. A stored mandate is authoritative; the terms in code only create version 1 on a first run.
 - One `MandateStore` is shared by the server and the investing engine. Two stores would drift apart the moment the owner changed a term.
