@@ -40,8 +40,14 @@ export function Receipt({ id }: { id: string }) {
       <header className="stage" style={{ minHeight: "100vh", display: "grid", alignItems: "center" }}>
         <div className="wrap">
           <h1>That link does not open a brief.</h1>
-          <p className="lede">{error} If you paid and lost the link, the transaction on Base is still your proof.</p>
-          <div className="cta"><a className="btn" href="/">Back to the briefs <span aria-hidden="true">↗</span></a></div>
+          {/* The server's reason is its own sentence. Run together with the next one it read as a
+              fragment, and the useful part is not the reason but the way back in. */}
+          <p className="lede">{error}</p>
+          <p className="lede">
+            If you paid and lost your link, connect the wallet you paid with on the front page and the
+            agent will hand it back.
+          </p>
+          <div className="cta"><a className="btn" href="/">Find my briefs <span aria-hidden="true">↗</span></a></div>
         </div>
       </header>
     );
@@ -85,7 +91,7 @@ export function Receipt({ id }: { id: string }) {
         </div>
       </header>
 
-      <main className="work">
+      <main className="work" id="main">
         <div className="wrap">
           {paid.brief.themes.map((theme) => {
             const claims = new Map(theme.claims.map((c) => [c.id, c]));

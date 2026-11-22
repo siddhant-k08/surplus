@@ -50,17 +50,17 @@ export function Recover() {
                     This needs the browser wallet you paid with. Open this page in that browser.
                 </p>
             )}
-            {error !== null && <p className="note error">{error}</p>}
+            {error !== null && <p className="note error" role="alert">{error}</p>}
 
             {found !== null && found.length === 0 && (
-                <p className="note">
+                <p className="note" role="status">
                     That wallet has not bought anything here. If you paid from a different wallet, connect
                     that one instead.
                 </p>
             )}
 
             {found !== null && found.length > 0 && (
-                <ul className="legs">
+                <ul className="legs" role="status">
                     {found.map((r) => (
                         <li key={r.id}>
                             <div className="leg">

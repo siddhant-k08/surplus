@@ -45,14 +45,15 @@ export function SignIn({ onSignedIn }: { onSignedIn: (address: string) => void }
                         </button>
                     </div>
 
+                    {/* A missing wallet is a circumstance, not a failure. Coral is for what went wrong. */}
                     {!hasWallet() && (
-                        <p className="lede" style={{ color: "var(--coral)" }}>
+                        <p className="note">
                             No browser wallet found. Install one to sign in, or drive the owner routes from a
                             script with the owner token.
                         </p>
                     )}
                     {error !== null && (
-                        <p className="lede" style={{ color: "var(--coral)" }}>
+                        <p className="note error" role="alert">
                             {error}
                         </p>
                     )}

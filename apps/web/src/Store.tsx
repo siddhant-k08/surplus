@@ -77,7 +77,7 @@ export function Store() {
                         </span>
                         <nav aria-label="Sections">
                             <a href="#buy" aria-current="page">Briefs</a>
-                            <a href="#how">How it works</a>
+                            <a href="#main">How it works</a>
                             <a href="/desk">Owner</a>
                         </nav>
                     </div>
@@ -100,7 +100,7 @@ export function Store() {
                                     {busy === "brief" ? "Waiting for your wallet…" : `Buy the latest brief, ${price}`}{" "}
                                     <span aria-hidden="true">↗</span>
                                 </button>
-                                <a className="textlink" href="#how">
+                                <a className="textlink" href="#main">
                                     How it works <span aria-hidden="true">↗</span>
                                 </a>
                             </div>
@@ -108,24 +108,29 @@ export function Store() {
                             {cat !== null && cat.latest === null && (
                                 // nothing to sell is a real state, and saying so is better than a button
                                 // that takes a payment for a brief that is not there
-                                <p className="lede" style={{ color: "var(--coral)" }}>
+                                <p className="note">
                                     The agent has no brief on offer right now. Commission your own themes
                                     below, or come back shortly.
                                 </p>
                             )}
+                            {/* Not an error: most people arrive without a wallet, and the first thing they
+                                meet should read as instruction rather than alarm. Coral is kept for the
+                                things that actually went wrong. */}
                             {!hasWallet() && (
-                                <p className="lede" style={{ color: "var(--coral)" }}>
-                                    You need a browser wallet holding USDC on Base Sepolia to buy here.
-                                    You do not need ETH: the facilitator pays the gas.
+                                <p className="note">
+                                    Buying needs a browser wallet holding USDC on Base Sepolia. You do not
+                                    need ETH: the facilitator pays the gas.
                                 </p>
                             )}
+                            {/* A purchase finishes without the page moving, so the outcome has to be
+                                announced as well as shown. */}
                             {error !== null && (
-                                <p className="lede" style={{ color: "var(--coral)" }}>{error}</p>
+                                <p className="lede" role="alert" style={{ color: "var(--coral)" }}>{error}</p>
                             )}
                             {bought !== null && (
-                                <p className="lede">
-                                    Paid. <a href={bought.receipt.url}>Open your brief</a>. Keep that link: it is the
-                                    only way back to it.
+                                <p className="lede" role="status">
+                                    Paid. <a href={bought.receipt.url}>Open your brief</a>. Keep that link, or come
+                                    back with the wallet you paid from.
                                 </p>
                             )}
                         </div>
@@ -174,7 +179,7 @@ export function Store() {
                 </div>
             </header>
 
-            <main className="work" id="how">
+            <main className="work" id="main">
                 <div className="wrap">
                     <h2>How a brief is built</h2>
                     <p>

@@ -170,7 +170,7 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
                         </span>
                         <nav aria-label="Desk">
                             <a href="#decision" aria-current="page">Decision</a>
-                            <a href="#book">Book</a>
+                            <a href="#main">Book</a>
                         </nav>
                         {left !== null && proposal !== null && (
                             <span className="pillbtn live num" title="Time left on this approval">
@@ -282,7 +282,11 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
                     </div>
 
                     {note !== null && (
-                        <section className="sheet" style={{ marginTop: "2rem", marginBottom: "1rem" }}>
+                        <section
+                            className="sheet"
+                            role={note.tone === "stop" ? "alert" : "status"}
+                            style={{ marginTop: "2rem", marginBottom: "1rem" }}
+                        >
                             <h3 style={{ color: note.tone === "stop" ? "var(--coral)" : "var(--cream)" }}>{note.title}</h3>
                             <ul style={{ margin: 0, paddingLeft: "1.1rem", color: "var(--cream-dim)", fontSize: ".9375rem" }}>
                                 {note.lines.map((l) => (
@@ -294,7 +298,7 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
                 </div>
             </header>
 
-            <main className="work" id="book">
+            <main className="work" id="main">
                 <div className="wrap">
                     {proposal !== null ? (
                         <>

@@ -240,3 +240,21 @@
 .notice .note{margin-top:.4rem}
 .notice.real{border-color:var(--coral);background:rgba(255,107,91,.08)}
 .notice.real strong{color:var(--coral)}
+
+/* Off screen until it is focused, then the first thing on the page. A keyboard user should not have
+   to walk the header to reach what they came for. */
+.skip{
+  position:absolute;left:0;top:0;z-index:100;transform:translateY(-120%);
+  display:inline-flex;align-items:center;min-height:44px;
+  background:var(--coral);color:#1A0B08;font:600 .9375rem var(--ui);
+  padding:.7rem 1rem;border-bottom-right-radius:8px;text-decoration:none;
+}
+/* `:focus`, not `:focus-visible`: nothing but a keyboard ever reaches this, and a skip link that
+   stays hidden when focused is worse than no skip link, because the focus has gone somewhere
+   invisible. */
+.skip:focus{transform:translateY(0);outline:2px solid var(--cream);outline-offset:-4px}
+
+/* A control is a target before it is a word. Comfortable on a desktop pointer, reachable on a thumb. */
+@media (pointer:coarse),(max-width:40rem){
+  .textlink{min-height:44px}
+}

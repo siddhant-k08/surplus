@@ -914,6 +914,44 @@ as a key or secret, with the label allowed a prefix so `EXECUTION_PRIVATE_KEY=` 
 
 Core 277, API 224.
 
+## The frontend pass, 22 Nov 2026
+
+Run with the `frontend-design` and `taste-skill` skills. A judgement first: taste-skill deals a fresh
+identity from its own kit, and applying that wholesale would have thrown away the navy, cream and
+coral direction Siddhant chose and approved. So its **checklist** was used against the real pages and
+its copy linter against the rendered DOM, with the identity left alone. Its browser checkers could not
+run at all: they need Chrome or Chromium, and neither is installed here.
+
+Checked at 1440, 390 and 320 through the in-app browser, on the storefront, the receipt page and the
+desk sign-in. What was already right: no horizontal overflow at any width, text contrast 8.3 to 1
+against the navy, headings in order, one h1 a page, every field labelled, reduced motion respected.
+
+What was wrong, and is fixed:
+
+- **No skip link.** A keyboard had to walk the header on every page. There is one now, off screen
+  until focused, and it uses `:focus` rather than `:focus-visible`, because nothing but a keyboard
+  reaches it and a skip link that stays hidden when focused is worse than none at all.
+- **Two controls under 44px on a phone** (the text links, at 33px). They have a minimum height on
+  coarse pointers and narrow screens now.
+- **The tab said "Surplus" on all three surfaces.** Per-surface titles, plus a description, theme
+  colour, share tags and a favicon drawn from the mark the page already uses.
+- **A visitor with no wallet met a wall of coral.** Most people arrive without one: that is a
+  circumstance, not a failure. It reads as a quiet note now, and coral is kept for what actually went
+  wrong. Same on the sign-in page.
+- **The receipt error ran two sentences together**: the server's reason landed mid-sentence, so it
+  read as a fragment. It is its own sentence now, and the page points at the recovery flow rather than
+  at the transaction hash, which is no longer the only way back.
+- **Purchase outcomes were shown but not announced.** The result of a payment, a recovery and a desk
+  action now carry `role="status"` or `role="alert"`, since none of them move the page.
+
+`copy-lint` on the rendered storefront: 0 FAIL, 0 WARN, two INFO notes (one "no X, no Y" negation, and
+the sentence rhythm).
+
+Not verified: the skip link appearing on focus, because the browser pane never holds document focus,
+so `:focus` cannot match there. The rule is in the stylesheet and the selector is right.
+
+Core 277, API 224.
+
 ### Still open on this
 
 - A real purchase against the deployed endpoint has not been made.
