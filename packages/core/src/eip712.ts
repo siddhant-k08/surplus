@@ -22,6 +22,22 @@ import type { Approval } from "./approval";
 export const APPROVAL_DOMAIN_NAME = "Surplus";
 export const APPROVAL_DOMAIN_VERSION = "1";
 
+/**
+ * The EIP-712 domain type, for the payload that crosses the wire to a wallet.
+ *
+ * `eth_signTypedData_v4` expects the domain's own type to be declared in `types`. viem infers it from
+ * the domain's fields, so the server never needs it and the hash is identical either way (a test pins
+ * that). A browser wallet is not viem: one that has to guess this is one that can guess differently,
+ * and the failure arrives as a signature the server rejects for no visible reason.
+ *
+ * The fields here must stay exactly the fields of `ApprovalDomain` and the login domain, in order.
+ */
+export const EIP712_DOMAIN_TYPE = [
+    { name: "name", type: "string" },
+    { name: "version", type: "string" },
+    { name: "chainId", type: "uint256" },
+] as const;
+
 export const APPROVAL_TYPES = {
     Approval: [
         { name: "proposalHash", type: "bytes32" },
@@ -100,7 +116,7 @@ export function approvalTypedDataJson(a: Approval, chainId: number): unknown {
     const td = approvalTypedData(a, chainId);
     return {
         domain: td.domain,
-        types: td.types,
+        types: { EIP712Domain: EIP712_DOMAIN_TYPE, ...td.types },
         primaryType: td.primaryType,
         message: {
             proposalHash: td.message.proposalHash,
