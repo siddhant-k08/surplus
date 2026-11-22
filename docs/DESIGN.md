@@ -90,18 +90,24 @@ ordered. And every animation ends in the state the element would have had anyway
 
 wagmi holds one account and one chain for the whole app (`src/wagmi.ts`). Two connectors: Coinbase
 Wallet, which covers the extension, the phone app and a Smart Wallet passkey, so it is the only route
-for someone with nothing installed; and injected, offered only when an extension is actually present.
+for someone with nothing installed; and injected, which arrives with its real name and icon when the
+browser announces it over EIP-6963.
 
-Two faces onto it, because most of this app is not a component. `src/wallet.ts` is imperative, for the
-x402 payment stack, the sign-in flow and receipt recovery, all of which call `signTypedData(address,
-payload)`. `src/Connect.tsx` is the hook version, for the pages that show who is connected. Both read
-the same wagmi store, so there is one answer to "which wallet is this" no matter who asks, the page
-re-renders when someone switches account in their wallet, and a reload reconnects rather than
-forgetting.
+**One button.** `ConnectButton` in `src/Connect.tsx` is the only way to connect, on the app, the
+portfolio and the owner desk alike. Someone with nothing installed has exactly one option and goes
+straight to it; someone with an extension gets a small native `<dialog>` listing what they actually
+have. It was two buttons side by side for a while, Coinbase and browser wallet, which asked a visitor
+to know the difference before they had any reason to care.
 
-wagmi, viem and react-query are about 65 kB gzipped and three pages have no wallet at all, so they are
-loaded by `Wallets.tsx` only where one can be used.
+Two faces onto the store, because most of this app is not a component. `src/wallet.ts` is imperative,
+for the x402 payment stack, the sign-in flow and receipt recovery, all of which call
+`signTypedData(address, payload)`. `src/Connect.tsx` is the hook version, for the pages that show who
+is connected. Both read the same wagmi store, so there is one answer to "which wallet is this" no
+matter who asks, the page re-renders when someone switches account in their wallet, and a reload
+reconnects rather than forgetting.
 
-The owner desk is injected-only in practice: the owner's address is fixed in server config and
-approvals are verified as EOA signatures, so a Smart Wallet address would be rejected after signing
-rather than refused up front. Revisit alongside ERC-1271 verification.
+wagmi, viem and react-query are about 68 kB gzipped and three pages have no wallet at all, so they
+are loaded by `Wallets.tsx` only where one can be used.
+
+The owner desk uses the same button but accepts one fixed address and verifies EOA signatures, so a
+Smart Wallet address would be rejected after signing. Revisit alongside ERC-1271 verification.

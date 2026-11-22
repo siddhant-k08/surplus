@@ -1388,42 +1388,66 @@ Neither endpoint leaks anything a buyer paid for. A theme id is the name of a qu
 a public SEC document with a public URL; the claims and quotes that connect the two are the product. A
 test asserts that neither response contains a claim, a quote, or a stored excerpt.
 
-### Wallets: wagmi and Coinbase Wallet
+### Wallets: wagmi, and one connect button
 
-The first attempt used `@base-org/account` directly behind a hand-rolled registry: a module-level
-provider variable, two SDKs, and every surface asking "is something connected?" in its own way.
-Siddhant called the experience thrash and he was right about the cause. Nothing told the page when an
-account changed, a reload forgot the wallet entirely, and the desk and the storefront could hold
-different ideas of who was signed in.
+Two goes at this, and the second one is what shipped.
 
-Replaced with **wagmi 3** and **@coinbase/wallet-sdk 4.4** (through wagmi's `coinbaseWallet`
-connector, which imports the SDK only when someone picks it). wagmi is one store every component
-reads, it reconnects the last wallet on mount, and account and chain changes arrive as state rather
-than as events nobody subscribed to.
+The first used `@base-org/account` behind a hand-rolled registry: a module-level provider variable,
+two SDKs, and every surface asking "is something connected?" in its own way. Siddhant called the
+experience thrash and he was right about the cause. Nothing told the page when an account changed, a
+reload forgot the wallet entirely, and it ended up presenting two buttons side by side, Coinbase and
+browser wallet, which asks a visitor to know the difference before they have any reason to care.
+
+Now: **wagmi 3**, one store every component reads, reconnecting the last wallet on mount, with
+account and chain changes arriving as state rather than as events nobody subscribed to. One
+`ConnectButton` (`src/Connect.tsx`) on the app, the portfolio and the owner desk. Someone with
+nothing installed has exactly one option and goes straight to it. Someone with an extension gets a
+small native `<dialog>` listing what they actually have, named and iconed as the browser announced
+them over EIP-6963, so the focus trap, Escape and the backdrop are the browser's rather than three
+more things to get wrong.
 
 Two faces onto the same store, because most of this app is not a component:
 
 - `src/wallet.ts`, imperative, for the x402 payment stack, sign-in and receipt recovery, all of which
-  want `signTypedData(address, payload)` they can call.
+  want `signTypedData(address, payload)` they can call. Connecting is deliberately not in it.
 - `src/Connect.tsx`, hooks, for the pages that show who is connected.
 
-Three things fell out of the change:
+### Why not RainbowKit or OnchainKit
+
+Both were tried, because a ready-made connect modal is the obvious answer and one of them is Base's
+own kit. Both need **wagmi 2**, and wagmi 2's `@wagmi/connectors` hard-depends on WalletConnect,
+which depends on `@reown/appkit`. Measured, with OnchainKit's modal wired up and working:
+
+| | wagmi 3, our button | wagmi 2 + OnchainKit |
+|---|---|---|
+| `npm audit --omit=dev` | 0 | 35 (22 high, 13 moderate) |
+| Total JS, gzipped | 326 kB | 1,100 kB |
+| Wallet chunk, gzipped | 68 kB | 476 kB |
+| WalletConnect in the bundle | no | yes |
+
+The modal statically imports every wallet it supports, which is where the 557 kB MetaMask SDK chunk
+came from, and `supportedWallets` cannot remove the defaults. Half a megabyte and 22 high advisories
+to render a button is the overcomplicated outcome, not the simple one. RainbowKit 2.2.11 has no
+wagmi 3 release and there is no newer tag.
+
+**Stay on wagmi 3** until one of those libraries supports it. Three things also fell out of the move
+to wagmi and are worth keeping:
 
 - `toSignableJson` is gone. It existed because `JSON.stringify` throws on the bigints in an EIP-3009
   authorisation; viem encodes a uint256 from a bigint directly, so the problem does not arise. Its
-  tests were replaced with tests for `signableTypedData`, which does the one transformation that is
-  still needed: dropping the declared `EIP712Domain` from `types` so viem derives it from the domain
+  tests were replaced with tests for `signableTypedData`, which does the one transformation still
+  needed: dropping the declared `EIP712Domain` from `types` so viem derives it from the domain
   instead. A declared one would override what viem derived, and a disagreement there is a signature
   the server rejects with nothing to point at.
 - `ensureChain` no longer carries its own table of RPC urls and explorers. wagmi offers an unknown
   chain to the wallet from the chain definitions in the config.
 - The balance read goes through the config's public transport rather than the wallet's provider.
 
-**The owner desk stays injected-only in practice.** The owner's address is fixed in server config and
-approvals are verified as EOA signatures, so a Coinbase Smart Wallet address would be rejected after
-signing rather than refused up front. Worth revisiting only alongside ERC-1271 verification.
+**The owner desk uses the same button but accepts one fixed address and verifies EOA signatures**, so
+a Coinbase Smart Wallet address would be rejected after signing rather than refused up front. Worth
+revisiting only alongside ERC-1271 verification.
 
-Cost, and what was done about it: wagmi, viem and react-query are about 65 kB gzipped, and three of
+Cost, and what was done about it: wagmi, viem and react-query are about 68 kB gzipped, and three of
 this site's pages are a person reading about an agent. They load with `Wallets.tsx`, mounted only by
 `WalletPages.tsx` (`/app`, `/app/portfolio`) and `Owner.tsx` (`/desk`). The main chunk is 120.9 kB
 gzipped, below the 125.8 it was before wagmi and the 127 it was before any of this.
