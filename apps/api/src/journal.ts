@@ -55,6 +55,8 @@ export interface ExecutionJournal {
     committedUsdcMinor(): Promise<bigint>;
     /** Transactions that were signed and whose outcome is unknown. Resolved against the chain on start. */
     unresolved(): Promise<ExecutionRecord[]>;
+    /** Everything that filled. The agent's own record of what the chain gave it. */
+    filled(): Promise<ExecutionRecord[]>;
 }
 
 const clone = (r: ExecutionRecord): ExecutionRecord => ({ ...r });
@@ -112,6 +114,10 @@ export class MemoryJournal implements ExecutionJournal {
 
     async unresolved(): Promise<ExecutionRecord[]> {
         return [...this.rows.values()].filter((r) => r.status === "sent").map(clone);
+    }
+
+    async filled(): Promise<ExecutionRecord[]> {
+        return [...this.rows.values()].filter((r) => r.status === "filled").map(clone);
     }
 }
 
@@ -209,6 +215,11 @@ export class PgJournal implements ExecutionJournal {
 
     async unresolved(): Promise<ExecutionRecord[]> {
         const rows = await this.sql<Row[]>`select * from executions where status = 'sent' order by at asc`;
+        return rows.map(fromRow);
+    }
+
+    async filled(): Promise<ExecutionRecord[]> {
+        const rows = await this.sql<Row[]>`select * from executions where status = 'filled' order by at asc`;
         return rows.map(fromRow);
     }
 }

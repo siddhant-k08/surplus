@@ -516,6 +516,39 @@ describe("the owner routes", () => {
     it("keeps execution status behind the owner gate", async () => {
         const { app } = await build();
         expect((await request(app).get("/invest/execution")).status).toBe(401);
+        expect((await request(app).get("/invest/positions")).status).toBe(401);
+    });
+
+    it("says there is nothing to reconcile against the chain while fills are simulated", async () => {
+        // claiming "reconciled" about swaps that never happened would be worse than saying nothing
+        const { app } = await build();
+        const res = await auth(request(app).get("/invest/positions"));
+        expect(res.status).toBe(200);
+        expect(res.body.checked).toBe(false);
+        expect(res.body.why).toMatch(/nothing onchain/);
+    });
+
+    it("reports the books against the wallet when there is something onchain", async () => {
+        const { app } = buildServer({
+            config: signedConfig,
+            mandates: mandateFor(terms),
+            readBrief: savedBrief,
+            engine: await engineFor("3.00"),
+            positions: async () => ({
+                ok: false,
+                positions: [{
+                    asset: "0xaaa", symbol: "NVDAc",
+                    bookedUnits: 1_000n, heldUnits: 400n, differenceUnits: -600n, verdict: "short" as const,
+                }],
+                issues: ["NVDAc: short by 600"],
+            }),
+        });
+        const res = await auth(request(app).get("/invest/positions"));
+        expect(res.body.checked).toBe(true);
+        expect(res.body.ok).toBe(false);
+        expect(res.body.positions[0].verdict).toBe("short");
+        expect(res.body.positions[0].bookedUnits).toBe("1000"); // a string, like every other amount
+        expect(res.body.issues[0]).toMatch(/short by 600/);
     });
 
     it("walks sync, propose, approve, execute over HTTP", async () => {

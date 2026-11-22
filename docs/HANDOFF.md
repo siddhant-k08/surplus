@@ -876,6 +876,25 @@ are covered by tests and the page builds and typechecks.
 
 Core 272, API 215.
 
+## The books against the chain, 22 Nov 2026
+
+`reconcileInternal` proves the books agree with themselves, which is not the same as being true. The
+check that can catch a lie compares what the agent recorded receiving against what the wallet actually
+holds, and it is only meaningful once real swaps exist.
+
+`comparePositions` in core does the comparison on integers: units the journal recorded against units
+the chain reports, no price or quote anywhere near it. `SwapExecutor.positions` feeds it from the
+journal's filled rows, summing several fills of the same token and ignoring the ones that failed, and
+`GET /invest/positions` serves it behind the owner gate.
+
+Short is the serious direction and fails the check: the books claiming tokens the wallet does not hold
+is either a fill booked without happening or tokens that left without an entry. Extra is reported and
+is not a failure, because the agent is not the only thing allowed to put tokens in that wallet. With
+simulated fills the route says there is nothing onchain to compare rather than claiming reconciled,
+which would be worse than saying nothing.
+
+Core 277, API 219.
+
 ### Still open on this
 
 - A real purchase against the deployed endpoint has not been made.

@@ -236,6 +236,7 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
         storage: backends.kind,
         storageCheck: () => backends.check(),
         readBrief: newestCatalogueBrief, findBrief: briefById,
+        ...(execution.executor !== null && { positions: () => execution.executor!.positions() }),
         ...(execution.executor !== null && {
             executionStatus: async () => {
                 const executor = execution.executor!;

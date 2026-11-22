@@ -110,6 +110,7 @@ describe("sending a swap without losing track of it", () => {
             receiptFor: async () => { calls.push("receiptFor"); return null; },
             nativeBalance: async () => 10_000_000_000_000n,
             chainId: async () => 8453,
+            tokenBalance: async () => 0n,
         };
         return { chain: { ...base, ...over }, calls };
     }
@@ -258,6 +259,45 @@ describe("sending a swap without losing track of it", () => {
         expect(result.ok).toBe(false);
         expect(result.checks[0]!.detail).toMatch(/chain 1, expected 8453/);
         expect(result.checks.length).toBe(1); // nothing else is worth checking
+    });
+
+    it("compares what it recorded buying against what the wallet holds", async () => {
+        // the internal checks prove the books agree with themselves; this is the one that can catch a
+        // fill booked without happening, or tokens that left without an entry
+        const journal = new MemoryJournal();
+        await journal.reserve({ key: "p1:0", symbol: "NVDAc", asset: order.asset, usdcInMinor: u("1.00") });
+        await journal.recordSigned("p1:0", HASH, RAW);
+        await journal.settle("p1:0", { status: "filled", amountOutMinor: 1_000n, gasUsed: 21_000n });
+
+        const matching = fakeChain({ tokenBalance: async () => 1_000n });
+        const good = await executorWith(matching.chain, journal).positions();
+        expect(good.ok).toBe(true);
+        expect(good.positions[0]).toMatchObject({ symbol: "NVDAc", bookedUnits: 1_000n, heldUnits: 1_000n });
+
+        const thin = fakeChain({ tokenBalance: async () => 400n });
+        const bad = await executorWith(thin.chain, journal).positions();
+        expect(bad.ok).toBe(false);
+        expect(bad.issues[0]).toMatch(/short by 600/);
+    });
+
+    it("adds up several fills of the same token", async () => {
+        const journal = new MemoryJournal();
+        for (const [i, units] of [300n, 700n].entries()) {
+            const key = `p1:${i}`;
+            await journal.reserve({ key, symbol: "NVDAc", asset: order.asset, usdcInMinor: u("0.50") });
+            await journal.recordSigned(key, HASH, RAW);
+            await journal.settle(key, { status: "filled", amountOutMinor: units });
+        }
+        // a failed one must not count towards what the wallet should hold
+        await journal.reserve({ key: "p1:2", symbol: "NVDAc", asset: order.asset, usdcInMinor: u("0.50") });
+        await journal.recordSigned("p1:2", HASH, RAW);
+        await journal.settle("p1:2", { status: "failed", detail: "reverted" });
+
+        const { chain } = fakeChain({ tokenBalance: async () => 1_000n });
+        const r = await executorWith(chain, journal).positions();
+        expect(r.ok).toBe(true);
+        expect(r.positions.length).toBe(1);
+        expect(r.positions[0]!.bookedUnits).toBe(1_000n);
     });
 
     it("resolves what it left behind when it starts again", async () => {

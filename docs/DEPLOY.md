@@ -327,7 +327,12 @@ during US market hours**, when the gate is actually doing its job.
 5. Propose, approve with the owner wallet, and execute **one order at the minimum trade size**, watching.
    The journal records the signed transaction before it is broadcast, so an interrupted run is
    recoverable rather than a mystery.
-6. Check `GET /invest/ledger`: the fill carries the real transaction hash, the quantity is what the
+6. Run the position check: `GET /invest/positions` with the owner token. It compares the units the
+   agent recorded receiving against the chain's own answer for the wallet, with no price involved.
+   Short means the books claim tokens the wallet does not hold, which needs a person before anything
+   else happens. Extra is reported and is not a failure: the agent is not the only thing allowed to
+   put tokens in that wallet.
+7. Check `GET /invest/ledger`: the fill carries the real transaction hash, the quantity is what the
    chain returned, and `reconcile.ok` is still true.
 
 ## Turning on real swaps

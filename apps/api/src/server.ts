@@ -18,6 +18,7 @@ import {
     type MandateTerms,
     type MandateVersion,
     type InvestmentGap,
+    type PositionReconciliation,
     type SavedBrief,
 } from "@surplus/core";
 import type { ApiConfig } from "./config";
@@ -219,6 +220,13 @@ export interface ServerDeps {
      * about to approve a trade needs the real answer, not the configured intention.
      */
     executionStatus?: () => Promise<ExecutionStatusView>;
+    /**
+     * What the wallet actually holds, against what the books say it bought.
+     *
+     * Absent when there is no executor, because there is then nothing onchain to compare: simulated
+     * fills buy nothing, and saying "reconciled" about them would be worse than saying nothing.
+     */
+    positions?: () => Promise<PositionReconciliation>;
     /**
      * Whether storage is answering. Absent means the question is not asked and health says so.
      *
@@ -919,6 +927,32 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             } catch (e) {
                 res.status(404).json({ error: e instanceof Error ? e.message : String(e) });
             }
+        });
+
+        // The books against the chain. The internal checks prove the books agree with themselves.
+        app.get("/invest/positions", owner, async (_req: Request, res: Response) => {
+            if (deps.positions === undefined) {
+                return void res.json({
+                    checked: false,
+                    why: "fills are simulated, so there is nothing onchain to compare them against",
+                    positions: [],
+                    issues: [],
+                });
+            }
+            const r = await deps.positions();
+            res.json({
+                checked: true,
+                ok: r.ok,
+                positions: r.positions.map((p) => ({
+                    asset: p.asset,
+                    symbol: p.symbol,
+                    bookedUnits: p.bookedUnits.toString(),
+                    heldUnits: p.heldUnits.toString(),
+                    differenceUnits: p.differenceUnits.toString(),
+                    verdict: p.verdict,
+                })),
+                issues: r.issues,
+            });
         });
 
         // What pressing execute would do, before it is pressed.

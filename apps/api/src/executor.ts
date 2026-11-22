@@ -1,7 +1,10 @@
 import { createPublicClient, createWalletClient, http, erc20Abi, keccak256, type Hash } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
-import { buildSwap, minOut, type Quote, type SwapOrder } from "@surplus/core";
+import {
+    buildSwap, comparePositions, minOut,
+    type PositionReconciliation, type Quote, type SwapOrder,
+} from "@surplus/core";
 import { MemoryJournal, type ExecutionJournal, type ExecutionRecord } from "./journal";
 
 /** Six decimals, for a message a person reads. Money is compared as integers everywhere else. */
@@ -54,6 +57,8 @@ export interface ChainAccess {
     receiptFor(hash: Hash): Promise<{ status: "success" | "reverted"; gasUsed: bigint } | null>;
     /** Native balance, for gas. A wallet with USDC and no ETH cannot send anything. */
     nativeBalance(): Promise<bigint>;
+    /** Units of any token the wallet holds. The chain's own answer, for reconciliation. */
+    tokenBalance(token: `0x${string}`): Promise<bigint>;
     /** Which chain is actually on the other end of the RPC. */
     chainId(): Promise<number>;
 }
@@ -161,6 +166,9 @@ export class SwapExecutor {
                 return { status: receipt.status, gasUsed: receipt.gasUsed };
             },
             nativeBalance: async () => publicClient.getBalance({ address: account.address }),
+            tokenBalance: async (token) => publicClient.readContract({
+                address: token, abi: erc20Abi, functionName: "balanceOf", args: [account.address],
+            }) as Promise<bigint>,
             chainId: async () => publicClient.getChainId(),
             receiptFor: async (hash) => {
                 try {
@@ -351,6 +359,35 @@ export class SwapExecutor {
             transaction: hash,
             gasUsed: receipt.gasUsed,
         };
+    }
+
+    /**
+     * What the books say the wallet holds, against what it actually holds.
+     *
+     * The internal reconciliation proves the books agree with themselves, which is not the same as
+     * being true. This is the check that can catch a lie, and it is only meaningful once real swaps
+     * have happened: it compares the units the journal recorded receiving against the chain's own
+     * answer, with no price or quote involved anywhere.
+     */
+    async positions(): Promise<PositionReconciliation> {
+        const byAsset = new Map<string, { symbol: string; units: bigint }>();
+        for (const record of await this.journal.filled()) {
+            const key = record.asset.toLowerCase();
+            const seen = byAsset.get(key);
+            const units = record.amountOutMinor ?? 0n;
+            if (seen === undefined) byAsset.set(key, { symbol: record.symbol, units });
+            else seen.units += units;
+        }
+
+        const held = new Map<string, bigint>();
+        for (const asset of byAsset.keys()) {
+            held.set(asset, await this.chain.tokenBalance(asset as `0x${string}`));
+        }
+
+        return comparePositions(
+            [...byAsset].map(([asset, v]) => ({ asset, symbol: v.symbol, units: v.units })),
+            held,
+        );
     }
 
     /**
