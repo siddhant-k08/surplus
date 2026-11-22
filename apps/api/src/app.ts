@@ -236,6 +236,29 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
         storage: backends.kind,
         storageCheck: () => backends.check(),
         readBrief: newestCatalogueBrief, findBrief: briefById,
+        ...(execution.executor !== null && {
+            executionStatus: async () => {
+                const executor = execution.executor!;
+                const { spent, remaining } = await executor.budget();
+                const unresolved = await backends.executions.unresolved();
+                return {
+                    willSendRealSwaps: config.investMode === "mainnet",
+                    ...(config.investMode !== "mainnet" && {
+                        why: `INVEST_MODE is ${config.investMode}, so fills are simulated`,
+                    }),
+                    address: executor.address,
+                    capUsdcMinor: (spent + remaining).toString(),
+                    spentUsdcMinor: spent.toString(),
+                    remainingUsdcMinor: remaining.toString(),
+                    unresolved: unresolved.map((r) => ({
+                        key: r.key,
+                        symbol: r.symbol,
+                        txHash: r.txHash,
+                        usdcInMinor: r.usdcInMinor.toString(),
+                    })),
+                };
+            },
+        }),
     });
 
     // The built owner desk and storefront, served by the same process that serves the API. Mounted last

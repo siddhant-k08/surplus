@@ -855,6 +855,27 @@ been discovered with money on the line.
 A second thing the preflight refuses to do: check anything at all against the wrong chain. A test asked
 for every check and got one, which was right and the code was wrong.
 
+## The desk says what the button will do, 22 Nov 2026
+
+`simulatedFills` was derived from `INVEST_MODE` alone, so the desk would have said "Live fills" on a
+server with no execution key, which simulates. The difference between a rehearsal and spending money
+should not be inferred from configuration.
+
+`GET /invest/execution` now answers it directly: whether a real swap would be sent and why not when it
+would not, the wallet the swaps would come from, the spend cap with what is already committed, and any
+transaction signed whose outcome is unknown. `/invest/ledger` asks that same source rather than
+recomputing it, because two places deciding this is two places to disagree.
+
+On the desk it is a notice above the controls, quiet for a rehearsal and coral when real money will
+move, and the button reads "Execute with real money" rather than "Execute". Unresolved transactions are
+named there too, since those are the ones that need resolving against the chain before anything else
+is believed.
+
+Not seen in a browser yet: showing it needs an owner session, which needs Siddhant's wallet. The routes
+are covered by tests and the page builds and typechecks.
+
+Core 272, API 215.
+
 ### Still open on this
 
 - A real purchase against the deployed endpoint has not been made.

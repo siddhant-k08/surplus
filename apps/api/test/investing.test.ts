@@ -475,6 +475,49 @@ describe("the owner routes", () => {
         expect(res.body.gap.revenueNeededUsdcMinor).toBe("0");
     });
 
+    it("says what pressing execute would actually do", async () => {
+        // config alone cannot answer this: INVEST_MODE=mainnet with no key still simulates, and an
+        // owner about to approve a trade needs the real answer
+        const { app } = await build();
+        const none = await auth(request(app).get("/invest/execution"));
+        expect(none.status).toBe(200);
+        expect(none.body.willSendRealSwaps).toBe(false);
+        expect(none.body.why).toMatch(/without an executor/);
+
+        const ledger = await auth(request(app).get("/invest/ledger"));
+        expect(ledger.body.simulatedFills).toBe(true);
+    });
+
+    it("reports the spend cap and anything left unresolved onchain", async () => {
+        const { app } = buildServer({
+            config: signedConfig,
+            mandates: mandateFor(terms),
+            readBrief: savedBrief,
+            engine: await engineFor("3.00"),
+            executionStatus: async () => ({
+                willSendRealSwaps: true,
+                address: "0x" + "ee".repeat(20),
+                capUsdcMinor: u("5.00").toString(),
+                spentUsdcMinor: u("1.00").toString(),
+                remainingUsdcMinor: u("4.00").toString(),
+                unresolved: [{ key: "p1:0", symbol: "NVDAc", txHash: "0x" + "ab".repeat(32), usdcInMinor: u("0.50").toString() }],
+            }),
+        });
+        const res = await auth(request(app).get("/invest/execution"));
+        expect(res.body.willSendRealSwaps).toBe(true);
+        expect(res.body.remainingUsdcMinor).toBe(u("4.00").toString());
+        expect(res.body.unresolved[0].symbol).toBe("NVDAc");
+
+        // and the ledger stops claiming the fills are simulated
+        const ledger = await auth(request(app).get("/invest/ledger"));
+        expect(ledger.body.simulatedFills).toBe(false);
+    });
+
+    it("keeps execution status behind the owner gate", async () => {
+        const { app } = await build();
+        expect((await request(app).get("/invest/execution")).status).toBe(401);
+    });
+
     it("walks sync, propose, approve, execute over HTTP", async () => {
         const { app } = await build();
         const sync = await auth(request(app).post("/invest/sync"));

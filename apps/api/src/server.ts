@@ -213,6 +213,13 @@ export interface ServerDeps {
     /** Shared so tests can drive sign-in; one is made per server otherwise. */
     sessions?: SessionStore;
     /**
+     * What pressing execute would actually do.
+     *
+     * Config alone cannot answer this: `INVEST_MODE=mainnet` with no key still simulates. An owner
+     * about to approve a trade needs the real answer, not the configured intention.
+     */
+    executionStatus?: () => Promise<ExecutionStatusView>;
+    /**
      * Whether storage is answering. Absent means the question is not asked and health says so.
      *
      * Checked on every health request rather than cached from start-up: a process that started fine and
@@ -286,6 +293,21 @@ export function gapView(g: InvestmentGap) {
         surplusNeededUsdcMinor: g.surplusNeeded.toString(),
         revenueNeededUsdcMinor: g.revenueNeeded.toString(),
     };
+}
+
+/** What the agent would do onchain if the owner executed right now. */
+export interface ExecutionStatusView {
+    /** True only when a real swap would be sent: mainnet, an executor, a key, a cap. */
+    willSendRealSwaps: boolean;
+    /** Why not, when it would not. */
+    why?: string;
+    /** The wallet the swaps would come from. */
+    address?: string;
+    capUsdcMinor?: string;
+    spentUsdcMinor?: string;
+    remainingUsdcMinor?: string;
+    /** Transactions that were signed and whose outcome is not yet known. */
+    unresolved: { key: string; symbol: string; txHash?: string | undefined; usdcInMinor: string }[];
 }
 
 /** Mandate version as JSON, with every limit as a decimal string of minor units. */
@@ -796,10 +818,13 @@ export function buildServer(deps: ServerDeps): BuiltServer {
 
     const engine = deps.engine;
     if (engine !== undefined) {
-        app.get("/invest/ledger", owner, (_req: Request, res: Response) => {
+        app.get("/invest/ledger", owner, async (_req: Request, res: Response) => {
+            // Asked, not recomputed: the execution status is the one thing that knows whether a real
+            // swap would be sent, and two places deciding that is two places to disagree.
+            const status = await deps.executionStatus?.();
             res.json({
                 mode: engine.treasury.ledger.all()[0]?.mode ?? config.investMode,
-                simulatedFills: config.investMode !== "mainnet",
+                simulatedFills: status === undefined ? true : !status.willSendRealSwaps,
                 balances: Object.fromEntries(
                     [...engine.treasury.ledger.balances()].map(([a, v]) => [a, v.toString()]),
                 ),
@@ -894,6 +919,18 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             } catch (e) {
                 res.status(404).json({ error: e instanceof Error ? e.message : String(e) });
             }
+        });
+
+        // What pressing execute would do, before it is pressed.
+        app.get("/invest/execution", owner, async (_req: Request, res: Response) => {
+            if (deps.executionStatus === undefined) {
+                return void res.json({
+                    willSendRealSwaps: false,
+                    why: "this server was built without an executor, so fills are simulated",
+                    unresolved: [],
+                });
+            }
+            res.json(await deps.executionStatus());
         });
 
         app.get("/invest/proposals", owner, (_req: Request, res: Response) => {

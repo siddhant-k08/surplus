@@ -224,6 +224,17 @@ export interface InvestLedger {
     gap: InvestmentGap;
 }
 
+/** What pressing execute would actually do. Asked of the agent, never inferred from config. */
+export interface ExecutionStatus {
+    willSendRealSwaps: boolean;
+    why?: string;
+    address?: string;
+    capUsdcMinor?: string;
+    spentUsdcMinor?: string;
+    remainingUsdcMinor?: string;
+    unresolved: { key: string; symbol: string; txHash?: string; usdcInMinor: string }[];
+}
+
 export interface ExecuteResult {
     id: string;
     simulated: boolean;
@@ -243,6 +254,7 @@ export const api = {
     ledger: () => call<InvestLedger>("/invest/ledger"),
 
     sync: () => post<SyncResult>("/invest/sync"),
+    execution: () => call<ExecutionStatus>("/invest/execution"),
     propose: (id?: string) => post<Proposal>("/invest/propose", id === undefined ? {} : { id }),
     approve: (id: string, signature: string) =>
         post<{ id: string; approved: boolean; expiresAt: string; signer: string }>("/invest/approve", {

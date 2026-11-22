@@ -3,6 +3,7 @@ import type { InvestmentGap } from "./api";
 import {
     api, formatUsdc, ApiError,
     type Mandate, type OwnerBrief, type Proposal, type SyncResult, type InvestLedger, type ExecuteResult,
+    type ExecutionStatus,
 } from "./api";
 import { signTypedData, currentAccount, describeWalletError } from "./wallet";
 
@@ -24,15 +25,17 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
     const [sync, setSync] = useState<SyncResult | null>(null);
     const [proposal, setProposal] = useState<Proposal | null>(null);
     const [fills, setFills] = useState<ExecuteResult | null>(null);
+    const [execution, setExecution] = useState<ExecutionStatus | null>(null);
     const [busy, setBusy] = useState<Busy>(null);
     const [note, setNote] = useState<Note | null>(null);
     const [left, setLeft] = useState<number | null>(null);
     const deadline = useRef<number | null>(null);
 
     const refresh = useCallback(async () => {
-        const [m, l] = await Promise.all([api.mandate(), api.ledger()]);
+        const [m, l, x] = await Promise.all([api.mandate(), api.ledger(), api.execution()]);
         setMandate(m);
         setLedger(l);
+        setExecution(x);
         try {
             setBrief(await api.brief());
         } catch {
@@ -180,6 +183,8 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
                             <h1>{headline(proposal, investable)}</h1>
                             <p className="lede">{subhead(proposal, investable, sync)}</p>
 
+                            {execution !== null && <RealMoneyNotice execution={execution} />}
+
                             <div className="cta">
                                 {proposal === null ? (
                                     <>
@@ -206,7 +211,12 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
                                 ) : proposal.state === "APPROVED" ? (
                                     <>
                                         <button className="btn" onClick={() => void doExecute()} disabled={busy !== null}>
-                                            {busy === "execute" ? "Re-quoting and filling…" : "Execute"} <span aria-hidden="true">↗</span>
+                                            {busy === "execute"
+                                                ? "Re-quoting and filling…"
+                                                : execution?.willSendRealSwaps === true
+                                                    ? "Execute with real money"
+                                                    : "Execute, simulated"}{" "}
+                                            <span aria-hidden="true">↗</span>
                                         </button>
                                         <button className="textlink" onClick={() => setProposal(null)} disabled={busy !== null}>
                                             Discard
@@ -419,6 +429,40 @@ export function gapLines(gap: InvestmentGap | undefined): string[] {
         `${formatUsdc(gap.revenueNeededUsdcMinor)} USDC more revenue would make a trade possible: ${parts.join(", then ")}.`,
         "Selling another brief also costs something to produce, so that figure is a floor, not a forecast.",
     ];
+}
+
+/**
+ * What executing would really do, said before the button is pressed rather than after.
+ *
+ * The distinction is the whole difference between a rehearsal and spending money, and it cannot be
+ * read off the configuration: mainnet with no key still simulates. So the agent is asked, and what it
+ * answers is what is shown.
+ */
+function RealMoneyNotice({ execution }: { execution: ExecutionStatus }) {
+    const real = execution.willSendRealSwaps;
+    return (
+        <div className={real ? "notice real" : "notice"}>
+            <p>
+                <strong>{real ? "Executing will spend real money." : "Fills are simulated."}</strong>{" "}
+                {real
+                    ? `Swaps are sent from ${execution.address ?? "the execution wallet"} on Base mainnet.`
+                    : execution.why ?? "No token moves and the book is tagged sim."}
+            </p>
+            {real && execution.remainingUsdcMinor !== undefined && (
+                <p className="note">
+                    {formatUsdc(execution.remainingUsdcMinor)} USDC of the spend cap is left,{" "}
+                    {formatUsdc(execution.spentUsdcMinor ?? "0")} already committed.
+                </p>
+            )}
+            {execution.unresolved.length > 0 && (
+                <p className="note error">
+                    {execution.unresolved.length} transaction(s) signed with no known outcome:{" "}
+                    {execution.unresolved.map((x) => `${x.symbol} ${x.txHash?.slice(0, 10) ?? "unsent"}`).join(", ")}.
+                    The agent resolves these against the chain when it starts.
+                </p>
+            )}
+        </div>
+    );
 }
 
 function headline(p: Proposal | null, investable: string): string {

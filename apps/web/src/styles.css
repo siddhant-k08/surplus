@@ -229,3 +229,14 @@
 .recover .legs{margin-top:1.25rem}
 .recover .sym{color:var(--cream);border-bottom:1px solid rgba(244,237,224,.35)}
 .recover .sym:hover{border-bottom-color:var(--coral)}
+
+/* What executing would really do. Quiet when it is a rehearsal, impossible to miss when it is not:
+   the difference is money, and it should not take reading a status line to notice. */
+.notice{
+  max-width:44rem;margin:1.25rem 0;padding:.9rem 1rem;
+  border:1px solid var(--glass-line);border-radius:10px;background:rgba(10,16,35,.42);
+}
+.notice p{margin:0}
+.notice .note{margin-top:.4rem}
+.notice.real{border-color:var(--coral);background:rgba(255,107,91,.08)}
+.notice.real strong{color:var(--coral)}
