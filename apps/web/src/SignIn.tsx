@@ -47,9 +47,9 @@ export function SignIn({ onSignedIn }: { onSignedIn: (address: string) => void }
         <>
             <div className="shell flex items-center gap-7 py-4">
                 <Wordmark />
-                <nav aria-label="Sections" className="ml-auto flex items-center gap-3">
+                <nav aria-label="Main" className="ml-auto flex items-center gap-3">
                     <Chip><Led />Base Sepolia</Chip>
-                    <Button href="/" tone="ghost" size="sm">Storefront</Button>
+                    <Button href="/" tone="ghost" size="sm">Home</Button>
                 </nav>
             </div>
 

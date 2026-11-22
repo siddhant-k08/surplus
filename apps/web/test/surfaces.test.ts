@@ -7,6 +7,7 @@ import {
 } from "../src/terms";
 import { termsFromDraft } from "../src/MandatePanel";
 import { evidenceCount, count } from "../src/Evidence";
+import { route, movedTo } from "../src/App";
 import type { MandateTerms, Proposal, SyncResult, BriefClaim } from "../src/api";
 
 const TX = "0x" + "cd".repeat(32);
@@ -235,5 +236,55 @@ describe("evidence counting", () => {
         expect(count(1, "claim")).toBe("1 claim");
         expect(count(2, "claim")).toBe("2 claims");
         expect(count(2, "company", "companies")).toBe("2 companies");
+    });
+});
+
+/**
+ * The router is the one piece of this app that decides what a person sees, so it is tested like
+ * logic rather than trusted like markup. The cases that matter are the ones a URL bar produces: a
+ * trailing slash, a retired path somebody shared, and a receipt id that is not one.
+ */
+describe("routing", () => {
+    it("finds every page", () => {
+        expect(route("/").k).toBe("home");
+        expect(route("/themes").k).toBe("themes");
+        expect(route("/filings").k).toBe("filings");
+        expect(route("/app").k).toBe("app");
+        expect(route("/app/portfolio").k).toBe("portfolio");
+    });
+
+    it("reads the desk's three tabs", () => {
+        expect(route("/desk")).toEqual({ k: "desk", tab: "decision" });
+        expect(route("/desk/mandate")).toEqual({ k: "desk", tab: "mandate" });
+        expect(route("/desk/book")).toEqual({ k: "desk", tab: "book" });
+    });
+
+    it("ignores a trailing slash, which a browser and a shared link both add", () => {
+        expect(route("/themes/").k).toBe("themes");
+        expect(route("/app/portfolio/").k).toBe("portfolio");
+        expect(route("/").k).toBe("home");
+    });
+
+    it("carries a receipt id out of the path", () => {
+        const found = route("/r/abcdef0123456789");
+        expect(found).toEqual({ k: "receipt", id: "abcdef0123456789" });
+    });
+
+    it("refuses a receipt id that is too short or not an id at all", () => {
+        expect(route("/r/short").k).toBe("missing");
+        expect(route("/r/has spaces in it here").k).toBe("missing");
+        expect(route("/r/../../etc/passwd").k).toBe("missing");
+    });
+
+    it("sends a retired path to the page that replaced it", () => {
+        expect(movedTo("/library")).toBe("/app/portfolio");
+        expect(movedTo("/store")).toBe("/app");
+        expect(movedTo("/themes")).toBe(null);
+        expect(movedTo("/nope")).toBe(null);
+    });
+
+    it("answers anything else with the page that offers a way out", () => {
+        expect(route("/invest").k).toBe("missing");
+        expect(route("/app/portfolio/extra").k).toBe("missing");
     });
 });

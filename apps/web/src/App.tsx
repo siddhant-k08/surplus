@@ -1,20 +1,25 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { api, get } from "./api";
-import { SignIn } from "./SignIn";
-import { Desk, type DeskTab } from "./Desk";
-import { Store } from "./Store";
+import { Suspense, lazy, useEffect, useState, useSyncExternalStore } from "react";
+import type { DeskTab } from "./Desk";
+import { Landing } from "./Landing";
+import { Themes } from "./Themes";
+import { Filings } from "./Filings";
 import { Receipt } from "./Receipt";
-import { Library } from "./Library";
+import { Button, Footer, SiteHeader, Spine } from "./Chrome";
 import { Motion } from "./motion";
 
-type Session = { state: "loading" } | { state: "out" } | { state: "in"; address: string };
+/** The owner's desk is a chunk of its own: see Owner.tsx. */
+const Owner = lazy(() => import("./Owner"));
+
+/** The buying pages, with wagmi and viem, loaded only when one is opened: see WalletPages.tsx. */
+const WalletPages = lazy(() => import("./WalletPages"));
 
 /**
- * Four surfaces, one bundle: the storefront, a receipt, and the desk's three tabs.
+ * The pages, and the twenty lines of routing that find them.
  *
- * A router library would be four hundred lines of dependency for five routes that do not nest. This
- * is the whole of it: read the path, push a new one, tell React when it changed. Links still work as
- * links, so middle-click and open-in-new-tab behave; only in-app navigation is intercepted.
+ * Four public pages, the app, a receipt, and the desk's three tabs. A router library would be four
+ * hundred lines of dependency for routes that do not nest. This is the whole of it: read the path,
+ * push a new one, tell React when it changed. Links still work as links, so middle-click and
+ * open-in-new-tab behave; only in-app navigation is intercepted.
  */
 const listeners = new Set<() => void>();
 const subscribe = (fn: () => void): (() => void) => {
@@ -34,72 +39,134 @@ if (typeof window !== "undefined") {
     addEventListener("popstate", () => { for (const fn of listeners) fn(); });
 }
 
-const TITLES: Record<string, string> = {
-    store: "Surplus: cited stock research, paid in USDC",
+/** Where a path that used to work now lives. An old shared link is not allowed to become a 404. */
+const MOVED: Record<string, string> = {
+    "/library": "/app/portfolio",
+    "/store": "/app",
+};
+
+/** Where a retired path now lives, or null when the path was never one of ours. */
+export const movedTo = (path: string): string | null => MOVED[path] ?? null;
+
+type Route =
+    | { k: "home" }
+    | { k: "themes" }
+    | { k: "filings" }
+    | { k: "app" }
+    | { k: "portfolio" }
+    | { k: "receipt"; id: string }
+    | { k: "desk"; tab: DeskTab }
+    | { k: "missing" };
+
+export function route(path: string): Route {
+    const clean = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+    const receipt = /^\/r\/([A-Za-z0-9_-]{10,64})$/.exec(clean);
+    if (receipt !== null) return { k: "receipt", id: receipt[1]! };
+    switch (clean) {
+        case "":
+        case "/": return { k: "home" };
+        case "/themes": return { k: "themes" };
+        case "/filings": return { k: "filings" };
+        case "/app": return { k: "app" };
+        case "/app/portfolio": return { k: "portfolio" };
+        case "/desk": return { k: "desk", tab: "decision" };
+        case "/desk/mandate": return { k: "desk", tab: "mandate" };
+        case "/desk/book": return { k: "desk", tab: "book" };
+        default: return { k: "missing" };
+    }
+}
+
+const TITLES: Record<Route["k"], string> = {
+    home: "Surplus: cited stock research, paid in USDC",
+    themes: "Themes: Surplus",
+    filings: "Filings read: Surplus",
+    app: "Buy a brief: Surplus",
+    portfolio: "Your portfolio: Surplus",
     receipt: "Your brief: Surplus",
-    library: "My briefs: Surplus",
-    decision: "Treasury: Surplus",
-    mandate: "Mandate: Surplus",
-    book: "The book: Surplus",
+    desk: "Owner desk: Surplus",
+    missing: "Not found: Surplus",
 };
 
 export function App() {
     const path = useSyncExternalStore(subscribe, current, current);
-    const receipt = /^\/r\/([A-Za-z0-9_-]{10,64})$/.exec(path);
-    const tab: DeskTab | null =
-        path === "/desk" ? "decision" : path === "/desk/mandate" ? "mandate" : path === "/desk/book" ? "book" : null;
-    const library = path === "/library";
-    const surface = receipt !== null ? "receipt" : library ? "library" : tab ?? "store";
+
+    // A moved path is replaced rather than pushed, so Back goes where the visitor came from and not
+    // to the old URL that would only move them again.
+    const moved = movedTo(path) ?? undefined;
+    useEffect(() => {
+        if (moved === undefined) return;
+        history.replaceState(null, "", moved);
+        for (const fn of listeners) fn();
+    }, [moved]);
+
+    const here = route(moved ?? path);
 
     useEffect(() => {
-        document.title = TITLES[surface] ?? TITLES.store!;
-    }, [surface]);
+        document.title = TITLES[here.k];
+    }, [here.k]);
 
     return (
         <Motion>
             {/* The first thing a keyboard reaches, so the nav is not a toll gate on every page. */}
             <a className="skip" href="#main">Skip to the main content</a>
-            {receipt !== null ? (
-                <Receipt id={receipt[1]!} />
-            ) : library ? (
-                <LibraryPage />
-            ) : tab !== null ? (
-                <Owner tab={tab} />
+            {here.k === "receipt" ? (
+                <Receipt id={here.id} />
+            ) : here.k === "desk" ? (
+                <Waiting.Boundary><Owner tab={here.tab} /></Waiting.Boundary>
+            ) : here.k === "portfolio" || here.k === "app" ? (
+                <Waiting.Boundary><WalletPages page={here.k} /></Waiting.Boundary>
+            ) : here.k === "themes" ? (
+                <Themes />
+            ) : here.k === "filings" ? (
+                <Filings />
+            ) : here.k === "missing" ? (
+                <Missing path={path} />
             ) : (
-                <Store />
+                <Landing />
             )}
         </Motion>
     );
 }
 
-/** The library needs the same public terms the storefront reads: network, asset and the price. */
-function LibraryPage() {
-    const [terms, setTerms] = useState<{ network: string; asset: string; briefPriceUsd: string } | null>(null);
-    useEffect(() => {
-        get<{ network: string; asset: string; briefPriceUsd: string }>("/catalogue").then(setTerms).catch(() => setTerms(null));
-    }, []);
-    return <Library terms={terms} />;
-}
-
-function Owner({ tab }: { tab: DeskTab }) {
-    const [session, setSession] = useState<Session>({ state: "loading" });
-
-    useEffect(() => {
-        api
-            .me()
-            .then((me) =>
-                setSession(me.signedIn && me.address !== null ? { state: "in", address: me.address } : { state: "out" }),
-            )
-            .catch(() => setSession({ state: "out" }));
-    }, []);
-
-    if (session.state === "loading") {
-        return (
-            <main id="main" className="shell grid min-h-[70vh] content-center">
-                <p className="font-mono text-sm text-dim" role="status">Checking whether you are signed in…</p>
+/** A dead end that says where the live ones are, rather than an apology. */
+function Missing({ path }: { path: string }) {
+    return (
+        <>
+            <SiteHeader here="home" />
+            <main id="main">
+                <section className="py-[clamp(3rem,7vw,5rem)]">
+                    <div className="shell band">
+                        <Spine label="Not found" />
+                        <div className="min-w-0">
+                            <h1 className="text-[clamp(2rem,4.2vw,3rem)] font-medium leading-[1.04] tracking-[-0.045em]">
+                                There is no page at <span className="font-mono text-dim">{path}</span>
+                            </h1>
+                            <p className="measure mt-5">
+                                If you are looking for a brief you bought, it is in your portfolio: the wallet that paid
+                                is the way back in.
+                            </p>
+                            <div className="mt-7 flex flex-wrap gap-3">
+                                <Button href="/app">Open app <span aria-hidden="true">↗</span></Button>
+                                <Button href="/app/portfolio" tone="ghost">Your portfolio</Button>
+                                <Button href="/" tone="ghost">Home</Button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </main>
-        );
-    }
-    if (session.state === "out") return <SignIn onSignedIn={(address) => setSession({ state: "in", address })} />;
-    return <Desk tab={tab} address={session.address} onSignedOut={() => setSession({ state: "out" })} />;
+            <Footer />
+        </>
+    );
 }
+
+/** What stands in while a lazily loaded page arrives, and the boundary that shows it. */
+function Waiting() {
+    return (
+        <main id="main" className="shell grid min-h-[70vh] content-center">
+            <p className="font-mono text-sm text-dim" role="status">Opening…</p>
+        </main>
+    );
+}
+Waiting.Boundary = function Boundary({ children }: { children: React.ReactNode }) {
+    return <Suspense fallback={<Waiting />}>{children}</Suspense>;
+};

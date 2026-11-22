@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useReducedMotion } from "motion/react";
-import { motion } from "./motion";
+import { CountUp, Reveal, motion } from "./motion";
 
 /**
  * The parts every surface shares.
@@ -61,9 +61,17 @@ export function TopBar({ nav, right }: { nav: ReactNode; right?: ReactNode }) {
                 }`}
             >
                 <Wordmark />
-                <nav aria-label="Sections" className="hidden gap-6 md:flex">{nav}</nav>
-                <div className="ml-auto flex items-center gap-3">{right}</div>
+                <nav aria-label="Main" className="hidden gap-6 md:flex">{nav}</nav>
+                <div className="ml-auto flex items-center gap-2.5">{right}</div>
             </div>
+            {/* On a phone the same four links sit in one scrolling row rather than behind a menu
+                button. Four links do not need a drawer, and a drawer is another state to get wrong. */}
+            <nav
+                aria-label="Main"
+                className="shell flex gap-5 overflow-x-auto border-t border-line pb-2.5 pt-2 [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden"
+            >
+                {nav}
+            </nav>
         </header>
     );
 }
@@ -175,5 +183,111 @@ export function Addr({ children }: { children: string }) {
         <span className="rounded-[3px] bg-pill px-1.5 py-0.5 text-ink" title={children}>
             {short}
         </span>
+    );
+}
+
+/** Which of the four places in the site a page is. Drives the nav's current mark. */
+export type Place = "home" | "themes" | "filings" | "portfolio" | "app" | "desk";
+
+/**
+ * The site's navigation: four places, each a page of its own.
+ *
+ * It used to be four anchors into one scrolling page, which is a table of contents pretending to be
+ * a nav: clicking "Treasury" moved you down the document you were already reading. These go
+ * somewhere. The transactional surface is not among them, because it is reached by the one button
+ * that means business.
+ */
+export function SiteNav({ here }: { here: Place }) {
+    return (
+        <>
+            <NavLink href="/" current={here === "home"}>Home</NavLink>
+            <NavLink href="/themes" current={here === "themes"}>Themes</NavLink>
+            <NavLink href="/filings" current={here === "filings"}>Filings</NavLink>
+            <NavLink href="/app/portfolio" current={here === "portfolio"}>Portfolio</NavLink>
+        </>
+    );
+}
+
+/**
+ * The bar every public page wears.
+ *
+ * `right` is where a page says what is true of it: the chain it trades on, the wallet that is
+ * connected, the one way in. Everything left of that is identical everywhere, which is the point of
+ * a nav.
+ */
+export function SiteHeader({ here, right }: { here: Place; right?: ReactNode }) {
+    return <TopBar nav={<SiteNav here={here} />} right={right} />;
+}
+
+/** The lime button that crosses from reading about the agent to using it. */
+export function OpenApp({ size = "sm" }: { size?: "md" | "sm" }) {
+    return (
+        <Button href="/app" size={size}>
+            Open app <span aria-hidden="true">↗</span>
+        </Button>
+    );
+}
+
+/**
+ * A row of figures across the full width, the same on every page that has numbers.
+ *
+ * Borders rather than cards. Four rounded panels floating on a dark ground is the look of a template;
+ * a ruled row reads like the ledger the numbers come from.
+ */
+export function Figures({ cells }: { cells: { k: string; v: string; unit?: string }[] }) {
+    return (
+        <div className="grid border-y border-line sm:grid-cols-2 lg:grid-cols-4">
+            {cells.map((c) => (
+                <div
+                    key={c.k}
+                    className="border-b border-line px-[var(--gut)] py-5 last:border-b-0 sm:border-r sm:last:border-r-0 lg:border-b-0"
+                >
+                    <span className="font-mono text-[0.6875rem] font-medium uppercase tracking-[0.11em] text-dim">{c.k}</span>
+                    <span className="mt-2.5 block font-mono text-[1.75rem] leading-none tracking-[-0.025em] text-ink">
+                        {/^[\d.]+$/.test(c.v) ? <CountUp value={c.v} /> : c.v}
+                        {c.unit !== undefined && c.unit !== "" && (
+                            <small className="ml-1.5 text-[0.6875rem] font-normal tracking-normal text-dim">{c.unit}</small>
+                        )}
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+/**
+ * A short line of prose, in the one voice the app uses for outcomes.
+ *
+ * Plain for what is about to happen, lime for what worked, red for what did not. Alerts get
+ * `role=alert` so a screen reader is told rather than left to notice.
+ */
+export function Note({
+    children,
+    tone = "plain",
+    alert,
+    status,
+}: {
+    children: ReactNode;
+    tone?: "plain" | "good" | "bad";
+    alert?: boolean;
+    status?: boolean;
+}) {
+    const colour = tone === "bad" ? "text-flag" : tone === "good" ? "text-lime" : "text-dim";
+    return (
+        <p role={alert === true ? "alert" : status === true ? "status" : undefined} className={`measure m-0 text-sm ${colour}`}>
+            {children}
+        </p>
+    );
+}
+
+/** The spine label and optional aside that names a band of a page. */
+export function Spine({ label, aside }: { label: string; aside?: ReactNode }) {
+    return (
+        <div className="lg:sticky lg:top-24 lg:self-start">
+            <Reveal>
+                <p className="m-0 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.16em] text-dim">{label}</p>
+                {aside !== undefined && <div className="mt-3 text-sm text-dim">{aside}</div>}
+            </Reveal>
+        </div>
     );
 }

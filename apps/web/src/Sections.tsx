@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, useInView, useReducedMotion } from "motion/react";
 import { Reveal, motion } from "./motion";
-import { Led } from "./Chrome";
+import { Led, Spine } from "./Chrome";
 
 /**
  * The storefront's middle: how a brief is built, what one looks like, and what the treasury does.
@@ -42,14 +42,7 @@ export function Band({
     return (
         <section id={id} className="border-b border-line py-[clamp(3rem,6vw,4.5rem)]">
             <div className="shell band">
-                <div className="lg:sticky lg:top-24 lg:self-start">
-                    <Reveal>
-                        <p className="m-0 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.16em] text-dim">
-                            {label}
-                        </p>
-                        {aside !== undefined && <div className="mt-3 text-sm text-dim">{aside}</div>}
-                    </Reveal>
-                </div>
+                <Spine label={label} aside={aside} />
                 <div className="min-w-0">{children}</div>
             </div>
         </section>

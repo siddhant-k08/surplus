@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, formatUsdc, get, type PaidReceipt } from "./api";
 import { EvidenceRow, SourceLink, WhatAQuoteProves, count } from "./Evidence";
-import { Button, Chip, Footer, Led, NavLink, TopBar } from "./Chrome";
+import { Button, Chip, Footer, Led, SiteHeader } from "./Chrome";
 import { MaskedLine, Reveal, motion, riseItem, stagger } from "./motion";
 import { explorerTx, networkName, shortHash } from "./explorer";
 
@@ -206,9 +206,14 @@ export function Receipt({ id }: { id: string }) {
 function Shell({ children }: { children: React.ReactNode }) {
     return (
         <>
-            <TopBar
-                nav={<><NavLink href="/">Research</NavLink><NavLink href="/#recover">Find my briefs</NavLink></>}
-                right={<><Chip><Led />Base Sepolia</Chip><Button href="/desk" tone="ghost" size="sm">Open desk</Button></>}
+            <SiteHeader
+                here="app"
+                right={
+                    <>
+                        <Chip><Led />Base Sepolia</Chip>
+                        <Button href="/app/portfolio" tone="ghost" size="sm">Your portfolio</Button>
+                    </>
+                }
             />
             {children}
         </>

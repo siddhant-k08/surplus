@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toSignableJson, chainIdFromCaip } from "../src/wallet";
+import { signableTypedData, chainIdFromCaip } from "../src/wallet";
 import { describePaymentFailure, checkPaymentSignature } from "../src/buy";
 import { privateKeyToAccount } from "viem/accounts";
 
@@ -7,38 +7,46 @@ import { privateKeyToAccount } from "viem/accounts";
  * The browser code had no tests, and three signing bugs in a row lived in it. These cover the parts
  * that are pure logic, which is where the bugs were.
  */
-describe("toSignableJson", () => {
-    it("serialises an EIP-3009 authorisation, whose amounts are bigints", () => {
-        // the shape @x402/evm hands the signer
-        const payload = {
-            domain: { name: "USDC", version: "2", chainId: 84532, verifyingContract: "0x036C" },
-            types: { TransferWithAuthorization: [{ name: "value", type: "uint256" }] },
-            primaryType: "TransferWithAuthorization",
-            message: {
-                from: "0x8Ab8",
-                to: "0xc0cB",
-                value: 10000n,
-                validAfter: 0n,
-                validBefore: 1795000000n,
-                nonce: "0xdead",
-            },
-        };
-        const json = JSON.parse(toSignableJson(payload)) as { message: Record<string, unknown> };
-        expect(json.message.value).toBe("10000");
-        expect(json.message.validAfter).toBe("0");
-        expect(json.message.validBefore).toBe("1795000000");
+describe("signableTypedData", () => {
+    // the shape @x402/evm hands the signer, and the shape the agent's own payloads arrive in
+    const authorisation = {
+        domain: { name: "USDC", version: "2", chainId: 84532, verifyingContract: "0x036C" },
+        types: {
+            EIP712Domain: [
+                { name: "name", type: "string" },
+                { name: "version", type: "string" },
+                { name: "chainId", type: "uint256" },
+            ],
+            TransferWithAuthorization: [{ name: "value", type: "uint256" }],
+        },
+        primaryType: "TransferWithAuthorization",
+        message: { from: "0x8Ab8", to: "0xc0cB", value: 10000n, validBefore: 1795000000n },
+    };
+
+    it("drops the declared domain type, which viem derives from the domain itself", () => {
+        const out = signableTypedData(authorisation);
+        expect(out.types.EIP712Domain).toBeUndefined();
+        expect(out.types.TransferWithAuthorization).toEqual([{ name: "value", type: "uint256" }]);
     });
 
-    it("does not round a value too large for a double", () => {
-        const big = 2n ** 70n + 1n;
-        const json = JSON.parse(toSignableJson({ v: big })) as { v: string };
-        expect(json.v).toBe(big.toString());
-        expect(BigInt(json.v)).toBe(big);
+    it("changes nothing else, because the signature is over what was offered", () => {
+        const out = signableTypedData(authorisation);
+        expect(out.domain).toBe(authorisation.domain);
+        expect(out.primaryType).toBe(authorisation.primaryType);
+        expect(out.message).toBe(authorisation.message);
+        // bigints reach viem as bigints: a uint256 is not routed through JSON any more
+        expect(out.message.value).toBe(10000n);
     });
 
-    it("leaves everything that is not a bigint alone", () => {
-        const json = toSignableJson({ a: "1", b: 2, c: true, d: null, e: [1, "2"] });
-        expect(json).toBe('{"a":"1","b":2,"c":true,"d":null,"e":[1,"2"]}');
+    it("leaves a payload that never declared the domain type alone", () => {
+        const plain = { ...authorisation, types: { TransferWithAuthorization: [{ name: "value", type: "uint256" }] } };
+        expect(signableTypedData(plain).types).toEqual(plain.types);
+    });
+
+    it("does not mutate what it was given", () => {
+        const before = Object.keys(authorisation.types).length;
+        signableTypedData(authorisation);
+        expect(Object.keys(authorisation.types).length).toBe(before);
     });
 });
 

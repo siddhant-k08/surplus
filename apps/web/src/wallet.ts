@@ -1,81 +1,81 @@
+import { erc20Abi } from "viem";
+import {
+    connect as wagmiConnect,
+    disconnect as wagmiDisconnect,
+    getAccount,
+    readContract,
+    signTypedData as wagmiSignTypedData,
+    switchChain,
+} from "wagmi/actions";
+import { config } from "./wagmi";
+
 /**
- * The owner's wallet.
+ * The wallet, as the rest of the app sees it.
  *
- * Deliberately thin: the desk needs an address and the ability to sign typed data, which is exactly the
- * interface an injected provider gives and exactly what the x402 client wanted too. No wallet library,
- * no connector registry, no chain switching beyond asking.
+ * A thin imperative face over wagmi, kept because most of this app is not a React component: the
+ * x402 payment stack wants a `signTypedData(address, payload)` it can call, and so do the sign-in and
+ * receipt-recovery flows. Everything here goes through the same wagmi store the hooks read, so there
+ * is exactly one answer to "which wallet is connected" no matter who asks.
  */
-
-interface Eip1193Provider {
-    request(args: { method: string; params?: unknown[] }): Promise<unknown>;
-    on?(event: string, handler: (...args: unknown[]) => void): void;
-}
-
-declare global {
-    interface Window {
-        ethereum?: Eip1193Provider;
-    }
-}
 
 export class WalletError extends Error {}
 
-export const hasWallet = (): boolean => typeof window !== "undefined" && window.ethereum !== undefined;
+/** Coinbase Wallet covers extension, mobile and a Smart Wallet passkey; injected is what is installed. */
+export type WalletKind = "coinbase" | "injected";
 
-function provider(): Eip1193Provider {
-    const p = window.ethereum;
-    if (p === undefined) {
-        throw new WalletError("No browser wallet found. Install one, or use the owner token from a script.");
-    }
-    return p;
+const TYPE: Record<WalletKind, string> = { coinbase: "coinbaseWallet", injected: "injected" };
+
+/** Coinbase Wallet needs nothing installed, so it is always a real option. */
+export const canUseCoinbase = (): boolean => typeof window !== "undefined";
+
+/** Whether a browser extension is actually present. Offering a button that cannot work is worse than one fewer. */
+export const hasWallet = (): boolean =>
+    typeof window !== "undefined" && (window as { ethereum?: unknown }).ethereum !== undefined;
+
+function connectorFor(kind: WalletKind) {
+    const wanted = config.connectors.find((c) => c.type === TYPE[kind]);
+    if (wanted === undefined) throw new WalletError("That wallet is not available in this build.");
+    return wanted;
 }
 
-/** Asks the wallet to connect and returns the account it offers. */
-export async function connect(): Promise<string> {
-    const accounts = (await provider().request({ method: "eth_requestAccounts" })) as string[];
-    const first = accounts[0];
+/** The wallet kind currently connected, if any. */
+export function connectedKind(): WalletKind | null {
+    const type = getAccount(config).connector?.type;
+    if (type === TYPE.coinbase) return "coinbase";
+    if (type === TYPE.injected) return "injected";
+    return null;
+}
+
+/**
+ * Connects a wallet and returns the account it offers.
+ *
+ * Asking for the connector that is already connected is not an error: it answers with the account it
+ * already has, rather than throwing at a person who clicked the button they were already using.
+ */
+export async function connect(kind: WalletKind = "injected"): Promise<string> {
+    const already = getAccount(config);
+    if (already.isConnected && already.address !== undefined && already.connector?.type === TYPE[kind]) {
+        return already.address;
+    }
+    const result = await wagmiConnect(config, { connector: connectorFor(kind) });
+    const first = result.accounts[0];
     if (first === undefined) throw new WalletError("The wallet connected but offered no account.");
     return first;
 }
 
+/** Forgets the connected wallet, so the next connect can choose a different one. */
+export async function disconnect(): Promise<void> {
+    await wagmiDisconnect(config);
+}
+
 /** The account already connected, if any. Never prompts. */
-export async function currentAccount(): Promise<string | null> {
-    if (!hasWallet()) return null;
-    try {
-        const accounts = (await provider().request({ method: "eth_accounts" })) as string[];
-        return accounts[0] ?? null;
-    } catch {
-        return null;
-    }
+export function currentAccount(): string | null {
+    return getAccount(config).address ?? null;
 }
 
-export async function chainId(): Promise<number> {
-    const hex = (await provider().request({ method: "eth_chainId" })) as string;
-    return Number.parseInt(hex, 16);
+export function chainId(): number | undefined {
+    return getAccount(config).chainId;
 }
-
-/** The chains this app can ask a wallet to switch to, with what a wallet needs to add an unknown one. */
-const CHAINS: Record<number, {
-    chainId: string;
-    chainName: string;
-    rpcUrls: string[];
-    nativeCurrency: { name: string; symbol: string; decimals: number };
-    blockExplorerUrls: string[];
-}> = {
-    84532: {
-        chainId: "0x14a34",
-        chainName: "Base Sepolia",
-        rpcUrls: ["https://sepolia.base.org"],
-        nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
-        blockExplorerUrls: ["https://sepolia.basescan.org"],
-    },
-    8453: {
-        chainId: "0x2105",
-        chainName: "Base",
-        rpcUrls: ["https://mainnet.base.org"],
-        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-        blockExplorerUrls: ["https://basescan.org"],
-    },
-};
 
 /** The chain id out of a CAIP-2 string like `eip155:84532`. */
 export function chainIdFromCaip(network: string): number | null {
@@ -88,89 +88,99 @@ export function chainIdFromCaip(network: string): number | null {
  *
  * Without this the first thing a buyer meets is a failure they cannot read: the payment is denominated
  * in USDC on one chain and their wallet is pointed at another, so the signature is either refused or
- * settles against nothing. A wallet that has never seen the chain is offered it rather than left stuck.
+ * settles against nothing. wagmi offers the chain to a wallet that has never seen it, from the chain
+ * definitions in the config, so there is no second table of RPC urls to keep correct here.
  */
 export async function ensureChain(wanted: number): Promise<void> {
-    if (await chainId() === wanted) return;
-    const chain = CHAINS[wanted];
-    if (chain === undefined) {
+    if (getAccount(config).chainId === wanted) return;
+    if (!config.chains.some((c) => c.id === wanted)) {
         throw new WalletError(`This payment needs chain ${wanted}. Switch your wallet to it and try again.`);
     }
-    try {
-        await provider().request({ method: "wallet_switchEthereumChain", params: [{ chainId: chain.chainId }] });
-    } catch (e) {
-        // 4902: the wallet does not know this chain yet, so offer it rather than leaving a dead end
-        if ((e as { code?: number }).code !== 4902) throw e;
-        await provider().request({ method: "wallet_addEthereumChain", params: [chain] });
-    }
-    if (await chainId() !== wanted) {
-        throw new WalletError(`Your wallet is still not on ${chain.chainName}. Switch it there and try again.`);
-    }
+    await switchChain(config, { chainId: wanted as (typeof config.chains)[number]["id"] });
+}
+
+/** The shape a typed-data payload arrives in, from the server or from the payment scheme. */
+interface TypedData {
+    domain: Record<string, unknown>;
+    types: Record<string, { name: string; type: string }[]>;
+    primaryType: string;
+    message: Record<string, unknown>;
 }
 
 /**
- * Serialises typed data for a wallet, with bigint amounts as decimal strings.
+ * The payload as viem wants it.
  *
- * `JSON.stringify` throws on a bigint, and a bigint is the correct representation for a uint256, so the
- * payment scheme hands us one: an EIP-3009 authorisation carries `value`, `validAfter` and `validBefore`
- * that way. Without this the wallet is never reached and the buyer is told "Do not know how to serialize
- * a BigInt", which is true about our code and useless about their purchase.
+ * One transformation, and it is the reason this is a named function rather than an inline spread:
+ * `EIP712Domain` is dropped from `types`. A raw `eth_signTypedData_v4` call needs the domain's own
+ * type declared, so the server sends it; viem derives that type from the domain's fields instead, and
+ * a declared one would override what viem derived. The hash is identical either way only while the
+ * two agree, and the failure when they do not is a signature the server rejects with nothing to point
+ * at. Letting viem derive it means they cannot disagree.
  *
- * A decimal string is what `eth_signTypedData_v4` expects for a uint256 anyway, and it is exactly how
- * the server already sends its own amounts, so this converts rather than reinterprets. Values are never
- * rounded or narrowed through a float.
+ * Nothing else is touched. Rebuilding the payload here would be a second implementation of the thing
+ * the signature is supposed to pin down.
  */
-export function toSignableJson(payload: unknown): string {
-    return JSON.stringify(payload, (_key, value: unknown) =>
-        typeof value === "bigint" ? value.toString() : value,
-    );
+export function signableTypedData(payload: TypedData): TypedData {
+    const { EIP712Domain: _declared, ...types } = payload.types;
+    return { ...payload, types };
 }
 
 /**
  * Signs an EIP-712 payload exactly as it was offered.
  *
- * The payload is passed through untouched apart from that serialisation. Rebuilding it here would be a
- * second implementation of the thing the signature is supposed to pin down, and any drift between the
- * two would show up as a signature the server rejects for no visible reason.
+ * bigint amounts need no special handling now: an EIP-3009 authorisation carries `value`, `validAfter`
+ * and `validBefore` as bigints, and viem encodes a uint256 from one directly rather than through JSON,
+ * which is what used to fail with "Do not know how to serialize a BigInt".
  */
 export async function signTypedData(address: string, payload: unknown): Promise<string> {
-    const signature = await provider().request({
-        method: "eth_signTypedData_v4",
-        params: [address, toSignableJson(payload)],
-    });
-    if (typeof signature !== "string") throw new WalletError("The wallet returned no signature.");
-    return signature;
+    const td = signableTypedData(payload as TypedData);
+    return await wagmiSignTypedData(config, {
+        account: address as `0x${string}`,
+        domain: td.domain,
+        types: td.types,
+        primaryType: td.primaryType,
+        message: td.message,
+    } as never);
 }
 
 /**
  * How much USDC the wallet holds, as a decimal string.
  *
- * Read through the wallet's own provider rather than a public RPC: it is already connected to the
- * right chain, the page gains no new host to trust, and nothing leaves the browser. A failure is a
- * missing number, never an error on screen: a balance is a convenience, and the purchase works
- * without it.
- *
- * `balanceOf(address)` is selector 0x70a08231 followed by the address padded to 32 bytes. Six
- * decimals, like every USDC amount in this project, and the division is done on the digits so the
- * value never passes through a float.
+ * Six decimals, like every USDC amount in this project, and the division is done on the digits so the
+ * value never passes through a float. A failure is a missing number, never an error on screen: a
+ * balance is a convenience, and the purchase works without it.
  */
 export async function readUsdcBalance(address: string, token: string): Promise<string> {
-    const padded = address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
-    const raw = (await provider().request({
-        method: "eth_call",
-        params: [{ to: token, data: `0x70a08231${padded}` }, "latest"],
-    })) as string;
-    const minor = BigInt(raw === "0x" || raw === "" ? "0x0" : raw);
+    const minor = await readContract(config, {
+        address: token as `0x${string}`,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [address as `0x${string}`],
+    });
     const whole = minor / 1_000_000n;
     const frac = (minor % 1_000_000n).toString().padStart(6, "0");
     return `${whole}.${frac}`;
 }
 
-/** Turns a wallet rejection into something worth showing a person. */
+/**
+ * Turns a wallet rejection into something worth showing a person.
+ *
+ * wagmi and viem wrap the provider's error, so the EIP-1193 code can be on the error, on its cause, or
+ * only in the name. All three are checked, because "User rejected the request" shown as a red failure
+ * is the page calling a person's own decision a fault.
+ */
 export function describeWalletError(e: unknown): string {
-    const code = (e as { code?: number })?.code;
-    if (code === 4001) return "You rejected the request in your wallet. Nothing was sent and nothing was charged.";
-    if (code === -32002) return "Your wallet already has a request open. Finish it there, then try again.";
     if (e instanceof WalletError) return e.message;
+    const err = e as { code?: number; name?: string; shortMessage?: string; cause?: { code?: number; name?: string } };
+    const code = err?.code ?? err?.cause?.code;
+    const name = err?.name ?? err?.cause?.name;
+    if (code === 4001 || name === "UserRejectedRequestError") {
+        return "You rejected the request in your wallet. Nothing was sent and nothing was charged.";
+    }
+    if (code === -32002 || name === "ResourceUnavailableRpcError") {
+        return "Your wallet already has a request open. Finish it there, then try again.";
+    }
+    if (name === "ConnectorAlreadyConnectedError") return "That wallet is already connected.";
+    if (typeof err?.shortMessage === "string") return err.shortMessage;
     return e instanceof Error ? e.message : String(e);
 }

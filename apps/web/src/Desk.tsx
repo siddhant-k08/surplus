@@ -121,7 +121,7 @@ export function Desk({ tab, address, onSignedOut }: { tab: DeskTab; address: str
             // A wallet can change accounts between signing in and approving, and the session would not
             // know. Asking it to sign as an account it no longer holds fails inside the wallet with a
             // message about `from`, which says nothing about what to do.
-            const selected = await currentAccount();
+            const selected = currentAccount();
             if (selected !== null && selected.toLowerCase() !== address.toLowerCase()) {
                 throw new Error(
                     `Your wallet has switched to ${selected}, but this session is signed in as ${address}. ` +
@@ -197,7 +197,7 @@ export function Desk({ tab, address, onSignedOut }: { tab: DeskTab; address: str
                         <DeskLink to="/desk" current={tab === "decision"}>Decision</DeskLink>
                         <DeskLink to="/desk/mandate" current={tab === "mandate"}>Mandate</DeskLink>
                         <DeskLink to="/desk/book" current={tab === "book"}>Book</DeskLink>
-                        <NavLink href="/">Storefront</NavLink>
+                        <NavLink href="/">Home</NavLink>
                     </>
                 }
                 right={
