@@ -145,10 +145,10 @@ const savedBrief = (): SavedBrief => ({
 });
 
 /** A sales ledger holding real revenue, as the paid endpoint would have written it. */
-function salesLedger(amount: string): readonly LedgerTx[] {
+function salesLedger(amount: string, mode: "sim" | "testnet" | "mainnet" = "testnet"): readonly LedgerTx[] {
     const l = new Ledger();
     l.post({
-        type: "PAYMENT_RECEIVED", mode: "testnet", at: new Date("2026-11-21T00:00:00Z"),
+        type: "PAYMENT_RECEIVED", mode, at: new Date("2026-11-21T00:00:00Z"),
         idempotencyKey: "pay:x402:0xaaa", txHash: "0xaaa", briefId: "brief-test",
         lines: [
             { account: "cash.operating", amount: u(amount) },
@@ -891,6 +891,42 @@ describe("the mandate can forbid investing while behind", () => {
     });
 });
 
+describe("money earned on one network cannot fund another", () => {
+    it("refuses to mirror testnet revenue into a mainnet book", async () => {
+        // Selling runs on Sepolia because that is the only network the free facilitator serves, and the
+        // stocks exist only on Base mainnet. Mirroring across would have the agent spend real money
+        // while its books claimed it had earned it.
+        const e = new InvestingEngine({
+            mode: "mainnet",
+            openingFloat: u("5.00"),
+            mandates: mandateFor(terms),
+            readBrief: savedBrief,
+            allBriefs: () => [savedBrief()],
+            salesLedger: () => salesLedger("3.00"), // tagged testnet
+            market,
+            chainId: CHAIN_ID,
+        });
+
+        const r = await e.syncRevenue();
+        expect(r.sales).toBe(0);
+        expect(r.revenue).toBe(0n);
+        expect(r.refusedSales.length).toBe(1);
+        expect(r.refusedSales[0]!.mode).toBe("testnet");
+        expect(e.treasury.ledger.balance("revenue.research")).toBe(0n);
+
+        // what a mainnet book may invest is the owner's capital, and it is labelled as that
+        const opening = e.treasury.ledger.all().find((x) => x.type === "OPENING_BALANCE");
+        expect(opening?.memo?.toLowerCase()).toContain("owner");
+    });
+
+    it("mirrors normally when both books are on the same network", async () => {
+        const e = await engineFor("3.00"); // sim book, sim sales
+        const r = await e.syncRevenue();
+        expect(r.sales).toBe(1);
+        expect(r.refusedSales).toEqual([]);
+    });
+});
+
 describe("executing for real", () => {
     /** An executor that records what it was asked to send, and can fail on a chosen symbol. */
     function fakeExecutor(over: { failOn?: string; amountOut?: bigint } = {}) {
@@ -917,7 +953,8 @@ describe("executing for real", () => {
             mandates: mandateFor(terms),
             readBrief: savedBrief,
             allBriefs: () => [savedBrief()],
-            salesLedger: () => salesLedger("3.00"),
+            // a mainnet book may only mirror mainnet revenue; see the guard above
+            salesLedger: () => salesLedger("3.00", "mainnet"),
             market,
             chainId: CHAIN_ID,
             verifyApproval: ({ approval, signature }) =>

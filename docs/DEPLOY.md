@@ -271,6 +271,44 @@ curl -s -H "Authorization: Bearer $OWNER_TOKEN" https://your-host/invest/ledger 
 `{"ok": true, "issues": []}` means the books balance, replay cleanly and hold no negative balance where
 one would be impossible. If that ever turns false, stop and read it before doing anything else.
 
+## A first real swap, deliberately
+
+Checked on Base mainnet, 22 Nov 2026, read only: a $1.00 and a $0.25 quote for NVDAc, MSFTc and AAPLc
+all returned, with the price 1.5 to 2.2 percent above NAV and **the same at both sizes**, so at this
+scale the spread is the premium over NAV rather than price impact. Liquidity scores were 3 to 5 against
+a gate that needs 2. The NAV gate blocks above 3 percent, so NVDAc at 2.2 percent passes but is not far
+off; a quiet market day is a better day for this than a loud one.
+
+What that means in practice: a swap of 50 cents proves the path as well as a swap of fifty dollars, and
+gas on Base is cents. Exposure should be a few dollars at most.
+
+### The books have to stay honest about where the money came from
+
+Selling runs on Base Sepolia and the stocks are on Base mainnet. Revenue earned on one network cannot
+fund trades on another, and `syncRevenue` refuses to mirror across: a mainnet book fed by testnet
+revenue would have the agent spending real money while its books claimed it had earned it. Those sales
+are reported as `refusedSales` rather than silently skipped.
+
+So **a mainnet trade today is funded by owner capital, not by surplus the agent earned.** That is what
+`OPENING_FLOAT_USDC` is, and the entry says "owner-provided working capital". The earned-surplus story
+stays on the simulated book until selling moves to mainnet too, which needs a paid facilitator.
+
+### The order to do it in
+
+1. Buy a brief on the live site with Base Sepolia USDC. Free, and it exercises payment, settlement,
+   receipt and recovery against the real deployment.
+2. Fund a throwaway wallet on **Base mainnet** with a few dollars of USDC and a little ETH for gas.
+   USDC on Ethereum mainnet is on the wrong chain: it has to be bridged to Base first, and that costs
+   Ethereum gas, which on a small amount is a meaningful fraction of it.
+3. Set `MAINNET_ENABLED=true`, `MAINNET_SPEND_CAP_USDC` to what you would be relaxed to lose,
+   `EXECUTION_PRIVATE_KEY` to the throwaway key, `INVEST_MODE=mainnet`, and `OPENING_FLOAT_USDC` to the
+   capital you are putting in.
+4. Propose, approve with the owner wallet, and execute **one order at the minimum trade size**, watching.
+   The journal records the signed transaction before it is broadcast, so an interrupted run is
+   recoverable rather than a mystery.
+5. Check `GET /invest/ledger`: the fill carries the real transaction hash, the quantity is what the
+   chain returned, and `reconcile.ok` is still true.
+
 ## Turning on real swaps
 
 Not a deploy step. It needs, in order: eligibility advice that buying these tokens is lawful for you,

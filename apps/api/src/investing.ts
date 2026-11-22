@@ -107,6 +107,13 @@ export interface SyncResult {
     unreadableBriefs: { file: string; error: string }[];
     /** Sales whose ledger entry carries no brief id, so their revenue cannot be tied to a brief. */
     unattributedSales: number;
+    /**
+     * Sales that were not mirrored because they were earned on another network.
+     *
+     * Real but not spendable here: a mainnet book funded by testnet revenue would be the agent
+     * spending real money while claiming to have earned it.
+     */
+    refusedSales: { transaction: string; mode: string; amountUsdcMinor: string }[];
     briefsCosted: number;
     revenue: bigint;
     costs: bigint;
@@ -274,7 +281,23 @@ export class InvestingEngine {
         const earners = new Set<string>();
         let revenue = 0n;
         let unattributed = 0;
+        const refusedSales: { transaction: string; mode: string; amountUsdcMinor: string }[] = [];
         for (const sale of sales) {
+            // Money earned on one network cannot fund trades on another.
+            //
+            // Selling runs on Base Sepolia because that is the only network the free facilitator serves,
+            // and the tokenized stocks exist only on Base mainnet. Mirroring testnet revenue into a
+            // mainnet book would have the agent spend real money while its books claimed it had earned
+            // it. Whatever a mainnet book invests is the owner's capital until selling moves to mainnet
+            // too, and the opening float is where that is recorded and labelled.
+            if (this.deps.mode === "mainnet" && sale.mode !== "mainnet") {
+                refusedSales.push({
+                    transaction: sale.transaction,
+                    mode: sale.mode,
+                    amountUsdcMinor: sale.amountUsdcMinor.toString(),
+                });
+                continue;
+            }
             revenue += sale.amountUsdcMinor;
             const briefId = sale.briefId ?? UNATTRIBUTED;
             if (sale.briefId === undefined) unattributed += 1;
@@ -304,7 +327,8 @@ export class InvestingEngine {
         await this.flush();
         return {
             gap: this.gap(),
-            sales: sales.length,
+            sales: sales.length - refusedSales.length,
+            refusedSales,
             unreadableBriefs: [...(await (this.deps.briefProblems?.() ?? []))],
             unattributedSales: unattributed,
             briefsCosted: briefs.length,

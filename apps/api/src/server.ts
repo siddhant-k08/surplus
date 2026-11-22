@@ -826,6 +826,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 investableUsdcMinor: r.investable.toString(),
                 settled: r.settled.map((x) => ({ briefId: x.briefId, investableUsdcMinor: x.investable.toString() })),
                 gap: gapView(r.gap),
+                refusedSales: r.refusedSales,
             });
         });
 

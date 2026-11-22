@@ -813,6 +813,25 @@ actually returned, which is the difference between a ledger and a guess.
 
 Core 272, API 207. The mainnet path is still off at the flag; what changed is that it is now a path.
 
+## Revenue cannot cross networks, 22 Nov 2026
+
+Siddhant has testnet USDC on Base Sepolia and $20 of real USDC on Ethereum mainnet, and asked whether
+they can be used for production testing. The answer turned up a defect worth more than the question.
+
+Nothing stopped `syncRevenue` mirroring the testnet sales book into a mainnet investing book. The agent
+would then have spent real money while its books said it had earned the surplus. It now refuses to
+mirror a sale whose mode is not the investing book's, and reports them as `refusedSales` rather than
+skipping them quietly. A mainnet trade today is funded by owner capital, which is what the opening
+float is and what its entry says.
+
+Checked on Base mainnet, read only, before advising anything: $1.00 and $0.25 quotes for NVDAc, MSFTc
+and AAPLc all return, 1.5 to 2.2 percent above NAV and the same at both sizes, so the spread at this
+scale is the premium over NAV rather than price impact. Liquidity 3 to 5 against a gate that needs 2.
+Fifty cents proves the path as well as fifty dollars would.
+
+The $20 is on the wrong chain: the stocks are on Base, so it would have to be bridged, and Ethereum gas
+on a small amount is a meaningful fraction of it. `docs/DEPLOY.md` has the order to do it in.
+
 ### Still open on this
 
 - A real purchase against the deployed endpoint has not been made.
