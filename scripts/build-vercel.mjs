@@ -49,6 +49,14 @@ writeFileSync(
             // generating a brief calls SEC EDGAR and then a model; measured at about 16 seconds
             maxDuration: 60,
             memory: 1024,
+            // Next to the database, not next to whoever is browsing.
+            //
+            // Unpinned, Vercel ran this wherever the request arrived, which for a buyer in India was
+            // bom1: every query to Postgres in us-east-1 crossed an ocean, and the x402 facilitator was
+            // simply unreachable from there, so a purchase hung until the client's timeout. A function
+            // that is mostly database calls belongs beside its database, and one region makes a failure
+            // reproducible instead of depending on where the buyer stands.
+            regions: ["iad1"],
         },
         null,
         2,

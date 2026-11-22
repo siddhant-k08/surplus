@@ -1104,6 +1104,254 @@ over it still verifies 200. Core 281, API 224.
 Still unproven: whether a real browser wallet now signs it. That needs Siddhant's wallet, and if it
 still refuses, the next thing to read is the wallet's own error rather than the server's.
 
+## Buying from the page never reached the wallet, 22 Nov 2026
+
+Clicking buy on the storefront, with MetaMask connected, failed with "Failed to create payment payload:
+Do not know how to serialize a BigInt".
+
+`wallet.ts` serialised the typed data with a bare `JSON.stringify`, which throws on a bigint. A bigint
+is the correct representation of a uint256, and the payment scheme uses it: an EIP-3009 authorisation
+carries `value`, `validAfter` and `validBefore` that way. So the wallet was never reached at all, and
+the buyer was shown a sentence that is true about our code and useless about their purchase.
+
+Fixed with `toSignableJson`, which converts bigints to decimal strings on the way out. That is what
+`eth_signTypedData_v4` expects for a uint256 and exactly how the server already sends its own amounts,
+so it converts rather than reinterprets, and no value passes through a float. It sits on the one
+function every signature in the page goes through, so the login, the approval and the payment all get
+it.
+
+The chain guard was already right here: `Store.tsx` reads the CAIP network out of the 402 and calls
+`ensureChain` before paying.
+
+### The real lesson: `apps/web` had no tests
+
+Three signing bugs in a row (the missing `EIP712Domain`, the unchecked account, this) all lived in
+browser code that nothing ran. Every one of them was reachable by a pure unit test.
+
+`apps/web` now has a test script and `apps/web/test/wallet.test.ts`, which needed no new configuration:
+vitest is already a root dependency and these are pure functions. `npm test` runs core, then the API,
+then the web, and `npm run test:web` runs it alone. Five tests to start: the EIP-3009 shape serialises,
+a value too large for a double is not rounded, non-bigints are untouched, and `chainIdFromCaip` refuses
+anything it does not recognise rather than guessing a chain.
+
+Core 281, API 224, web 5.
+
+## The storefront purchase works, and the 502 was a region, 22 Nov 2026
+
+After the BigInt fix a browser purchase settled for real: transaction
+`0xcd716e115484b9b924c0166f246d8aca25ccb26e8177d41fe662817db35ebd93`, status success, block 62145421,
+submitted by the facilitator `0xd407e409e34e0b9afb99ecceb609bdbcd5e7f1bf`, booked as ledger entry 4 and
+attributed to `brief-2026-11-21T19-57-41-888Z`. So paying from the page, with MetaMask, against the
+deployment, works end to end. The 502 Siddhant saw came from a later attempt.
+
+**A reporting mistake of mine, recorded because it is the kind that matters.** Asked whether he had been
+charged, I compared the buyer and seller USDC balances against figures I had read earlier in the same
+session and said nothing had moved. Both readings were taken after the settlement, so they agreed with
+each other and told me nothing. The books were the authority available the whole time and they said
+four sales. Balances are a differential measurement and are worthless without a baseline from before
+the event.
+
+The receipt recovery path then did its job: signing the recovery payload with the payer key returned both
+purchases with their secret links, which is the remedy for a buyer whose response never arrived. First
+time it has been exercised against production.
+
+### Why the facilitator timed out, and a wrong diagnosis on the way
+
+First answer, now withdrawn: the host's log lines carry a `region`, the failing one said `bom1`, and I
+wrote that up as a Mumbai instance unable to reach `x402.org`. It was wrong, and it was wrong in the
+same way as the balance mistake above: a field was read as if its meaning were known.
+
+What the evidence actually supports, in the order it was established:
+
+1. The Vercel project's `serverlessFunctionRegion` was **already** `iad1`, before anything was changed.
+   So whatever region the function ran in, it was not configured to follow the buyer.
+2. `/health` now reports `process.env.VERCEL_REGION`, which the host sets inside the running function,
+   and it says `iad1` on every read. A log field whose meaning I guessed at loses to the runtime's own
+   statement about where it is.
+3. `/health` also measures the facilitator now. From production it answers in **66 to 138 ms**, five
+   reads out of five. The call that hung for 90 seconds answers in a tenth of a second from the same
+   place.
+
+So the hang was transient, not geographic: either `x402.org` had a bad moment, or that cold instance's
+first outbound call stalled. Nothing found so far explains which, and nothing should be written up as
+if it did. The `regions: ["iad1"]` added to `vercel.json` and the function config is harmless and
+matches the project setting, but it fixed nothing and must not be described as the fix.
+
+What genuinely changed, and why each of these stands on its own:
+
+- `FACILITATOR_TIMEOUT_MS`, default 15000, passed to `HTTPFacilitatorClient`. Its own default is 90
+  seconds, the wrong order of magnitude for someone standing in front of a page when the facilitator
+  normally answers in under 150 ms. A recurrence now costs a buyer 15 seconds, not a minute and a half.
+- `describePaymentFailure` no longer ends a timeout with "try again". A timeout is the one failure where
+  the money may already have moved, so the buyer is sent to "Lost your link?" with the same wallet
+  before buying again. Tests assert the message never says "try again" or "nothing was charged" on a
+  timeout, because both would be guesses about someone's money.
+- `/health` reports `region`, and `facilitator` with its latency. This incident cost a lost purchase and
+  a dig through host logs to reach a diagnosis that was then wrong; one request answers it now.
+  Reported, never fatal: an unreachable facilitator stops sales but breaks neither storage nor the
+  books, and flapping health on someone else's outage would ruin it for the two faults it exists to
+  catch. The check is injected like `storageCheck`, so no test reaches the network to answer it.
+
+Core 281, API 226, web 8.
+
+## invalid_exact_evm_signature, and what it is not, 22 Nov 2026
+
+A browser purchase was refused with `invalid_exact_evm_signature`. No sale was booked and the buyer's
+balance was unchanged, measured against a baseline taken at the time rather than one remembered from
+earlier in the session.
+
+Our own serialisation was the obvious suspect, since the BigInt fix had just landed on that path, and it
+was ruled out properly rather than by reading the code: `scheme.createPaymentPayload` was driven locally
+with a signer that reproduces the browser exactly, serialising through `toSignableJson` and signing the
+JSON that comes back out. The resulting signature recovers to the authorisation's own `from`. The
+round trip through decimal strings is faithful.
+
+So the rejection means the account that signed is not the account the payment pays from, which the
+facilitator cannot distinguish from a serialisation bug and reports with one opaque string either way.
+
+Everything needed to tell those apart is in the page already, so `checkPaymentSignature` now recovers
+the signer and compares it to `authorization.from` **before the payment is sent**, and refuses a doomed
+one rather than spending a round trip to be told no. It names both accounts. Two real causes it catches:
+a wallet with several accounts signing with a different one than it offered, which is easy to arrange by
+importing a key, and a second wallet extension answering a request the first was asked.
+
+It also refuses an authorisation whose `validBefore` has already passed, because a prompt left sitting
+produces a signature the facilitator will refuse and "this expired while it waited to be approved" is
+something a person can act on.
+
+`describePaymentFailure` translates the facilitator's string too, for the case where the signature is
+somehow valid locally and refused there anyway. Every one of these messages says nothing was charged
+only where that is known from the failure itself: a rejected signature never moved money, unlike a
+timeout.
+
+Still unknown, honestly: which of those causes was Siddhant's. The page will now say, in the message
+itself, rather than needing another round of this.
+
+Core 281, API 226, web 13.
+
+## Desktop-first frontend redesign, 22 Nov 2026
+
+All three surfaces rebuilt against the brief in `docs/DESIGN.md`, which carries the tokens, the layout
+principles, the wireframes and the critique. The identity is unchanged: navy, cream, coral, Archivo and
+Newsreader. Two semantic colours were added because the desk has to say "this is a rehearsal" and "the
+books agree" without borrowing coral, which is reserved for the action and for alarm: `--sim #7FA6C9`
+and `--good #5FB49C`.
+
+The one editorial decision worth recording: **Newsreader now carries claim text and quoted filing prose
+on every surface, and Archivo carries every number, label and control.** A brief is a document and the
+desk is an instrument, and the type should not pretend those are the same kind of thing.
+
+### What changed on each surface
+
+**Storefront.** Both purchases now sit in the hero as two cards of equal width, type scale and button.
+They are deliberately not symmetrical in content: the left shows the real counts of a brief that exists
+(themes, verified facts, filings read), the right shows the rules and the wait for research that does
+not exist yet. The second leads to the theme form rather than straight to a payment, so its button is
+the ghost variant and scrolls to the form and focuses it. Loading, no-brief, no-wallet, paying, paid and
+failed each have their own line in one `.states` region, so two outcomes can never be on screen at once.
+No claim or quote appears in the public catalogue.
+
+**Receipt.** Rebuilt as a document with a filings rail. It now renders **every claim a fit cites and
+every quote under each**, where it previously rendered `claimIds[0]` and `quotes[0]` with no sign that
+there was more. Source citations link to the filing itself with `target="_blank"` and
+`rel="noopener noreferrer"`; the API had always sent `url`, the frontend type simply omitted it.
+
+**Desk.** Organised around the five steps the agent actually enforces: sync, propose, review, sign,
+execute. `steps.ts` holds that as a pure function with a `blocked` state kept separate from `later`,
+because "you cannot propose yet" and "you will propose next" look identical in a progress bar and mean
+completely different things. Evidence uses the same component as the receipt. Ledger, reconciliation,
+positions and the mandate are all still reachable without crowding the step. Simulated against real is
+stated before the execute button and again in the result, from `GET /invest/execution`, never inferred
+from configuration.
+
+**Mandate controls.** A new section with every term grouped by meaning, a review of exactly what changed
+before saving, the new version and the reapproval warning after, and the version history with its chain
+verification state. Only changed terms are sent, so the server's list of what changed stays true and a
+term the owner never touched is never reset. Percent converts to basis points on the digits of the
+string rather than through a float: `0.07%` through a float is 6.999999999999999 bps.
+
+### API and storage changes, both additive
+
+- `receipts` gained a nullable `network` column, created the same way `payer` was, with
+  `alter table ... add column if not exists`. New receipts store the settlement network so the page can
+  link to the right explorer. **Old receipts keep `network` absent and the API answers `null`**, and the
+  page then shows the hash without a link and says why. It is never filled in from the running config:
+  this server's chain today is not evidence of where an old sale settled. Tests cover both.
+- `mandateView` now reports `investOnlyWhenAhead` when the mandate carries it. The write path already
+  accepted it; only the read path was blind, so the desk could not show a constraint the owner holds.
+- `GET /catalogue` was missing from the Vite dev proxy, so the storefront could not load its own
+  catalogue in development. Fixed, and verified live in the browser.
+
+### Verified, and not
+
+Reviewed in a real browser at 1440 and 1280 and again at 375: the storefront, the signed-out desk, the
+receipt with a real brief, and the receipt's not-found state. Two layout faults were found and fixed
+that way, both invisible in the source: a full-height surface was centring its navigation bar along with
+its message, and the first fix for it stretched the wrong grid row on a page with four children.
+
+**Not visually reviewed: the desk once signed in, and the mandate editor.** Both need an owner session,
+which needs an EIP-712 wallet signature, and this task said not to perform one. Their logic is covered
+by unit tests and typecheck, but no screenshot of them exists and none should be claimed.
+
+The multi-claim evidence path is covered by unit tests rather than by the screenshots: every fit in the
+current catalogue brief happens to cite exactly one claim.
+
+Core 281, API 229, web 40.
+
+## The frontend was rebuilt: soot and lime, Tailwind and motion, 22 Nov 2026
+
+Siddhant rejected the navy and coral design as generic, and he was right: dark ground, glass panels and
+one warm accent is a look rather than a decision, and it was the same look on a page you read and a
+page you operate. Four rounds of mockups narrowed it to a direction and it is now in the codebase.
+
+The direction, "soot and lime": near-black `#0f0f0f`, Archivo for everything a person reads, DM Mono for
+every figure, hash and address, and a pale lime `#DAFA9C` rationed to the one action meant to be pressed
+and the marks that say a thing was verified. Amber is real money, red is something dropped or failed.
+The earlier rounds and the reasoning are in the published mockups; the tokens are the real record and
+they live in `apps/web/src/theme.css`.
+
+### Stack changes
+
+- **Tailwind v4** through `@tailwindcss/vite`, configured in CSS rather than a config file. Every colour,
+  face and easing is an `@theme` token, so changing the look is editing one file. Both Tailwind packages
+  are devDependencies: they are build-time tools, and leaving them in `dependencies` put `vite` and
+  `esbuild` into the production tree, where `npm audit --omit=dev` immediately reported two advisories
+  that have nothing to do with what ships.
+- **`motion`** (the package formerly called framer-motion) for the animation. It is reached only through
+  `src/motion.tsx`, which wraps the tree in `LazyMotion` with `domAnimation` and re-exports `m` as
+  `motion`. The full `motion` component cost 58 kB gzipped on a storefront whose job is to load fast for
+  someone who has not paid yet; this is about 41 kB and `strict` throws if a plain `motion.*` import
+  sneaks back in. Still worth another look later.
+- **Routing**, about thirty lines in `App.tsx` over `history.pushState` and `useSyncExternalStore`. Five
+  routes that do not nest did not need a router dependency. Links stay links, so middle-click and
+  open-in-new-tab still behave; only in-app navigation is intercepted.
+- `src/styles.css` is gone. `src/Spike.tsx` is an unrouted scratch page that referenced it and is now
+  unstyled; nothing imports it.
+
+### Surfaces
+
+`/` storefront, `/r/:id` brief, and the desk split into three real routes: `/desk` decision,
+`/desk/mandate`, `/desk/book`. The desk was three jobs in one scroll before.
+
+Nine motion moments, each tied to something the product does rather than added for movement: the hero
+arrives as one orchestrated entrance, the underline draws under "can prove", the proof chain lights
+claim to quote to filing to EDGAR in sequence, figures count once, evidence rows open on a grid-rows
+transition, the step rail marks the current step, and the hero lights faintly where a pointer is.
+Everything is off under `prefers-reduced-motion` and each moment ends in its finished state.
+
+### Verified
+
+Typecheck clean, core 281, API 229, web 40. Reviewed in a browser at 1440 and at 375: no horizontal
+overflow at either, sections measured rather than eyeballed (hero 606, stats 106, how 431, commission
+592, recover 417, footer 120 at 1440).
+
+Two things caught in review that the source would not have shown: the first screenshots looked broken
+because they were taken mid-entrance, before the staggered hero had landed, and `index.html` was still
+loading Newsreader and declaring a navy `theme-color` and a coral favicon from the old direction.
+
+**Not visually reviewed: the desk once signed in, and the mandate editor**, both of which need an owner
+session and therefore a wallet signature. Their logic is covered by tests and typecheck.
+
 ## Next milestones, in order
 
 1. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.
