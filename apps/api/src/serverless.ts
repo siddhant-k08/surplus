@@ -9,6 +9,7 @@ process.env.SURPLUS_ROOT ??= process.cwd();
 const { loadConfig } = await import("./config");
 const { assemble } = await import("./app");
 const { loadRootEnv } = await import("./paths");
+const { log, errorFields } = await import("./log");
 type Assembled = Awaited<ReturnType<typeof assemble>>;
 
 /**
@@ -46,11 +47,14 @@ function start(): Promise<Assembled> {
             // that can be wrong on a host while every route still answers, so they are stated rather
             // than assumed: no catalogue means `GET /brief` has nothing to sell.
             const catalogue = await ready.backends.catalogue.list();
-            console.log(
-                `Surplus assembled: storage ${ready.backends.kind}, root ${process.env.SURPLUS_ROOT ?? "derived"}, ` +
-                `catalogue ${ready.config.briefsDir} (${catalogue.length} brief(s)), ` +
-                `mandate v${ready.mandates.current().version}, ${ready.sales.length} sale(s) booked`,
-            );
+            log.info("assembled", "Surplus assembled", {
+                storage: ready.backends.kind,
+                root: process.env.SURPLUS_ROOT ?? "derived",
+                catalogue: ready.config.briefsDir,
+                briefs: catalogue.length,
+                mandateVersion: ready.mandates.current().version,
+                sales: ready.sales.length,
+            });
             return ready;
         })
         .catch((e: unknown) => {
@@ -66,7 +70,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         ready = await start();
     } catch (e) {
         // the request is answered rather than dropped, and the reason is logged where the host collects it
-        console.error("could not start Surplus:", e);
+        log.error("startup_failed", "could not start Surplus", errorFields(e));
         res.statusCode = 503;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ error: "this server is not ready; see the deployment logs" }));

@@ -895,6 +895,25 @@ which would be worse than saying nothing.
 
 Core 277, API 219.
 
+## Structured logs, and a bug my own test name caught, 22 Nov 2026
+
+Operational events are now one line of JSON with a stable `event` name, so alerting is on a thing
+rather than on a phrase: `sale_not_recorded` and `execution_unresolved` are the two worth waking
+someone for. Every line keeps a readable `message`, because logs are read by people more often than by
+machines, and the position check is on the desk now beside the internal reconciliation line.
+
+The redaction is where this got interesting. The first version masked anything shaped like 32 bytes of
+hex, on the grounds that a private key looks like that. So does a transaction hash, and the whole
+purpose of `sale_not_recorded` is to carry the transaction of a sale that settled and could not be
+written down. The test asserting that hashes survive had been written to assert the opposite, which is
+how the contradiction surfaced: a test whose name and body disagree is usually the body being wrong.
+
+Redaction is now by context, never by shape: connection strings, bearer tokens, and anything labelled
+as a key or secret, with the label allowed a prefix so `EXECUTION_PRIVATE_KEY=` is caught while
+`tokenBalance:` is left alone. The rule for key material is that it is never logged in the first place.
+
+Core 277, API 224.
+
 ### Still open on this
 
 - A real purchase against the deployed endpoint has not been made.

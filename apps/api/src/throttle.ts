@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import type { Sql } from "./pg";
+import { log, errorFields } from "./log";
 
 /**
  * A ceiling on how often one caller may use the free routes that do work.
@@ -89,7 +90,10 @@ export function limit(args: { throttle: Throttle; name: string; max: number; win
             .catch((e: unknown) => {
                 // A limiter that cannot answer must not take the route down with it. Logged, then the
                 // request proceeds: the limit exists to stop abuse, not to be a dependency of the API.
-                console.error(`rate limit check failed for ${args.name}, allowing the request:`, e);
+                log.error("rate_limit_unavailable", `rate limit check failed for ${args.name}; allowing the request`, {
+                    limit: args.name,
+                    ...errorFields(e),
+                });
                 next();
             });
     };

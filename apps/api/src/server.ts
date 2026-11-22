@@ -30,6 +30,7 @@ import { UNATTRIBUTED, type InvestingEngine } from "./investing";
 import { normalizeThemes, type ResearchService } from "./research";
 import { recoveryPayload, verifyRecovery } from "./recovery";
 import { MemoryThrottle, limit, type Throttle } from "./throttle";
+import { log, errorFields } from "./log";
 import { parseTermsUpdate, changedTerms } from "./terms";
 import { newReceiptId, type ReceiptStore } from "./receipts";
 
@@ -177,18 +178,16 @@ export async function persistSale(args: {
         console.log(`booked ${formatUsdc(args.amountUsdcMinor)} USDC (tx ${args.transaction})`);
         return persistedId;
     } catch (e) {
-        console.error(
-            "MONEY RECEIVED BUT NOT RECORDED. Reconcile this against Base by hand: " +
-            JSON.stringify({
-                transaction: args.transaction,
-                amountUsdcMinor: args.amountUsdcMinor.toString(),
-                briefId: served?.briefId ?? UNATTRIBUTED,
-                payer: args.payer ?? null,
-                receiptId: served?.receiptId ?? null,
-                at: new Date().toISOString(),
-            }),
-            e,
-        );
+        // The one line worth its own alert. Everything needed to reconcile it against Base by hand is
+        // a field here, including the transaction, which is why redaction never masks hashes.
+        log.error("sale_not_recorded", "money received but not recorded; reconcile against Base by hand", {
+            transaction: args.transaction,
+            amountUsdcMinor: args.amountUsdcMinor.toString(),
+            briefId: served?.briefId ?? UNATTRIBUTED,
+            payer: args.payer ?? null,
+            receiptId: served?.receiptId ?? null,
+            ...errorFields(e),
+        });
         return args.persistedId;
     }
 }
@@ -398,9 +397,11 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 },
             });
             if (verdict === "wrong_asset") {
-                console.warn(
-                    `settled payment in unexpected asset ${requirements.asset}, expected ${config.expectedAsset}; no revenue booked`,
-                );
+                log.warn("settled_wrong_asset", "settled payment in an unexpected asset; no revenue booked", {
+                    asset: requirements.asset,
+                    expected: config.expectedAsset,
+                    transaction: result.transaction,
+                });
             } else if (verdict === "booked") {
                 const amount = BigInt(result.amount ?? requirements.amount);
                 persistedId = await persistSale({
@@ -989,7 +990,11 @@ export function buildServer(deps: ServerDeps): BuiltServer {
      * detail goes to the logs, where it belongs.
      */
     app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
-        console.error(`unhandled error on ${req.method} ${req.path}:`, err);
+        log.error("request_failed", `unhandled error on ${req.method} ${req.path}`, {
+            method: req.method,
+            path: req.path,
+            ...errorFields(err),
+        });
         if (res.headersSent) return;
         res.status(500).json({ error: "the agent could not complete that request" });
     });

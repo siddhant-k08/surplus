@@ -21,6 +21,7 @@ import {
 import { InvestingEngine, type MarketData } from "./investing";
 import { ResearchService } from "./research";
 import { openBackends, bookNames } from "./backends";
+import { log } from "./log";
 import { openExecutor } from "./executor";
 import { verifyApprovalSignature } from "./signature";
 import { existsSync } from "node:fs";
@@ -223,7 +224,10 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
     if (execution.executor !== null) {
         const resolved = await execution.executor.recover();
         for (const r of resolved) {
-            console.log(`recovered execution ${r.key}: ${r.outcome}`);
+            log.info("execution_recovered", `recovered execution ${r.key}: ${r.outcome}`, {
+                key: r.key,
+                outcome: r.outcome,
+            });
         }
     }
 

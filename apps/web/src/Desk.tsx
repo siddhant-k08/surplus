@@ -3,7 +3,7 @@ import type { InvestmentGap } from "./api";
 import {
     api, formatUsdc, ApiError,
     type Mandate, type OwnerBrief, type Proposal, type SyncResult, type InvestLedger, type ExecuteResult,
-    type ExecutionStatus,
+    type ExecutionStatus, type PositionsView,
 } from "./api";
 import { signTypedData, currentAccount, describeWalletError } from "./wallet";
 
@@ -26,16 +26,20 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
     const [proposal, setProposal] = useState<Proposal | null>(null);
     const [fills, setFills] = useState<ExecuteResult | null>(null);
     const [execution, setExecution] = useState<ExecutionStatus | null>(null);
+    const [positions, setPositions] = useState<PositionsView | null>(null);
     const [busy, setBusy] = useState<Busy>(null);
     const [note, setNote] = useState<Note | null>(null);
     const [left, setLeft] = useState<number | null>(null);
     const deadline = useRef<number | null>(null);
 
     const refresh = useCallback(async () => {
-        const [m, l, x] = await Promise.all([api.mandate(), api.ledger(), api.execution()]);
+        const [m, l, x, p] = await Promise.all([
+            api.mandate(), api.ledger(), api.execution(), api.positions(),
+        ]);
         setMandate(m);
         setLedger(l);
         setExecution(x);
+        setPositions(p);
         try {
             setBrief(await api.brief());
         } catch {
@@ -361,6 +365,7 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
                                 Every line is double-entry, append-only, and tagged with the mode it happened in.
                                 {ledger === null ? "" : ` Reconciliation: ${ledger.reconcile.ok ? "clean" : ledger.reconcile.issues.join("; ")}.`}
                             </p>
+                            {positions !== null && <AgainstTheChain positions={positions} />}
                             <ul className="legs">
                                 {(ledger?.entries ?? []).map((e) => {
                                     const cash = e.lines.find((l) => l.account === "cash.operating");
@@ -429,6 +434,54 @@ export function gapLines(gap: InvestmentGap | undefined): string[] {
         `${formatUsdc(gap.revenueNeededUsdcMinor)} USDC more revenue would make a trade possible: ${parts.join(", then ")}.`,
         "Selling another brief also costs something to produce, so that figure is a floor, not a forecast.",
     ];
+}
+
+/**
+ * The books against the wallet.
+ *
+ * The reconciliation line above it says the books agree with themselves. This says whether they are
+ * true, which is a different question and the only one a holder of the tokens actually cares about.
+ */
+function AgainstTheChain({ positions }: { positions: PositionsView }) {
+    if (!positions.checked) {
+        return (
+            <p className="note">
+                Against the chain: nothing to compare. {positions.why ?? "Fills are simulated."}
+            </p>
+        );
+    }
+    if (positions.positions.length === 0) {
+        return <p className="note">Against the chain: nothing bought yet, so nothing to hold.</p>;
+    }
+    return (
+        <div className={positions.ok === false ? "notice real" : "notice"}>
+            <p>
+                <strong>
+                    {positions.ok === false
+                        ? "The wallet does not hold what the books say."
+                        : "The wallet holds what the books say."}
+                </strong>
+            </p>
+            <ul className="legs">
+                {positions.positions.map((p) => (
+                    <li key={p.asset}>
+                        <div className="leg">
+                            <div className="leg-row">
+                                <span className="sym">{p.symbol}</span>
+                                <span className="theme">
+                                    booked {p.bookedUnits} units, wallet holds {p.heldUnits}
+                                    {p.verdict === "matches" ? "" : ` (${p.verdict}, ${p.differenceUnits})`}
+                                </span>
+                            </div>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+            {positions.issues.map((i) => (
+                <p className="note error" key={i}>{i}</p>
+            ))}
+        </div>
+    );
 }
 
 /**

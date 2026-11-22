@@ -224,6 +224,23 @@ export interface InvestLedger {
     gap: InvestmentGap;
 }
 
+/** The books against the chain: units recorded as bought, against units the wallet holds. */
+export interface PositionsView {
+    /** False when fills are simulated, so there is nothing onchain to compare. */
+    checked: boolean;
+    why?: string;
+    ok?: boolean;
+    positions: {
+        asset: string;
+        symbol: string;
+        bookedUnits: string;
+        heldUnits: string;
+        differenceUnits: string;
+        verdict: "matches" | "short" | "extra";
+    }[];
+    issues: string[];
+}
+
 /** What pressing execute would actually do. Asked of the agent, never inferred from config. */
 export interface ExecutionStatus {
     willSendRealSwaps: boolean;
@@ -255,6 +272,7 @@ export const api = {
 
     sync: () => post<SyncResult>("/invest/sync"),
     execution: () => call<ExecutionStatus>("/invest/execution"),
+    positions: () => call<PositionsView>("/invest/positions"),
     propose: (id?: string) => post<Proposal>("/invest/propose", id === undefined ? {} : { id }),
     approve: (id: string, signature: string) =>
         post<{ id: string; approved: boolean; expiresAt: string; signer: string }>("/invest/approve", {

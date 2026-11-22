@@ -258,9 +258,27 @@ Point an uptime monitor at it (Better Stack, UptimeRobot and the like are free a
 on the status code. That is the whole alerting story: the endpoint is honest about being unhealthy, so
 anything that watches HTTP status is enough.
 
-One log line deserves its own alert if your log drain can do it: `MONEY RECEIVED BUT NOT RECORDED`. It
-means a payment settled and storage then refused the write, and the line carries everything needed to
-reconcile against Base by hand.
+### The log lines worth alerting on
+
+Operational events are one line of JSON each, with a stable `event` name, so a drain can alert on the
+thing rather than on a phrase someone may reword:
+
+| `event` | Means | Worth waking someone? |
+|---|---|---|
+| `sale_not_recorded` | a payment settled and storage refused the write | **yes** |
+| `execution_unresolved` | a signed swap whose outcome is still unknown | **yes** |
+| `startup_failed` | an instance could not assemble, usually the database | yes, if it persists |
+| `settled_wrong_asset` | a payment arrived in something other than the expected USDC | yes |
+| `rate_limit_unavailable` | the limiter could not answer; requests were let through | worth knowing |
+| `sale_booked`, `brief_generated`, `execution_recovered`, `assembled` | normal operation | no |
+
+Every line also carries a readable `message`, because logs are read by people more often than by
+machines.
+
+Credentials are redacted on the way out: connection strings, bearer tokens, and anything labelled as a
+key or a secret. Redaction is by context and never by shape, because a private key and a transaction
+hash are both 32 bytes of hex, and masking that shape would destroy the field `sale_not_recorded`
+exists to carry.
 
 A deeper check needs the owner token:
 

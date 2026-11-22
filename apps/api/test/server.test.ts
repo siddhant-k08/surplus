@@ -209,11 +209,15 @@ describe("writing a settled sale down", () => {
                 transaction: tx, amountUsdcMinor: u("0.01"), payer: "0x" + "b".repeat(40),
             });
             expect(mark).toBe(0); // unchanged: nothing was persisted
-            const logged = errors.join("\n");
-            expect(logged).toContain("MONEY RECEIVED BUT NOT RECORDED");
-            expect(logged).toContain(tx);
-            expect(logged).toContain("brief-test");
-            expect(logged).toContain(served.receiptId);
+            // one line of JSON, so a log drain can alert on the event rather than on a phrase
+            const line = JSON.parse(errors[0]!) as Record<string, unknown>;
+            expect(line.event).toBe("sale_not_recorded");
+            expect(line.level).toBe("error");
+            // the transaction is the whole point of the line: it must survive redaction intact
+            expect(line.transaction).toBe(tx);
+            expect(line.briefId).toBe("brief-test");
+            expect(line.receiptId).toBe(served.receiptId);
+            expect(line.amountUsdcMinor).toBe("10000");
         } finally {
             spy.mockRestore();
         }

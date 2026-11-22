@@ -6,6 +6,7 @@ import {
     type PositionReconciliation, type Quote, type SwapOrder,
 } from "@surplus/core";
 import { MemoryJournal, type ExecutionJournal, type ExecutionRecord } from "./journal";
+import { log, errorFields } from "./log";
 
 /** Six decimals, for a message a person reads. Money is compared as integers everywhere else. */
 const formatUsdcMinor = (v: bigint): string => {
@@ -490,7 +491,12 @@ export class SwapExecutor {
                     outcome: current?.status === "failed" ? "failed" : "unknown",
                 });
                 if (current?.status !== "failed") {
-                    console.error(`execution ${record.key} is still unresolved:`, e);
+                    log.error("execution_unresolved", `execution ${record.key} is still unresolved`, {
+                        key: record.key,
+                        symbol: record.symbol,
+                        transaction: record.txHash,
+                        ...errorFields(e),
+                    });
                 }
             }
         }

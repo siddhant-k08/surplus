@@ -11,6 +11,7 @@ import {
     type ThemeSpec,
 } from "@surplus/core";
 import type { BriefBackend } from "./briefs";
+import { log } from "./log";
 import { MemoryReservations, type Reservations } from "./reservations";
 
 export const MAX_THEMES = 3;
@@ -351,11 +352,15 @@ export class ResearchService {
         const docsMs = result.timings.reduce((t, x) => t + x.docsMs, 0);
         const modelMs = result.timings.reduce((t, x) => t + x.modelMs, 0);
         const totalMs = Date.now() - startedAt;
-        console.log(
-            `generated ${briefId} in ${totalMs} ms (filings ${docsMs} ms, model ${modelMs} ms, ` +
-            `other ${totalMs - docsMs - modelMs} ms) across ${result.timings.length} theme(s), ` +
-            `cost $${costUsd.toFixed(4)}`,
-        );
+        log.info("brief_generated", `generated ${briefId} in ${totalMs} ms`, {
+            briefId,
+            totalMs,
+            docsMs,
+            modelMs,
+            themes: result.timings.length,
+            costUsd: Number(costUsd.toFixed(6)),
+            costUsdcMinor: costUsdcMinor.toString(),
+        });
 
         return {
             saved, cached: false, costUsdcMinor, issues: result.issues.length, rejected: result.rejected,

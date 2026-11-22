@@ -48,7 +48,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 27 files, 277 tests. API 12 files, 219 tests. The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 27 files, 277 tests. API 13 files, 224 tests. The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -81,6 +81,7 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - Quotes come from the KyberSwap aggregator with the router address pinned. NAV is a reference value, never an execution price.
 - Real swaps live in `apps/api/src/executor.ts` and refuse to exist without `MAINNET_ENABLED`, a positive spend cap and a key. A fill is booked only from a confirmed receipt with status success; `parseBuiltSwap` refuses calldata that would spend more than was quoted. Deployment notes are in `docs/DEPLOY.md`.
 - A swap is simulated, then signed, then written to the execution journal (`apps/api/src/journal.ts`), and only then broadcast. Signing fixes the hash without putting it on the chain, so a crash after that point can always be resolved against the chain, and the raw bytes are kept so recovery rebroadcasts the same transaction rather than building a second one. `recover()` runs before the server serves anything. The onchain spend cap is counted from the journal, never from a field: anything not known to have failed counts.
+- Operational events are one JSON line each with a stable `event` name (`apps/api/src/log.ts`); `sale_not_recorded` and `execution_unresolved` are the two worth alerting on. Redaction is by context, never by shape: a private key and a transaction hash are the same shape, and masking that would destroy the field those lines exist to carry.
 - `GET /invest/positions` compares units the execution journal recorded receiving against the wallet's onchain balances (`comparePositions`). Short fails: the books claim tokens the wallet does not hold. Extra is reported, not a failure. With simulated fills it says there is nothing to compare rather than claiming reconciled.
 - The NAV deviation gate blocks only when NAV is fresh, so it is inert whenever the underlying market is closed, which is when the premium to NAV is widest. A first real swap belongs in US market hours.
 - Mainnet stays off (`MAINNET_ENABLED=false`) until Siddhant explicitly authorizes it, with a spend cap and a throwaway wallet. The API refuses to start on Base mainnet without that flag, and `INVEST_MODE=mainnet` needs it too.
