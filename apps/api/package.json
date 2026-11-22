@@ -10,7 +10,8 @@
         "buy": "tsx src/buy.ts",
         "approve": "tsx src/sign-approval.ts",
         "db:import": "tsx src/db-import.ts",
-        "db:export": "tsx src/db-export.ts"
+        "db:export": "tsx src/db-export.ts",
+        "preflight": "tsx src/preflight.ts"
     },
     "dependencies": {
         "@surplus/core": "*",

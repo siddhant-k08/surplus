@@ -293,6 +293,26 @@ So **a mainnet trade today is funded by owner capital, not by surplus the agent 
 `OPENING_FLOAT_USDC` is, and the entry says "owner-provided working capital". The earned-surplus story
 stays on the simulated book until selling moves to mainnet too, which needs a paid facilitator.
 
+### Rehearse it first
+
+```bash
+npm run preflight -w @surplus/api -- --symbol=NVDAc --usdc=0.50
+```
+
+Everything a real swap does, stopping before the broadcast: the trusted set, liquidity, a live quote,
+the pre-trade gates, the wallet's USDC and gas, the calldata, and the chain's own answer to whether the
+swap would succeed. Nothing is signed and nothing is sent. It is not a separate implementation of the
+path: it builds the same calldata through the same code, so what it reports is what would happen.
+
+It runs with no wallet configured too, and reports the market side only, which is a useful thing to look
+at on its own.
+
+**One thing it taught us immediately.** The NAV deviation gate blocks only when NAV is fresh, so it is
+inert whenever the underlying market is closed, which is exactly when the premium to NAV is widest and
+least checkable. A preflight run on a Saturday reported NAV 34 hours old and the deviation check
+skipped, with the quote 2.2 percent above NAV and nothing to stop it being 10. **Do a first real swap
+during US market hours**, when the gate is actually doing its job.
+
 ### The order to do it in
 
 1. Buy a brief on the live site with Base Sepolia USDC. Free, and it exercises payment, settlement,
@@ -303,10 +323,11 @@ stays on the simulated book until selling moves to mainnet too, which needs a pa
 3. Set `MAINNET_ENABLED=true`, `MAINNET_SPEND_CAP_USDC` to what you would be relaxed to lose,
    `EXECUTION_PRIVATE_KEY` to the throwaway key, `INVEST_MODE=mainnet`, and `OPENING_FLOAT_USDC` to the
    capital you are putting in.
-4. Propose, approve with the owner wallet, and execute **one order at the minimum trade size**, watching.
+4. Run the preflight above against the funded wallet and read every line of it.
+5. Propose, approve with the owner wallet, and execute **one order at the minimum trade size**, watching.
    The journal records the signed transaction before it is broadcast, so an interrupted run is
    recoverable rather than a mystery.
-5. Check `GET /invest/ledger`: the fill carries the real transaction hash, the quantity is what the
+6. Check `GET /invest/ledger`: the fill carries the real transaction hash, the quantity is what the
    chain returned, and `reconcile.ok` is still true.
 
 ## Turning on real swaps

@@ -4,6 +4,13 @@ import { base } from "viem/chains";
 import { buildSwap, minOut, type Quote, type SwapOrder } from "@surplus/core";
 import { MemoryJournal, type ExecutionJournal, type ExecutionRecord } from "./journal";
 
+/** Six decimals, for a message a person reads. Money is compared as integers everywhere else. */
+const formatUsdcMinor = (v: bigint): string => {
+    const neg = v < 0n;
+    const abs = neg ? -v : v;
+    return `${neg ? "-" : ""}${abs / 1_000_000n}.${(abs % 1_000_000n).toString().padStart(6, "0")}`;
+};
+
 /**
  * Sending real swaps.
  *
@@ -45,6 +52,17 @@ export interface ChainAccess {
     waitFor(hash: Hash): Promise<{ status: "success" | "reverted"; gasUsed: bigint }>;
     /** The receipt if the chain has one, or null if it has never seen the transaction. */
     receiptFor(hash: Hash): Promise<{ status: "success" | "reverted"; gasUsed: bigint } | null>;
+    /** Native balance, for gas. A wallet with USDC and no ETH cannot send anything. */
+    nativeBalance(): Promise<bigint>;
+    /** Which chain is actually on the other end of the RPC. */
+    chainId(): Promise<number>;
+}
+
+/** One thing checked before a real swap, and what was found. */
+export interface PreflightCheck {
+    name: string;
+    ok: boolean;
+    detail: string;
 }
 
 export interface ExecutorConfig {
@@ -142,6 +160,8 @@ export class SwapExecutor {
                 const receipt = await publicClient.waitForTransactionReceipt({ hash });
                 return { status: receipt.status, gasUsed: receipt.gasUsed };
             },
+            nativeBalance: async () => publicClient.getBalance({ address: account.address }),
+            chainId: async () => publicClient.getChainId(),
             receiptFor: async (hash) => {
                 try {
                     const receipt = await publicClient.getTransactionReceipt({ hash });
@@ -331,6 +351,87 @@ export class SwapExecutor {
             transaction: hash,
             gasUsed: receipt.gasUsed,
         };
+    }
+
+    /**
+     * Everything `fill` would do, stopping before the broadcast.
+     *
+     * The point of this is that it is not a separate implementation: it builds the same calldata through
+     * the same code and asks the chain the same question, so what it reports is what would happen, not
+     * an argument that it ought to work. Nothing is signed and nothing is sent.
+     */
+    async preflight(order: SwapOrder, quote: Quote): Promise<{ ok: boolean; checks: PreflightCheck[] }> {
+        const checks: PreflightCheck[] = [];
+        const add = (name: string, ok: boolean, detail: string): void => void checks.push({ name, ok, detail });
+
+        try {
+            const id = await this.chain.chainId();
+            const right = id === base.id;
+            add("network", right, right ? `Base mainnet (${id})` : `chain ${id}, expected ${base.id}`);
+            // nothing below means anything against the wrong chain: not the balances, not the calldata
+            if (!right) return { ok: false, checks };
+        } catch (e) {
+            add("network", false, `the RPC did not answer: ${e instanceof Error ? e.message : String(e)}`);
+            return { ok: false, checks };
+        }
+
+        const { spent, remaining } = await this.budget();
+        add(
+            "spend cap",
+            order.usdcIn <= remaining,
+            `${formatUsdcMinor(remaining)} USDC of the cap left, this order needs ${formatUsdcMinor(order.usdcIn)} ` +
+            `(${formatUsdcMinor(spent)} already committed)`,
+        );
+
+        const held = await this.balance();
+        add("USDC", held >= order.usdcIn, `wallet holds ${formatUsdcMinor(held)} USDC`);
+
+        const gas = await this.chain.nativeBalance();
+        add("gas", gas > 0n, gas > 0n ? `${gas} wei of ETH for gas` : "no ETH for gas, so nothing can be sent");
+
+        let built;
+        try {
+            built = await this.build({
+                quote,
+                sender: this.account.address,
+                recipient: this.account.address,
+                slippageBps: order.maxSlippageBps,
+                minOut: minOut(quote.amountOut, order.maxSlippageBps),
+            });
+            add(
+                "calldata",
+                true,
+                `router ${built.router}, spends ${formatUsdcMinor(built.amountIn)} USDC, ` +
+                `expects ${built.amountOut} units, reverts below ${built.minOut}`,
+            );
+        } catch (e) {
+            add("calldata", false, e instanceof Error ? e.message : String(e));
+            return { ok: false, checks };
+        }
+
+        const allowance = await this.allowance(built.router);
+        add(
+            "allowance",
+            true,
+            allowance >= built.amountIn
+                ? `${formatUsdcMinor(allowance)} USDC already approved to the router`
+                : `${formatUsdcMinor(allowance)} USDC approved; a real run would approve exactly ` +
+                  `${formatUsdcMinor(built.amountIn)} first`,
+        );
+
+        if (allowance >= built.amountIn) {
+            try {
+                await this.chain.simulate({ to: built.router, data: built.data });
+                add("simulation", true, "the swap would succeed against the chain as it stands");
+            } catch (e) {
+                add("simulation", false, `the swap would revert: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        } else {
+            // simulating a transfer the router is not yet allowed to make would fail for the wrong reason
+            add("simulation", true, "not simulated: the router needs its approval first, which a real run does");
+        }
+
+        return { ok: checks.every((c) => c.ok), checks };
     }
 
     /**

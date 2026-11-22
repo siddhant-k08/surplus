@@ -832,6 +832,29 @@ Fifty cents proves the path as well as fifty dollars would.
 The $20 is on the wrong chain: the stocks are on Base, so it would have to be bridged, and Ethereum gas
 on a small amount is a meaningful fraction of it. `docs/DEPLOY.md` has the order to do it in.
 
+## Preflight, and what it found, 22 Nov 2026
+
+Siddhant researched the Indian position on tokenized stocks, concluded it is not illegal, and authorised
+proceeding. That is his decision and it is recorded as his. Claude does not execute trades with real
+money regardless of authorisation, so the division is: everything up to the button is built and
+rehearsed here, and he presses it.
+
+`npm run preflight -w @surplus/api -- --symbol=NVDAc --usdc=0.50` does everything a real swap does and
+stops before the broadcast: trusted set, liquidity, live quote, the pre-trade gates, the wallet's USDC
+and gas, the calldata, and the chain's own answer through `eth_call`. `SwapExecutor.preflight` builds
+the same calldata through the same code as `fill`, so it reports what would happen rather than arguing
+that it ought to work. Nothing is signed.
+
+It earned itself on the first run. **The NAV deviation gate is inert whenever the underlying market is
+closed**: it blocks only when NAV is fresh, and a Saturday run reported NAV 34 hours old with the check
+skipped, while the quote sat 2.2 percent above NAV with nothing to stop it being 10. The one guard
+against paying far too much is off exactly when the premium is widest. A first real swap belongs in US
+market hours. That is now in `docs/DEPLOY.md`, and it is the kind of thing that would otherwise have
+been discovered with money on the line.
+
+A second thing the preflight refuses to do: check anything at all against the wrong chain. A test asked
+for every check and got one, which was right and the code was wrong.
+
 ### Still open on this
 
 - A real purchase against the deployed endpoint has not been made.

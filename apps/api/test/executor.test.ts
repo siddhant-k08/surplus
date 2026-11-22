@@ -108,6 +108,8 @@ describe("sending a swap without losing track of it", () => {
             },
             waitFor: async () => { calls.push("waitFor"); return { status: "success" as const, gasUsed: 21_000n }; },
             receiptFor: async () => { calls.push("receiptFor"); return null; },
+            nativeBalance: async () => 10_000_000_000_000n,
+            chainId: async () => 8453,
         };
         return { chain: { ...base, ...over }, calls };
     }
@@ -217,6 +219,45 @@ describe("sending a swap without losing track of it", () => {
         const ex = executorWith(chain, journal);
         expect((await ex.budget()).remaining).toBe(u("0.50"));
         await expect(ex.fill(order, quote, "p1:0")).rejects.toThrow(/spend cap/);
+    });
+
+    it("checks everything a real swap needs, and sends nothing", async () => {
+        // not a separate implementation: the same calldata through the same code, asking the chain the
+        // same question, so what it reports is what would happen
+        const journal = new MemoryJournal();
+        const { chain, calls } = fakeChain();
+        const result = await executorWith(chain, journal).preflight(order, quote);
+
+        expect(result.ok).toBe(true);
+        expect(result.checks.map((c) => c.name))
+            .toEqual(["network", "spend cap", "USDC", "gas", "calldata", "allowance", "simulation"]);
+        expect(calls).not.toContain("sign");
+        expect(calls).not.toContain("broadcast");
+        expect(await journal.find("p1:0")).toBe(null); // nothing claimed, nothing committed
+    });
+
+    it("says which check failed rather than that it is not ready", async () => {
+        const journal = new MemoryJournal();
+        const poor = fakeChain({
+            readUsdc: async (fn) => (fn === "balanceOf" ? u("0.10") : u("1000.00")),
+            nativeBalance: async () => 0n,
+        });
+        const result = await executorWith(poor.chain, journal).preflight(order, quote);
+
+        expect(result.ok).toBe(false);
+        const failed = result.checks.filter((c) => !c.ok).map((c) => c.name);
+        expect(failed).toContain("USDC");
+        expect(failed).toContain("gas");
+        expect(result.checks.find((c) => c.name === "gas")?.detail).toMatch(/no ETH/);
+    });
+
+    it("refuses to proceed when the RPC is pointed at the wrong chain", async () => {
+        const journal = new MemoryJournal();
+        const wrong = fakeChain({ chainId: async () => 1 });
+        const result = await executorWith(wrong.chain, journal).preflight(order, quote);
+        expect(result.ok).toBe(false);
+        expect(result.checks[0]!.detail).toMatch(/chain 1, expected 8453/);
+        expect(result.checks.length).toBe(1); // nothing else is worth checking
     });
 
     it("resolves what it left behind when it starts again", async () => {
