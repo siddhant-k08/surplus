@@ -989,6 +989,76 @@ Core 277, API 224.
 - The deployment is not connected to GitHub (`vercel link` could not reach the repository), so deploys
   are manual: `npm run build && npx vercel deploy --prod`.
 
+## First real sale from the deployed endpoint, 22 Nov 2026
+
+Siddhant ran the buyer against the live URL and it worked end to end on the host: challenge, payment,
+settlement, brief handed over, sale booked in Postgres by the host itself.
+
+Proof: payer `0x8Ab8b5d0b8806868B636B9251e2e1d2753356384`, transaction
+`0x169a7aa815ce9b88fe44d6e3796711e5c7a2f5bd7de951cec0ae7201f8e36c45`, amount `10000` on
+`eip155:84532`, booked as ledger entry 3 (`PAYMENT_RECEIVED`, `testnet`, cash.operating +10000,
+revenue.research -10000) attributed to `brief-2026-11-21T19-57-41-888Z` and carrying the payer. The
+two entries before it are the local sales of 20 Nov that `db:import` copied in, which is why they say
+`briefId: unknown` and carry no payer. Entry 3 is the first one the deployment wrote.
+
+So the loop that was listed as unproven is proven: a paid request against the serverless deployment
+reaches Postgres and reconciles.
+
+### The bug it surfaced in the buyer client
+
+`buy.ts` then died with `ledger.entries is not iterable` and exited 1. `/ledger` became owner-gated
+when it stopped being a demo endpoint (it is the operator's whole financial history), so the
+anonymous read now answers 401 with `{"error": ...}`, and the script cast that body to the success
+shape without checking.
+
+The shape mismatch is the lesser half. The real fault is that **money had already moved** and the
+brief was already in hand when the script exited non-zero. An operator reading that exit code
+concludes the purchase failed and runs it again, paying twice. Nothing after the brief arrives may
+fail the run.
+
+`showLedger(url, transaction)` now:
+
+- never throws, and reports instead of failing, so the exit code reflects the purchase and nothing else
+- sends `OWNER_TOKEN` when the person running it has one, and when they do not says the books are
+  closed and points at the settlement transaction, which is public on Base and is a buyer's real proof
+- checks the response status and the shape of the body before reading it, rather than casting
+- reports the status of **its own** sale by matching the settlement transaction, instead of printing
+  every sale in the book. Counting someone else's purchase as proof of this one is how a broken
+  booking would have gone unnoticed
+
+Verified by hand against the live endpoint: anonymous `GET /ledger` answers 401, and with the owner
+token it returns the three entries above. The repaired script is typechecked but has not been rerun,
+because a rerun spends another cent of Siddhant's testnet USDC and that is his to spend.
+
+## What the first live sale exposed: the reserve target, 22 Nov 2026
+
+The loop works, and that makes the next obstacle visible. It is arithmetic, not a bug.
+
+Live mandate v2: `reserveTargetUsdc` 500000 ($0.50), `investShareBps` 5000, `minTradeUsdc` 50000
+($0.05), `maxTradeUsdc` 1000000. Price is $0.01 a brief. `investmentGap` run against the live state
+(revenue 30000, reserve balance 0) says: reserve gap $0.50, surplus needed $0.10, revenue needed
+$0.60, so about 60 more sales at a cent before a single smallest-allowed trade can be placed. About
+57 if the three cents already in cash.operating are counted, which `investmentGap` does not do because
+they have not been swept into the reserve yet.
+
+This is the consequence the price decision of 21 Nov predicted and it is now measured rather than
+predicted.
+
+The way out is Siddhant's to choose, because the reserve target is a term of his mandate and the agent
+never changes user constraints:
+
+1. Lower `reserveTargetUsdc` for the demo, through `POST /mandate`, which creates version 3 and
+   invalidates any outstanding approval. A reserve of $0.02 with the same invest share puts the first
+   trade about 12 sales away.
+2. Accumulate sales. Honest, and at a cent each it means roughly 60 purchases.
+
+Raising the price back to $3.00 is not on the table: it would make the demo work by making the shop
+unusable to anyone without meaningful test USDC, and the 21 Nov note already ruled it out.
+
+Note also that no cost is booked on the live host yet. `costUsdcMinor` for the catalogue brief is
+21201 ($0.021201), so at a cent a sale a brief needs three sales just to pay for itself. That is a
+true fact about the economics at this price, not a fault.
+
 ## Next milestones, in order
 
 1. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.
