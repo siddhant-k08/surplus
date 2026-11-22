@@ -10,6 +10,7 @@ import {
     reconcileInternal,
     scanBriefs,
     loadLatestBrief,
+    EIP712_DOMAIN_TYPE,
     formatUsdc,
     type Ledger,
     type LedgerSink,
@@ -465,9 +466,12 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         const payload = loginPayload({
             address: config.ownerAddress, nonce, issuedAt, chainId: config.approvalChainId,
         });
-        // issuedAt is a uint256 in the typed data, so it crosses the wire as a decimal string
+        // issuedAt is a uint256 in the typed data, so it crosses the wire as a decimal string. The domain
+        // type is declared here for the wallet that will sign this; viem infers it, a browser wallet does
+        // not have to.
         res.json({
             ...payload,
+            types: { EIP712Domain: EIP712_DOMAIN_TYPE, ...payload.types },
             message: { ...payload.message, issuedAt: payload.message.issuedAt.toString() },
         });
     });

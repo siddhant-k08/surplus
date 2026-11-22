@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "./api";
-import { connect, hasWallet, signTypedData, describeWalletError } from "./wallet";
+import { connect, hasWallet, signTypedData, describeWalletError, ensureChain, WalletError } from "./wallet";
 
 /**
  * Sign in by signing, not by typing a secret.
@@ -19,6 +19,18 @@ export function SignIn({ onSignedIn }: { onSignedIn: (address: string) => void }
         try {
             const address = await connect();
             const offer = await api.nonce();
+            // The desk knows which address it will accept and says so in the payload, so a mismatch is
+            // worth catching here. Signing first would spend a wallet prompt to earn "not a valid owner
+            // signature", which is true and tells nobody which wallet to use instead.
+            if (address.toLowerCase() !== offer.message.address.toLowerCase()) {
+                throw new WalletError(
+                    `This desk only accepts ${offer.message.address}, and your wallet offered ${address}. ` +
+                    "Switch to the owner account in your wallet and sign in again.",
+                );
+            }
+            // The domain pins a chain, and a wallet pointed elsewhere refuses to sign typed data for it.
+            // Asking first turns a refusal nobody can act on into a switch prompt.
+            await ensureChain(offer.domain.chainId);
             const signature = await signTypedData(address, offer);
             const { address: confirmed } = await api.verify(offer.message.nonce, signature);
             onSignedIn(confirmed);

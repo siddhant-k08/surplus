@@ -101,7 +101,7 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
             const p = await api.propose();
             setProposal(p);
             setFills(null);
-            deadline.current = Date.now() + Number(p.toSign.message.issuedAt) * 0 + expirySeconds(mandate) * 1000;
+            deadline.current = Date.now() + expirySeconds(mandate) * 1000;
             return p.warnings.length === 0
                 ? null
                 : { tone: "ok", title: "Proposed, with notes", lines: p.warnings };
@@ -110,6 +110,16 @@ export function Desk({ address, onSignedOut }: { address: string; onSignedOut: (
     const doApprove = () =>
         run("approve", async () => {
             if (proposal === null) return null;
+            // A wallet can change accounts between signing in and approving, and the session would not
+            // know. Asking it to sign as an account it no longer holds fails somewhere inside the wallet
+            // with a message about `from`, which says nothing about what to do.
+            const selected = await currentAccount();
+            if (selected !== null && selected.toLowerCase() !== address.toLowerCase()) {
+                throw new Error(
+                    `Your wallet has switched to ${selected}, but this session is signed in as ${address}. ` +
+                    "Switch back to that account, or sign out and sign in again.",
+                );
+            }
             const signature = await signTypedData(address, proposal.toSign);
             const r = await api.approve(proposal.id, signature);
             setProposal({ ...proposal, state: "APPROVED" });
