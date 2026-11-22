@@ -1059,6 +1059,51 @@ Note also that no cost is booked on the live host yet. `costUsdcMinor` for the c
 21201 ($0.021201), so at a cent a sale a brief needs three sales just to pay for itself. That is a
 true fact about the economics at this price, not a fault.
 
+## The owner desk could not be signed into from a wallet, 22 Nov 2026
+
+Siddhant imported `OWNER_PRIVATE_KEY` into his wallet, tried to sign in to the desk, and got "not a
+valid owner signature". The owner flow had only ever been exercised through viem, never through an
+injected browser wallet, and two faults were waiting there.
+
+What was ruled out first: the deployment's `OWNER_ADDRESS` is `0x322472B62a297249234B258a48Df86ce8D620D48`,
+which is exactly the address `OWNER_PRIVATE_KEY` controls, and signing the live `/auth/nonce` payload
+with that key returns 200. Server, config and key all agree, so the fault was between the wallet and
+the payload.
+
+**1. The typed data never declared its own domain type.** `loginPayload` and `APPROVAL_TYPES` carried
+only `Login` and `Approval`. viem infers `EIP712Domain` from the domain's fields, so every test and
+every script passed. `eth_signTypedData_v4` expects it to be declared, and a wallet left to guess it
+can guess differently, which surfaces as a signature the server rejects with nothing to point at.
+
+Fixed with `EIP712_DOMAIN_TYPE` in `packages/core/src/eip712.ts`, added to the two payloads that cross
+the wire to a wallet: `approvalTypedDataJson` and the `/auth/nonce` response. The server's own
+verification still lets viem infer it, so the fix is additive.
+
+Declaring it inside `APPROVAL_TYPES` and `LOGIN_TYPES` was tried first and reverted: viem then infers
+the domain type from the declaration, and `chainId` as `uint256` makes it demand a `bigint`, which
+would have pushed a type change through config, the engine and the tests for no behavioural gain.
+
+Four tests pin the equivalence, because a drift between the wallet payload and the verified payload
+would look exactly like a wallet signing the wrong thing: the declared fields match the domain's own
+fields in order, the hash is identical with and without the declaration, and a signature made over the
+wallet payload verifies against the payload the server builds.
+
+**2. A mismatched account produced a true but useless message.** The desk is told which address it will
+accept (`message.address`) and signed with whatever the wallet offered without comparing the two. A
+wallet sitting on the wrong account therefore spent a prompt to earn "not a valid owner signature",
+which names neither the address it wanted nor the one it got. `SignIn.tsx` now compares before signing
+and names both. `Desk.tsx` does the same before an approval, since a wallet can switch accounts after
+sign-in; this also gives its unused `currentAccount` import a job.
+
+Also removed there: `Number(p.toSign.message.issuedAt) * 0` in the approval deadline, which contributed
+nothing except a way for the deadline to become `NaN`.
+
+Deployed and verified: `/auth/nonce` now answers with `types: [EIP712Domain, Login]`, and a signature
+over it still verifies 200. Core 281, API 224.
+
+Still unproven: whether a real browser wallet now signs it. That needs Siddhant's wallet, and if it
+still refuses, the next thing to read is the wallet's own error rather than the server's.
+
 ## Next milestones, in order
 
 1. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.
