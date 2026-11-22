@@ -1352,6 +1352,113 @@ loading Newsreader and declaring a navy `theme-color` and a coral favicon from t
 **Not visually reviewed: the desk once signed in, and the mandate editor**, both of which need an owner
 session and therefore a wallet signature. Their logic is covered by tests and typecheck.
 
+## One page became a site, 23 Nov 2026
+
+Siddhant's note: the landing page and the app were the same scrolling document, the nav was a table of
+contents pointing at sections of the page you were already on, and there was no page for the themes or
+the filings the agent has read. He asked for the pattern most products use, with tilt-rust.vercel.app
+as the reference: information on the landing page, an "Open app" button that goes somewhere else, and a
+simple nav of real places. He also asked for Base's wallet connect SDK.
+
+### The pages now
+
+| Path | What it is | Can it move money |
+|---|---|---|
+| `/` | Landing. Nothing on it wakes a wallet or loads the payment stack. | No |
+| `/themes` | Every theme researched, the companies under each, how often one came back empty. | No |
+| `/filings` | Every SEC document read, newest first, linking out to EDGAR. | No |
+| `/app` | The counter: connect, buy the latest brief, commission your own themes. | Yes |
+| `/app/portfolio` | One wallet's briefs, spend and balance, opened by a signature. | No |
+| `/r/<id>` | A bought brief. | No |
+| `/desk`, `/desk/mandate`, `/desk/book` | The owner's desk. | Yes, each trade signed on its own |
+
+`/library` and `/store` are replaced in history rather than left to 404, so a shared link still lands
+somewhere, and Back goes where the visitor came from rather than to the path that would move them
+again. Anything else gets a not-found page that offers the three live ways out.
+
+### Two API routes had to move
+
+The new endpoints were at `GET /themes` and `GET /filings`, which is exactly where the web app now has
+pages. Express would have matched the API route first and answered a person's navigation with JSON.
+They are now `GET /catalogue/themes` and `GET /catalogue/filings`, and `catalogue` was added to the
+single-page fallback's exclusion list in `app.ts`: without it, a catalogue path the server did not
+register would answer a machine with a web page instead of a 404.
+
+Neither endpoint leaks anything a buyer paid for. A theme id is the name of a question and a filing is
+a public SEC document with a public URL; the claims and quotes that connect the two are the product. A
+test asserts that neither response contains a claim, a quote, or a stored excerpt.
+
+### Wallets: wagmi and Coinbase Wallet
+
+The first attempt used `@base-org/account` directly behind a hand-rolled registry: a module-level
+provider variable, two SDKs, and every surface asking "is something connected?" in its own way.
+Siddhant called the experience thrash and he was right about the cause. Nothing told the page when an
+account changed, a reload forgot the wallet entirely, and the desk and the storefront could hold
+different ideas of who was signed in.
+
+Replaced with **wagmi 3** and **@coinbase/wallet-sdk 4.4** (through wagmi's `coinbaseWallet`
+connector, which imports the SDK only when someone picks it). wagmi is one store every component
+reads, it reconnects the last wallet on mount, and account and chain changes arrive as state rather
+than as events nobody subscribed to.
+
+Two faces onto the same store, because most of this app is not a component:
+
+- `src/wallet.ts`, imperative, for the x402 payment stack, sign-in and receipt recovery, all of which
+  want `signTypedData(address, payload)` they can call.
+- `src/Connect.tsx`, hooks, for the pages that show who is connected.
+
+Three things fell out of the change:
+
+- `toSignableJson` is gone. It existed because `JSON.stringify` throws on the bigints in an EIP-3009
+  authorisation; viem encodes a uint256 from a bigint directly, so the problem does not arise. Its
+  tests were replaced with tests for `signableTypedData`, which does the one transformation that is
+  still needed: dropping the declared `EIP712Domain` from `types` so viem derives it from the domain
+  instead. A declared one would override what viem derived, and a disagreement there is a signature
+  the server rejects with nothing to point at.
+- `ensureChain` no longer carries its own table of RPC urls and explorers. wagmi offers an unknown
+  chain to the wallet from the chain definitions in the config.
+- The balance read goes through the config's public transport rather than the wallet's provider.
+
+**The owner desk stays injected-only in practice.** The owner's address is fixed in server config and
+approvals are verified as EOA signatures, so a Coinbase Smart Wallet address would be rejected after
+signing rather than refused up front. Worth revisiting only alongside ERC-1271 verification.
+
+Cost, and what was done about it: wagmi, viem and react-query are about 65 kB gzipped, and three of
+this site's pages are a person reading about an agent. They load with `Wallets.tsx`, mounted only by
+`WalletPages.tsx` (`/app`, `/app/portfolio`) and `Owner.tsx` (`/desk`). The main chunk is 120.9 kB
+gzipped, below the 125.8 it was before wagmi and the 127 it was before any of this.
+
+### Other changes worth knowing
+
+- The desk is lazily loaded (`Owner.tsx`). One person will ever open it, and the landing page should
+  not ship the controls for someone else's treasury. The main chunk went from 135.9 kB gzipped with the
+  new pages inlined to 125.8 kB, below where it was before them.
+- `Recover.tsx` is gone. It was a second implementation of what the portfolio page does, with its own
+  copy of the signature flow; `/app` now points at the portfolio instead.
+- Shared chrome moved into `Chrome.tsx`: `SiteNav`, `SiteHeader`, `OpenApp`, `Figures`, `Note`, `Spine`.
+  `Band` in `Sections.tsx` now uses `Spine` rather than its own copy of it.
+- The nav collapses to one scrolling row on a phone rather than a menu button. Four links do not need a
+  drawer, and a drawer is another state to get wrong.
+- The themes page counts gaps as occurrences, not as themes that have never found anything. The same
+  question can find something in one brief and nothing in the next: longevity-biotech is covered once
+  and empty in six of seven briefs, and a count of "themes that never found anything" would have
+  reported zero gaps on a catalogue full of them.
+- The filings page shows citations rather than publishers. Every publisher is SEC EDGAR, and a figure
+  that is always 1 is furniture.
+- A filing's URL is checked to be http or https before it is linked. Source documents are untrusted
+  data everywhere else in this project and a URL is no exception.
+
+### Verified
+
+Typecheck clean across core, API, scripts and web. Core 281, API 234 (25 Postgres tests included), web
+48: seven new ones cover the router, including trailing slashes, a receipt id that is not one, and the
+retired paths, and four cover `signableTypedData`. Every page was loaded against the running API and read back: themes shows 3 themes,
+9 companies and 6 empty runs across 7 briefs; filings shows 15 real documents with their EDGAR links.
+
+**Not visually reviewed: the desk once signed in, and the mandate editor**, unchanged from before and
+still needing an owner wallet signature. The browser pane also hid itself partway through the review,
+so the later checks are DOM and text rather than screenshots.
+
 ## Next milestones, in order
 
 1. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.
