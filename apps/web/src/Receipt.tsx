@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatUsdc } from "./api";
+import { ApiError, formatUsdc, get } from "./api";
 
 interface Paid {
   receipt: { transaction: string; amountUsdcMinor: string; at: string };
@@ -26,14 +26,22 @@ export function Receipt({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/receipt/${id}`)
-      .then(async (r) => {
-        if (r.ok) return setPaid(await r.json());
-        const body = (await r.json().catch(() => ({}))) as { error?: string };
-        setError(body.error ?? "That link does not open anything.");
-      })
-      .catch(() => setError("Could not reach the agent. It may be restarting."));
+    // `get` retries a cold start; a 404 is an answer and is not retried
+    get<Paid>(`/receipt/${id}`)
+      .then(setPaid)
+      .catch((e: unknown) => {
+        setError(
+          e instanceof ApiError
+            ? e.message
+            : "Could not reach the agent. It may be restarting; try again shortly.",
+        );
+      });
   }, [id]);
+
+  // the tab should not promise a brief the link does not open
+  useEffect(() => {
+    if (error !== null) document.title = "That link does not open a brief: Surplus";
+  }, [error]);
 
   if (error !== null) {
     return (

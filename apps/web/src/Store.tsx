@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Recover } from "./Recover";
-import { formatUsdc } from "./api";
+import { formatUsdc, get } from "./api";
 import { connect, hasWallet, describeWalletError, ensureChain, chainIdFromCaip } from "./wallet";
 
 interface Catalogue {
@@ -30,10 +30,10 @@ export function Store() {
     const [bought, setBought] = useState<Bought | null>(null);
 
     useEffect(() => {
-        fetch("/catalogue")
-            .then((r) => r.json())
+        // through `get`, so a cold start that answers 503 for a moment is retried rather than shown
+        get<Catalogue>("/catalogue")
             .then(setCat)
-            .catch(() => setError("Could not reach the agent. It may be restarting."));
+            .catch(() => setError("Could not reach the agent. It may be restarting; try again shortly."));
     }, []);
 
     async function purchase(kind: "brief" | "research") {

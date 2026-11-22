@@ -26,23 +26,63 @@ export class ApiError extends Error {
     }
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(path, {
-        ...init,
-        credentials: "same-origin",
-        headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-    });
-    const text = await res.text();
-    const body: unknown = text === "" ? {} : JSON.parse(text);
+/**
+ * Statuses worth trying again, and only for reads.
+ *
+ * The agent runs on a host that starts an instance on demand, and an instance that is still finding
+ * its database answers 503 for a moment. Showing a person "could not reach the agent" because they
+ * were the first visitor in an hour is a failure of the page, not of the agent.
+ *
+ * A write is never retried. A POST here can settle a payment, approve a trade or spend a nonce, and
+ * repeating one is not a retry: it is a second attempt at moving money. If a write is interrupted the
+ * person is told, and they decide.
+ */
+const RETRIABLE = new Set([502, 503, 504]);
+const BACKOFF_MS = [250, 750];
 
-    if (!res.ok) {
-        const o = body as { error?: string; refused?: string[]; stopped?: string[]; details?: string[] };
-        // The agent answers a refusal with its reasons rather than a bare failure, so keep them.
-        const reasons = o.refused ?? o.stopped ?? o.details ?? [];
-        throw new ApiError(res.status, o.error ?? reasons[0] ?? `request failed with ${res.status}`, reasons);
+const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+async function call<T>(path: string, init?: RequestInit): Promise<T> {
+    const method = (init?.method ?? "GET").toUpperCase();
+    const mayRetry = method === "GET";
+
+    for (let attempt = 0; ; attempt += 1) {
+        let res: Response;
+        try {
+            res = await fetch(path, {
+                ...init,
+                credentials: "same-origin",
+                headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+            });
+        } catch (e) {
+            // the network itself failed, which for a read is worth one more go
+            if (mayRetry && attempt < BACKOFF_MS.length) {
+                await wait(BACKOFF_MS[attempt]!);
+                continue;
+            }
+            throw e;
+        }
+
+        if (mayRetry && RETRIABLE.has(res.status) && attempt < BACKOFF_MS.length) {
+            await wait(BACKOFF_MS[attempt]!);
+            continue;
+        }
+
+        const text = await res.text();
+        const body: unknown = text === "" ? {} : JSON.parse(text);
+
+        if (!res.ok) {
+            const o = body as { error?: string; refused?: string[]; stopped?: string[]; details?: string[] };
+            // The agent answers a refusal with its reasons rather than a bare failure, so keep them.
+            const reasons = o.refused ?? o.stopped ?? o.details ?? [];
+            throw new ApiError(res.status, o.error ?? reasons[0] ?? `request failed with ${res.status}`, reasons);
+        }
+        return body as T;
     }
-    return body as T;
 }
+
+/** A read, with the retry above. Exported so every page shares one idea of what a flaky read is. */
+export const get = <T>(path: string): Promise<T> => call<T>(path);
 
 const post = <T>(path: string, body?: unknown): Promise<T> =>
     call<T>(path, { method: "POST", ...(body !== undefined && { body: JSON.stringify(body) }) });

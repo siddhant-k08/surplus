@@ -952,6 +952,34 @@ so `:focus` cannot match there. The rule is in the stylesheet and the selector i
 
 Core 277, API 224.
 
+## The README said the wrong thing, 22 Nov 2026
+
+The repository's front door still described a library prototype with "no production executor or
+user-facing application" and an `apps/` folder "reserved for future applications". All three are
+false, and a public repository whose README is out of date is worse than one with no README: it tells
+a visitor the project is less than it is, and it tells the author nothing.
+
+Rewritten for a reader arriving cold: what it sells, what is real and what is simulated as a table
+rather than a paragraph, why the simulated part is simulated (the two halves are on different
+networks, not a shortage of effort), how a brief earns the right to exist, how the money works, how to
+run it, and the limits stated plainly including the eligibility question nothing in the repository
+answers.
+
+## Reads retry, writes never, 22 Nov 2026
+
+A serverless instance that is still finding its database answers 503 for a moment, and the page was
+showing "could not reach the agent" to whoever happened to be the first visitor in an hour.
+
+Reads now retry twice, at 250 ms and 750 ms, on a network failure or a 502, 503 or 504. Writes are
+never retried, and the comment says why: a POST here can settle a payment, approve a trade or spend a
+nonce, and repeating one is not a retry but a second attempt at moving money. If a write is
+interrupted the person is told and decides.
+
+The storefront and the receipt page were still calling `fetch` directly and so had neither the retry
+nor the error handling; both go through the shared reader now. A 404 is an answer and is not retried.
+
+Core 277, API 224.
+
 ### Still open on this
 
 - A real purchase against the deployed endpoint has not been made.
