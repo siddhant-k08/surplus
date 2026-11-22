@@ -1,6 +1,5 @@
-import { useState } from "react";
-import { useAccount, useDisconnect } from "wagmi";
-import { ConnectWallet, Wallet as OnchainWallet } from "@coinbase/onchainkit/wallet";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useAccount, useConnect, useConnectors, useDisconnect, type Connector } from "wagmi";
 import { Button, Chip, Led, Note } from "./Chrome";
 import { shortHash } from "./explorer";
 import { describeWalletError, type WalletKind } from "./wallet";
@@ -58,13 +57,135 @@ export function WalletChip({ wallet }: { wallet: Wallet }) {
 }
 
 /**
+ * Every wallet this visitor can actually use, in the order they should see them.
+ *
+ * Coinbase Wallet first: it covers the extension, the phone app and a Smart Wallet passkey, so it is
+ * the only route for someone with nothing installed. After it, whatever the browser announced over
+ * EIP-6963, which is how a modern extension introduces itself and why these arrive with their real
+ * name and icon rather than as a generic "injected". The generic connector is the fallback for an
+ * extension too old to announce itself, and it is dropped the moment a real one has.
+ */
+function useWalletOptions(): Connector[] {
+    const connectors = useConnectors();
+    return useMemo(() => {
+        const coinbase = connectors.filter((c) => c.type === "coinbaseWallet");
+        const announced = connectors.filter((c) => c.type === "injected" && c.id !== "injected");
+        const generic = connectors.filter(
+            (c) =>
+                c.id === "injected" &&
+                announced.length === 0 &&
+                typeof window !== "undefined" &&
+                (window as { ethereum?: unknown }).ethereum !== undefined,
+        );
+        return [...coinbase, ...announced, ...generic];
+    }, [connectors]);
+}
+
+/**
  * One button.
  *
- * It opens OnchainKit's wallet modal, which lists whatever the visitor can actually use, so the page
- * never asks anyone to know the difference between a Smart Wallet and an extension before they have
- * a reason to care. The button itself is ours, through the `render` prop, because a stock button in
- * someone else's styling is the one element on the page that would look borrowed.
+ * It used to be two, Coinbase and browser wallet side by side, which asked a visitor to know the
+ * difference before they had any reason to care. Now it is the control every app has: one Connect
+ * wallet, and a choice only when there is really more than one thing to choose. Someone with nothing
+ * installed has exactly one option and never sees a list.
  */
+export function ConnectButton({ label = "Connect wallet" }: { label?: string }) {
+    const options = useWalletOptions();
+    const { connectAsync, isPending } = useConnect();
+    const [error, setError] = useState<string | null>(null);
+    const [picking, setPicking] = useState(false);
+
+    async function use(connector: Connector) {
+        setPicking(false);
+        setError(null);
+        try {
+            await connectAsync({ connector });
+        } catch (e) {
+            setError(describeWalletError(e));
+        }
+    }
+
+    const only = options.length === 1 ? options[0] : undefined;
+
+    return (
+        <div className="grid gap-3">
+            <div>
+                <Button
+                    onClick={() => (only === undefined ? setPicking(true) : void use(only))}
+                    disabled={isPending || options.length === 0}
+                >
+                    {isPending ? "Opening your wallet…" : label}
+                    <span aria-hidden="true">↗</span>
+                </Button>
+            </div>
+            {picking && <Picker options={options} onPick={(c) => void use(c)} onClose={() => setPicking(false)} />}
+            {error !== null && <Note tone="bad" alert>{error}</Note>}
+        </div>
+    );
+}
+
+/**
+ * The choice, when there is one.
+ *
+ * A native `<dialog>`, so the focus trap, the Escape key and the backdrop are the browser's rather
+ * than three more things to get wrong. Each row is the wallet's own name and icon, as it announced
+ * them, because a list that renamed people's wallets would be a list they could not read.
+ */
+function Picker({
+    options, onPick, onClose,
+}: {
+    options: Connector[]; onPick: (c: Connector) => void; onClose: () => void;
+}) {
+    const ref = useRef<HTMLDialogElement>(null);
+
+    useEffect(() => {
+        const el = ref.current;
+        if (el === null || el.open) return;
+        el.showModal();
+    }, []);
+
+    return (
+        <dialog
+            ref={ref}
+            onClose={onClose}
+            onClick={(e) => { if (e.target === ref.current) ref.current?.close(); }}
+            aria-label="Choose a wallet"
+            className="w-[min(22rem,calc(100vw-2rem))] rounded-card border border-line bg-surface p-0 text-dim backdrop:bg-black/70"
+        >
+            <div className="flex items-center gap-2 border-b border-line px-4 py-3 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.09em] text-dim">
+                Choose a wallet
+                <button
+                    type="button"
+                    onClick={() => ref.current?.close()}
+                    className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-base leading-none text-dim hover:text-ink"
+                    aria-label="Close"
+                >
+                    ×
+                </button>
+            </div>
+            <ul className="m-0 list-none p-0">
+                {options.map((c) => (
+                    <li key={c.uid} className="border-b border-line last:border-b-0">
+                        <button
+                            type="button"
+                            onClick={() => onPick(c)}
+                            className="flex w-full cursor-pointer items-center gap-3 border-0 bg-transparent px-4 py-3.5 text-left text-[0.9375rem] text-ink hover:bg-pill"
+                        >
+                            {c.icon === undefined ? (
+                                <span aria-hidden="true" className="size-5 rounded-[4px] bg-lime" />
+                            ) : (
+                                <img src={c.icon} alt="" width={20} height={20} className="size-5 rounded-[4px]" />
+                            )}
+                            {c.name}
+                        </button>
+                    </li>
+                ))}
+            </ul>
+        </dialog>
+    );
+}
+
+/** The connect control in context: who is connected, or the one button, with what it needs stated. */
 export function ConnectRow({ wallet, chain }: { wallet: Wallet; chain: string }) {
     if (wallet.address !== null) {
         return (
@@ -80,19 +201,10 @@ export function ConnectRow({ wallet, chain }: { wallet: Wallet; chain: string })
 
     return (
         <div className="grid gap-3">
-            <OnchainWallet>
-                <ConnectWallet
-                    render={({ onClick, status }) => (
-                        <Button onClick={onClick} disabled={status === "connecting"}>
-                            {status === "connecting" ? "Opening your wallet…" : "Connect wallet"}
-                            <span aria-hidden="true">↗</span>
-                        </Button>
-                    )}
-                />
-            </OnchainWallet>
+            <ConnectButton />
             <Note>
-                You need USDC on {chain}. You do not need ETH: the facilitator pays the gas. No wallet yet?
-                Coinbase Wallet in the list signs with a passkey, so there is nothing to install.
+                You need USDC on {chain}. You do not need ETH: the facilitator pays the gas. Nothing installed?
+                Coinbase Wallet signs with a passkey, so there is nothing to download.
             </Note>
             {wallet.error !== null && <Note tone="bad" alert>{wallet.error}</Note>}
         </div>

@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useAccount } from "wagmi";
-import { ConnectWallet, Wallet as OnchainWallet } from "@coinbase/onchainkit/wallet";
 import { api } from "./api";
 import { Button, Chip, Footer, Led, Wordmark } from "./Chrome";
+import { ConnectButton } from "./Connect";
 import { MaskedLine, motion, riseItem, stagger } from "./motion";
 import { signTypedData, describeWalletError, ensureChain, WalletError } from "./wallet";
 
@@ -76,16 +76,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (address: string) => void }
                         that did both on one click would be asking for a signature nobody expected. */}
                     <motion.div variants={riseItem} className="mt-8">
                         {address === undefined ? (
-                            <OnchainWallet>
-                                <ConnectWallet
-                                    render={({ onClick, status }) => (
-                                        <Button onClick={onClick} disabled={status === "connecting"}>
-                                            {status === "connecting" ? "Opening your wallet…" : "Connect wallet"}
-                                            <span aria-hidden="true">↗</span>
-                                        </Button>
-                                    )}
-                                />
-                            </OnchainWallet>
+                            <ConnectButton />
                         ) : (
                             <Button onClick={run} disabled={busy}>
                                 {busy ? "Waiting for your wallet…" : "Sign in with wallet"} <span aria-hidden="true">↗</span>

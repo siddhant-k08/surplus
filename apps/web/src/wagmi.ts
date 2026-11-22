@@ -25,7 +25,7 @@ export const config = createConfig({
         coinbaseWallet({
             appName: "Surplus",
             appLogoUrl: typeof window === "undefined" ? null : `${window.location.origin}/favicon.svg`,
-            preference: "all",
+            preference: { options: "all" },
         }),
         injected(),
     ],
