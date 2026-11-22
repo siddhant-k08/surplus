@@ -788,6 +788,31 @@ what happens around a send should not depend on an aggregator's endpoint being u
 
 Core 261, API 204.
 
+## Real execution is now reachable, 22 Nov 2026
+
+The executor was crash-safe and, it turned out, dead code: nothing called `fill`. `execute` always
+simulated, so turning mainnet on would have changed a label and nothing else. Worse, had it been wired
+up naively it would have booked quantities from the quoted price rather than from what the swap
+actually returned, which is the difference between a ledger and a guess.
+
+- `Treasury.execute` takes an optional `realized` map, keyed by leg index. With it, quantities are what
+  the chain returned and the entry carries the transaction hash and drops the SIMULATED label. Without
+  it, nothing changes: the simulation is still a simulation and still says so.
+- A leg missing from that map did not execute. It is not booked, and the proposal ends FAILED however
+  many of its siblings succeeded, because a proposal that half happened is not a settled proposal. The
+  money that did move is still booked, because it moved.
+- `splitFill` and `attributeFills` in `swapplan.ts` put the quantities back the way the money came out.
+  One swap can cover several themes and the trade cap can spread one leg over several swaps, so this
+  replays the plan's own order. Every unit is accounted for: the rounding remainder goes to the largest
+  contributor rather than being dropped, because tokens in the wallet and in no entry would make the
+  books disagree with the chain.
+- `InvestingEngine.sendSwaps` sends one swap per order, keyed `proposal:position` so a retry resumes
+  rather than sends again, and stops at the first failure. With real money a failed swap is a reason to
+  look, not a reason to try the next one.
+- Nothing is sent when a gate blocked the trade. The checks exist to be read before the money moves.
+
+Core 272, API 207. The mainnet path is still off at the flag; what changed is that it is now a path.
+
 ### Still open on this
 
 - A real purchase against the deployed endpoint has not been made.

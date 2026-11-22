@@ -201,6 +201,9 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
         allBriefs: async () => [...(await catalogue.list()), ...(await customBriefs.list())],
         briefProblems: async () => [...(await catalogue.problems()), ...(await customBriefs.problems())],
         salesLedger: () => salesLedgerLoaded.all(),
+        // Real swaps only when there is an executor, which refuses to exist without mainnet deliberately
+        // enabled, a spend cap and a key. Otherwise fills are simulated and labelled as such.
+        ...(execution.executor !== null && { executor: execution.executor }),
         market,
         ledger: investLedger,
         sink: investStore,

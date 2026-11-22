@@ -8,6 +8,7 @@ import { parseUsdc as u } from "../src/money";
 import type { Leg } from "../src/policy";
 import { baseTerms, NVDA, MSFT, META, AMZN } from "./fixtures";
 
+
 const T0 = Date.parse("2026-11-19T12:00:00Z");
 
 function setup() {
@@ -384,5 +385,91 @@ describe("restoring a treasury from its ledger", () => {
         mandates.create(baseTerms());
         const tr = new Treasury({ mode: "sim", mandates, ledger: new Ledger() });
         expect(tr.settleBrief("nothing").net).toBe(0n);
+    });
+});
+
+describe("booking what the chain actually returned", () => {
+    const setup = () => {
+        const mandates = new MandateStore();
+        mandates.create(baseTerms());
+        const tr = new Treasury({ mode: "mainnet", mandates });
+        tr.ledger.post({
+            type: "OPENING_BALANCE", mode: "mainnet", at: new Date("2026-11-22T00:00:00Z"),
+            memo: "investable for the test",
+            lines: [
+                { account: "surplus.investable", amount: u("10.00") },
+                { account: "equity.opening", amount: u("-10.00") },
+            ],
+        });
+        return { tr, mandates };
+    };
+
+    const approveTwoLegs = (tr: Treasury) => {
+        const legs: Leg[] = [
+            { symbol: "NVDAc", asset: NVDA, theme: "ai-compute", usdcIn: u("1.00"), maxSlippageBps: 100 },
+            { symbol: "MSFTc", asset: MSFT, theme: "platform-giants", usdcIn: u("1.00"), maxSlippageBps: 100 },
+        ];
+        const quoted = new Map([[NVDA.toLowerCase(), u("100")], [MSFT.toLowerCase(), u("50")]]);
+        expect(tr.createProposal({ id: "p1", legs, quotedPrices: quoted })).toEqual({ ok: true });
+        expect(tr.approve("p1", "owner").ok).toBe(true);
+        return { quoted, decimals: new Map([[NVDA.toLowerCase(), 18], [MSFT.toLowerCase(), 18]]) };
+    };
+
+    it("records the quantity the swap returned, not the one the quote predicted", () => {
+        const { tr } = setup();
+        const { quoted, decimals } = approveTwoLegs(tr);
+        const tx = "0x" + "ab".repeat(32);
+
+        const result = tr.execute("p1", {
+            freshPrices: quoted,
+            decimals,
+            realized: new Map([
+                [0, { quantity: 9_000_000_000_000_000n, transaction: tx }],
+                [1, { quantity: 19_000_000_000_000_000n, transaction: tx }],
+            ]),
+        });
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.fills[0]!.quantity).toBe(9_000_000_000_000_000n); // what came back, not 10^16
+        expect(result.unfilled).toEqual([]);
+        expect(tr.state("p1")).toBe("SETTLED");
+
+        const entry = tr.ledger.all().find((e) => e.type === "PURCHASE_SETTLED");
+        expect(entry?.txHash).toBe(tx);
+        expect(entry?.memo).not.toContain("SIMULATED");
+    });
+
+    it("books only the legs that executed, and refuses to call that settled", () => {
+        // the money that moved has to appear; the money that did not must not, and a proposal that
+        // half happened is not a settled proposal
+        const { tr } = setup();
+        const { quoted, decimals } = approveTwoLegs(tr);
+
+        const result = tr.execute("p1", {
+            freshPrices: quoted,
+            decimals,
+            realized: new Map([[0, { quantity: 9_000_000_000_000_000n, transaction: "0x" + "cd".repeat(32) }]]),
+        });
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.fills.length).toBe(1);
+        expect(result.unfilled).toEqual([{ symbol: "MSFTc", usdcIn: u("1.00"), reason: "the swap did not execute" }]);
+        expect(tr.state("p1")).toBe("FAILED");
+
+        // only the leg that happened moved money out of the investable balance
+        expect(tr.ledger.balance("surplus.investable")).toBe(u("9.00"));
+        expect(tr.ledger.all().filter((e) => e.type === "PURCHASE_SETTLED").length).toBe(1);
+    });
+
+    it("still simulates when no realized fills are given, and says so in the entry", () => {
+        const { tr } = setup();
+        const { quoted, decimals } = approveTwoLegs(tr);
+        const result = tr.execute("p1", { freshPrices: quoted, decimals });
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.fills.length).toBe(2);
+        expect(tr.state("p1")).toBe("SETTLED");
     });
 });

@@ -40,8 +40,20 @@ export interface ProposalRecord {
 export type ProposeResult = { ok: true } | { ok: false; reasons: string[] };
 export type ApproveResult = { ok: true; approval: Approval } | { ok: false; reasons: string[] };
 export type ExecuteResult =
-    | { ok: true; fills: Fill[] }
+    | { ok: true; fills: Fill[]; unfilled: { symbol: string; usdcIn: bigint; reason: string }[] }
     | { ok: false; outcome: PrecheckOutcome; reasons: string[] };
+
+/**
+ * What a leg actually got, when the swap really happened.
+ *
+ * Keyed by leg index, because the same token can appear in more than one theme and the index is what
+ * stays stable. Absent for a leg means that leg did not execute: it is not booked, and the proposal
+ * does not reach SETTLED.
+ */
+export interface RealizedFill {
+    quantity: bigint;
+    transaction: string;
+}
 
 interface BriefAccount {
     revenue: bigint;
@@ -376,9 +388,23 @@ export class Treasury {
     }
 
     /** Simulated execution: re-checks everything, then books fills at the fresh prices. */
+    /**
+     * Books the fills for an approved proposal.
+     *
+     * With no `realized` map the quantities come from the fresh quotes, which is a simulation and is
+     * labelled as one. With a `realized` map the quantities are what the chain actually returned, and a
+     * leg missing from it did not happen: it is not booked, and the proposal ends FAILED rather than
+     * SETTLED however many of its siblings succeeded. Booking a leg that did not execute would put a
+     * position in the books that does not exist in the wallet.
+     */
     execute(
         id: string,
-        i: { freshPrices: PriceMap; decimals: ReadonlyMap<string, number>; blocks?: readonly string[] },
+        i: {
+            freshPrices: PriceMap;
+            decimals: ReadonlyMap<string, number>;
+            blocks?: readonly string[];
+            realized?: ReadonlyMap<number, RealizedFill>;
+        },
     ): ExecuteResult {
         const rec = this.get(id);
         if (rec.machine.state !== "APPROVED" || !rec.approval) {
@@ -420,19 +446,27 @@ export class Treasury {
 
         rec.machine.transition("EXECUTING", this.now());
         const fills: Fill[] = [];
+        const unfilled: { symbol: string; usdcIn: bigint; reason: string }[] = [];
         try {
             // The same asset can appear in more than one theme, so the key is per leg, not per asset.
             // Legs are fixed when the proposal is created, so the index is stable across retries.
             for (const [n, leg] of rec.proposal.legs.entries()) {
                 const key = leg.asset.toLowerCase();
                 const price = i.freshPrices.get(key)!;
-                const quantity = (leg.usdcIn * 10n ** BigInt(i.decimals.get(key)!)) / price;
-                const tag = this.opts.mode === "sim" ? "SIMULATED " : "";
+                const real = i.realized?.get(n);
+                if (i.realized !== undefined && real === undefined) {
+                    // the swap for this leg did not happen; booking it would invent a position
+                    unfilled.push({ symbol: leg.symbol, usdcIn: leg.usdcIn, reason: "the swap did not execute" });
+                    continue;
+                }
+                const quantity = real?.quantity ?? (leg.usdcIn * 10n ** BigInt(i.decimals.get(key)!)) / price;
+                const tag = real === undefined ? "SIMULATED " : "";
                 this.ledger.post({
                     type: "PURCHASE_SETTLED",
                     mode: this.opts.mode,
                     at: this.now(),
                     idempotencyKey: `fill:${id}:${n}:${key}`,
+                    ...(real !== undefined && { txHash: real.transaction }),
                     memo: `${tag}fill ${leg.symbol}: ${formatUsdc(leg.usdcIn)} USDC at ${price} => ${quantity} units`,
                     lines: [
                         { account: `positions.${key}`, amount: leg.usdcIn },
@@ -446,8 +480,18 @@ export class Treasury {
             throw e;
         }
         rec.fills = fills;
+        if (unfilled.length > 0) {
+            // The money that did move is booked; the proposal is not settled, because it did not all
+            // happen. The owner proposes again for the remainder rather than this pretending.
+            rec.machine.transition(
+                "FAILED",
+                this.now(),
+                `only ${fills.length} of ${rec.proposal.legs.length} legs executed`,
+            );
+            return { ok: true, fills, unfilled };
+        }
         rec.machine.transition("SETTLED", this.now());
-        return { ok: true, fills };
+        return { ok: true, fills, unfilled: [] };
     }
 
     /** After a stopped precheck: refresh the quotes and put the proposal back in front of the Owner. */

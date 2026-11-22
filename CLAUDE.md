@@ -47,7 +47,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 27 files, 261 tests. API 12 files, 204 tests. The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 27 files, 272 tests. API 12 files, 207 tests. The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -68,6 +68,7 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - Approvals bind to proposal hash, mandate version and hash, max spend and expiry. Drift beyond tolerance means REAPPROVAL_REQUIRED.
 - An approval is refused if the mandate moved since the payload was offered: the signature covers a mandate version and hash, and `Treasury.approve` takes an `expect` approval so the domain layer enforces the match too.
 - An approval over HTTP needs the owner's EIP-712 signature (`src/eip712.ts` builds the payload, `apps/api/src/signature.ts` verifies it). The bearer token only decides who reaches the route. `OWNER_ADDRESS` is required and comes from config, never from the request. Core's `Treasury.approve` still allows an unsigned approval for the sim demos, so the requirement is enforced in the API layer.
+- A real fill is booked from what the swap returned, never from the quoted price: `Treasury.execute` takes a `realized` map and `attributeFills` puts the quantities back across the legs the way the money came out, remainder to the largest contributor so no unit is dropped. A leg whose swap did not execute is not booked and the proposal ends FAILED, because a proposal that half happened is not settled.
 - The LLM never computes money, never sets source tiers, and never sets evidence scores.
 - `realizedSales`/`realizedRevenue` are the only answer to what was earned; a payment with no settlement transaction is not revenue.
 - Costs and revenue are attributed per brief: every saved brief's model cost is booked once (`llm-<briefId>`), and each sale is mirrored individually keyed on its settlement transaction and attributed to the brief it bought. Booking only the newest brief's cost understated real spending. Simulated activity never writes into the testnet or mainnet book: the investing loop keeps its own `sim` ledger and reads the real one read-only.

@@ -890,3 +890,96 @@ describe("the mandate can forbid investing while behind", () => {
         expect(l.behindBy).toBe(u("1.10"));
     });
 });
+
+describe("executing for real", () => {
+    /** An executor that records what it was asked to send, and can fail on a chosen symbol. */
+    function fakeExecutor(over: { failOn?: string; amountOut?: bigint } = {}) {
+        const sent: { key: string; symbol: string; usdcIn: bigint }[] = [];
+        return {
+            sent,
+            executor: {
+                fill: async (order: { symbol: string; usdcIn: bigint }, _quote: unknown, key: string) => {
+                    sent.push({ key, symbol: order.symbol, usdcIn: order.usdcIn });
+                    if (order.symbol === over.failOn) throw new Error("swap reverted on chain");
+                    return {
+                        amountOut: over.amountOut ?? 7_000_000_000_000_000n,
+                        transaction: "0x" + "ab".repeat(32),
+                    };
+                },
+            },
+        };
+    }
+
+    const mainnetEngine = async (executor?: { fill: unknown }) =>
+        new InvestingEngine({
+            mode: "mainnet",
+            openingFloat: u("1.00"),
+            mandates: mandateFor(terms),
+            readBrief: savedBrief,
+            allBriefs: () => [savedBrief()],
+            salesLedger: () => salesLedger("3.00"),
+            market,
+            chainId: CHAIN_ID,
+            verifyApproval: ({ approval, signature }) =>
+                verifyApprovalSignature({ approval, signature, chainId: CHAIN_ID, ownerAddress: ownerAccount.address }),
+            ...(executor !== undefined && { executor: executor as never }),
+        });
+
+    const approved = async (e: InvestingEngine) => {
+        await e.syncRevenue();
+        const p = await e.propose("p1");
+        if (!p.ok) throw new Error(`the proposal was refused: ${p.reasons.join("; ")}`);
+        const r = await e.approve("p1", await signOffer(ownerAccount, p.toSign));
+        if (!r.ok) throw new Error(`the approval was refused: ${JSON.stringify(r)}`);
+    };
+
+    it("sends a swap per order and books the quantity that came back", async () => {
+        const fake = fakeExecutor({ amountOut: 9_000_000_000_000_000n });
+        const e = await mainnetEngine(fake.executor);
+        await approved(e);
+
+        const result = await e.execute("p1");
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.simulated).toBe(false);
+        expect(fake.sent.length).toBeGreaterThan(0);
+        // keyed by proposal and position, so a retry resumes rather than sends again
+        expect(fake.sent[0]!.key).toMatch(/^p1:\d+$/);
+
+        // the booked quantity is what the chain returned, split across the legs that paid
+        const booked = result.fills.reduce((a, f) => a + BigInt(f.quantity), 0n);
+        expect(booked).toBe(9_000_000_000_000_000n * BigInt(fake.sent.length));
+        expect(result.unfilled).toEqual([]);
+
+        const entry = e.treasury.ledger.all().find((x) => x.type === "PURCHASE_SETTLED");
+        expect(entry?.txHash).toBe("0x" + "ab".repeat(32));
+        expect(entry?.memo).not.toContain("SIMULATED");
+    });
+
+    it("books only what executed when a swap fails, and does not settle the proposal", async () => {
+        const fake = fakeExecutor({ failOn: "NVDAc" });
+        const e = await mainnetEngine(fake.executor);
+        await approved(e);
+
+        const result = await e.execute("p1");
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.warnings.join(" ")).toMatch(/swap reverted on chain/);
+        // nothing was booked for the leg whose swap failed
+        expect(result.fills.every((f) => f.symbol !== "NVDAc")).toBe(true);
+        expect(result.unfilled.some((x) => x.symbol === "NVDAc")).toBe(true);
+        expect(e.treasury.state("p1")).toBe("FAILED");
+    });
+
+    it("sends nothing at all without an executor, and says the fills are simulated", async () => {
+        const e = await mainnetEngine();
+        await approved(e);
+        const result = await e.execute("p1");
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.simulated).toBe(true);
+        expect(result.fills.length).toBeGreaterThan(0);
+        expect(e.treasury.ledger.all().find((x) => x.type === "PURCHASE_SETTLED")?.memo)
+            .toContain("SIMULATED");
+    });
+});

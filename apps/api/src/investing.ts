@@ -6,6 +6,7 @@ import {
     validateBrief,
     swapPlan,
     swapPlanTotal,
+    attributeFills,
     realizedSales,
     investmentGap,
     preTradeChecks,
@@ -15,6 +16,9 @@ import {
     approvalTypedDataJson,
     formatUsdc,
     type InvestmentGap,
+    type RealizedFill,
+    type Quote,
+    type SwapOrder,
     type LedgerTx,
     type Leg,
     type Approval,
@@ -71,6 +75,15 @@ export interface InvestingDeps {
     briefProblems?: () =>
         | readonly { file: string; error: string }[]
         | Promise<readonly { file: string; error: string }[]>;
+    /**
+     * Sends the swaps, when there are real ones to send.
+     *
+     * Absent means fills are simulated, which is the normal state: the executor refuses to exist
+     * without mainnet deliberately enabled, a spend cap and a key.
+     */
+    executor?: {
+        fill(order: SwapOrder, quote: Quote, key: string): Promise<{ amountOut: bigint; transaction: string }>;
+    };
     /** The paid endpoint's ledger, read only, as the source of real revenue. */
     salesLedger: () => readonly LedgerTx[];
     market: () => Promise<MarketData>;
@@ -472,7 +485,14 @@ export class InvestingEngine {
      * quote or price drift stops execution and the proposal needs re-approval.
      */
     async execute(id: string): Promise<
-        | { ok: true; fills: { symbol: string; usdcIn: string; price: string; quantity: string }[]; simulated: boolean; warnings: string[] }
+        | {
+            ok: true;
+            fills: { symbol: string; usdcIn: string; price: string; quantity: string }[];
+            /** Legs whose swap did not execute. Not booked, and the proposal is not settled. */
+            unfilled: { symbol: string; usdcIn: string; reason: string }[];
+            simulated: boolean;
+            warnings: string[];
+        }
         | { ok: false; reasons: string[]; outcome?: string }
     > {
         const rec = this.treasury.proposal(id);
@@ -489,14 +509,28 @@ export class InvestingEngine {
             now: this.now(),
         });
         const blocks = blockReasons(gates);
-        const result = this.treasury.execute(id, { freshPrices: fresh.prices, decimals, blocks });
+
+        // Real swaps, when there are any to send. Anything the gates stopped is not sent at all: the
+        // checks exist to be read before the money moves, not after.
+        const sending = this.deps.executor !== undefined && this.deps.mode === "mainnet" && blocks.length === 0;
+        const { realized, problems } = sending
+            ? await this.sendSwaps(id, rec.proposal.legs, fresh.quotes)
+            : { realized: undefined, problems: [] as string[] };
+
+        const result = this.treasury.execute(id, {
+            freshPrices: fresh.prices,
+            decimals,
+            blocks,
+            ...(realized !== undefined && { realized }),
+        });
         await this.flush();
 
         if (!result.ok) return { ok: false, reasons: result.reasons, outcome: result.outcome };
         return {
             ok: true,
-            simulated: this.deps.mode !== "mainnet",
-            warnings: warnings(gates),
+            simulated: !sending,
+            warnings: [...warnings(gates), ...problems],
+            unfilled: result.unfilled.map((x) => ({ symbol: x.symbol, usdcIn: x.usdcIn.toString(), reason: x.reason })),
             fills: result.fills.map((f) => ({
                 symbol: f.symbol,
                 usdcIn: f.usdcIn.toString(),
@@ -504,6 +538,55 @@ export class InvestingEngine {
                 quantity: f.quantity.toString(),
             })),
         };
+    }
+
+    /**
+     * Sends one swap per order and reports what each returned.
+     *
+     * Stops at the first failure rather than carrying on. With real money, a swap that failed is a
+     * reason to look rather than a reason to try the next one, and the legs that did not execute are
+     * simply not booked.
+     *
+     * The key is the proposal and the position in the plan, so a retry of the same proposal resumes
+     * each swap instead of sending it again.
+     */
+    private async sendSwaps(
+        id: string,
+        legs: readonly Leg[],
+        quotes: ReadonlyMap<string, Quote>,
+    ): Promise<{ realized: Map<number, RealizedFill>; problems: string[] }> {
+        const executor = this.deps.executor!;
+        const plan = swapPlan(legs, this.mandates.current().terms.maxTradeUsdc);
+        const amounts = new Map<number, bigint>();
+        const transactions = new Map<number, string>();
+        const problems: string[] = [];
+
+        for (const [position, order] of plan.entries()) {
+            const quote = quotes.get(order.asset.toLowerCase());
+            if (quote === undefined) {
+                problems.push(`${order.symbol}: no usable quote, so nothing was sent for it`);
+                break;
+            }
+            try {
+                const filled = await executor.fill(order, quote, `${id}:${position}`);
+                amounts.set(position, filled.amountOut);
+                transactions.set(position, filled.transaction);
+            } catch (e) {
+                problems.push(`${order.symbol}: ${e instanceof Error ? e.message : String(e)}`);
+                break;
+            }
+        }
+
+        const perLeg = attributeFills(legs, plan, amounts);
+        const realized = new Map<number, RealizedFill>();
+        for (const [legIndex, quantity] of perLeg) {
+            // the transaction recorded against a leg is the first swap that bought for it
+            const position = plan.findIndex(
+                (o, p) => amounts.has(p) && o.asset.toLowerCase() === legs[legIndex]!.asset.toLowerCase(),
+            );
+            realized.set(legIndex, { quantity, transaction: transactions.get(position) ?? "" });
+        }
+        return { realized, problems };
     }
 
     view(id: string): ProposalView {
