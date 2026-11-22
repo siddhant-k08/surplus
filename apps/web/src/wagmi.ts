@@ -12,10 +12,10 @@ import { coinbaseWallet, injected } from "wagmi/connectors";
  * reports account and chain changes as state rather than as events nobody subscribed to.
  *
  * Two connectors, both real paths. Coinbase Wallet covers the extension, the mobile app and a Smart
- * Wallet passkey, which is the only route for someone with nothing installed; `options: "all"` is what
- * offers all three rather than forcing one. `injected` covers MetaMask and anything else already in
- * the browser. Both are EIP-1193 underneath, so paying, signing in and recovering a receipt do not
- * care which was chosen.
+ * Wallet passkey, which is the only route for someone with nothing installed; `preference: "all"` is
+ * what offers all three rather than forcing one. `injected` covers MetaMask and anything else already
+ * in the browser. Both are EIP-1193 underneath, so paying, signing in and recovering a receipt do not
+ * care which was chosen. Which one a person gets is their choice, made once in the connect modal.
  *
  * The Coinbase SDK itself is not in this chunk: its connector imports it only when someone picks it.
  */
@@ -25,7 +25,7 @@ export const config = createConfig({
         coinbaseWallet({
             appName: "Surplus",
             appLogoUrl: typeof window === "undefined" ? null : `${window.location.origin}/favicon.svg`,
-            preference: { options: "all" },
+            preference: "all",
         }),
         injected(),
     ],

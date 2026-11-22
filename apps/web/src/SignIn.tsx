@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { useAccount } from "wagmi";
+import { ConnectWallet, Wallet as OnchainWallet } from "@coinbase/onchainkit/wallet";
 import { api } from "./api";
 import { Button, Chip, Footer, Led, Wordmark } from "./Chrome";
 import { MaskedLine, motion, riseItem, stagger } from "./motion";
-import { connect, hasWallet, signTypedData, describeWalletError, ensureChain, WalletError } from "./wallet";
+import { signTypedData, describeWalletError, ensureChain, WalletError } from "./wallet";
 
 /**
  * Sign in by signing, not by typing a secret.
@@ -12,14 +14,15 @@ import { connect, hasWallet, signTypedData, describeWalletError, ensureChain, Wa
  * still needs its own signature.
  */
 export function SignIn({ onSignedIn }: { onSignedIn: (address: string) => void }) {
+    const { address } = useAccount();
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     async function run() {
+        if (address === undefined) return;
         setBusy(true);
         setError(null);
         try {
-            const address = await connect();
             const offer = await api.nonce();
             // The desk knows which address it will accept and says so in the payload, so a mismatch is
             // worth catching here. Signing first would spend a wallet prompt to earn "not a valid owner
@@ -68,18 +71,32 @@ export function SignIn({ onSignedIn }: { onSignedIn: (address: string) => void }
                         Sign in with the wallet that approves trades. Signing in lets you read the books and ask for a
                         proposal. It does not authorise a trade: each one is signed on its own.
                     </motion.p>
+                    {/* The same one button as everywhere else, and then the thing it is for. Connecting
+                        and signing in are two steps because they authorise different things, and a desk
+                        that did both on one click would be asking for a signature nobody expected. */}
                     <motion.div variants={riseItem} className="mt-8">
-                        <Button onClick={run} disabled={busy || !hasWallet()}>
-                            {busy ? "Waiting for your wallet…" : "Sign in with wallet"} <span aria-hidden="true">↗</span>
-                        </Button>
+                        {address === undefined ? (
+                            <OnchainWallet>
+                                <ConnectWallet
+                                    render={({ onClick, status }) => (
+                                        <Button onClick={onClick} disabled={status === "connecting"}>
+                                            {status === "connecting" ? "Opening your wallet…" : "Connect wallet"}
+                                            <span aria-hidden="true">↗</span>
+                                        </Button>
+                                    )}
+                                />
+                            </OnchainWallet>
+                        ) : (
+                            <Button onClick={run} disabled={busy}>
+                                {busy ? "Waiting for your wallet…" : "Sign in with wallet"} <span aria-hidden="true">↗</span>
+                            </Button>
+                        )}
                     </motion.div>
 
                     <div className="mt-4 grid gap-2" aria-live="polite">
-                        {/* A missing wallet is a circumstance, not a failure. Lime and red are for other things. */}
-                        {!hasWallet() && (
-                            <p className="measure m-0 text-sm text-dim">
-                                No browser wallet found. Install one to sign in, or drive the owner routes from a
-                                script with the owner token.
+                        {address !== undefined && (
+                            <p className="measure m-0 font-mono text-xs text-dim">
+                                Connected as {address}. The desk accepts one address, and will say so if this is not it.
                             </p>
                         )}
                         {error !== null && <p className="measure m-0 text-sm text-flag" role="alert">{error}</p>}
