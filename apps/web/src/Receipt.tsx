@@ -1,148 +1,216 @@
 import { useEffect, useState } from "react";
-import { ApiError, formatUsdc, get } from "./api";
+import { ApiError, formatUsdc, get, type PaidReceipt } from "./api";
+import { EvidenceRow, SourceLink, WhatAQuoteProves, count } from "./Evidence";
+import { Button, Chip, Footer, Led, NavLink, TopBar } from "./Chrome";
+import { MaskedLine, Reveal, motion, riseItem, stagger } from "./motion";
+import { explorerTx, networkName, shortHash } from "./explorer";
 
-interface Paid {
-  receipt: { transaction: string; amountUsdcMinor: string; at: string };
-  brief: {
-    id: string;
-    createdAt: string;
-    disclaimer: string;
-    sources: { id: string; title: string; publishedAt: string | null }[];
-    themes: {
-      themeId: string;
-      gap: boolean;
-      gapReason?: string;
-      claims: { id: string; text: string; quotes?: { sourceId: string; text: string }[] }[];
-      fits: { symbol: string; fit: number; evidence: number; claimIds: string[] }[];
-    }[];
-  };
-  provider: string;
-  model: string;
+/**
+ * What a buyer comes back to. The link is the key; the transaction beside it is proof.
+ *
+ * The brief is the product, so it is laid out to be read and taken apart: themes as sections,
+ * companies as rows, the full evidence inside each. The rail carries the filings, because "which
+ * documents did this actually read" is the first question a sceptical reader asks.
+ */
+export function Receipt({ id }: { id: string }) {
+    const [paid, setPaid] = useState<PaidReceipt | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        // `get` retries a cold start; a 404 is an answer and is not retried
+        get<PaidReceipt>(`/receipt/${id}`)
+            .then(setPaid)
+            .catch((e: unknown) => {
+                setError(
+                    e instanceof ApiError
+                        ? e.message
+                        : "Could not reach the agent. It may be restarting; try again shortly.",
+                );
+            });
+    }, [id]);
+
+    // the tab should not promise a brief the link does not open
+    useEffect(() => {
+        if (error !== null) document.title = "That link does not open a brief: Surplus";
+    }, [error]);
+
+    if (error !== null) {
+        return (
+            <Shell>
+                <main id="main" className="shell grid min-h-[70vh] content-center py-16">
+                    <div className="max-w-[46rem]">
+                        <h1 className="text-[clamp(2rem,4.2vw,3rem)] font-medium leading-[1.04] tracking-[-0.04em]">
+                            That link does not open a brief.
+                        </h1>
+                        {/* The server's reason is its own sentence; run together with the next it reads as a fragment. */}
+                        <p className="measure mt-5 text-[1.0625rem]">{error}</p>
+                        <p className="measure mt-3 text-[1.0625rem]">
+                            If you paid and lost your link, connect the wallet you paid with on the front page and the
+                            agent will hand it back.
+                        </p>
+                        <div className="mt-8"><Button href="/#recover">Find my briefs <span aria-hidden="true">↗</span></Button></div>
+                    </div>
+                </main>
+            </Shell>
+        );
+    }
+
+    if (paid === null) {
+        return (
+            <Shell>
+                <main id="main" className="shell grid min-h-[70vh] content-center py-16">
+                    <p className="font-mono text-sm text-dim" role="status">Opening your brief…</p>
+                </main>
+            </Shell>
+        );
+    }
+
+    const sources = new Map(paid.brief.sources.map((s) => [s.id, s]));
+    const link = explorerTx(paid.receipt.network, paid.receipt.transaction);
+    const chain = networkName(paid.receipt.network);
+    const facts = paid.brief.themes.reduce((a, t) => a + t.claims.length, 0);
+
+    return (
+        <Shell>
+            <main id="main">
+                <section className="border-b border-line">
+                    <div className="shell grid items-start gap-10 py-[clamp(2.5rem,5vw,3.5rem)] lg:grid-cols-[1fr_22rem]">
+                        <motion.div variants={stagger()} initial="hidden" animate="shown">
+                            <motion.p
+                                variants={riseItem}
+                                className="m-0 mb-5 inline-flex items-center gap-2 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.16em] text-lime before:h-px before:w-6 before:bg-lime before:content-['']"
+                            >
+                                Paid · yours to keep
+                            </motion.p>
+                            <h1 className="text-[clamp(2.2rem,4.4vw,3.2rem)] font-medium leading-[1.02] tracking-[-0.045em]">
+                                <MaskedLine delay={0.1}>Your brief.</MaskedLine>
+                            </h1>
+                            <motion.p variants={riseItem} className="measure mt-5 text-[1.0625rem]">
+                                {count(paid.brief.themes.length, "theme")}, {count(facts, "verified fact")},{" "}
+                                {count(paid.brief.sources.length, "filing")}. Every row below opens onto the filing
+                                text behind it.
+                            </motion.p>
+                            <motion.p variants={riseItem} className="mt-4 font-mono text-xs text-dim">
+                                Keep this link. It is the only way back, apart from the wallet you paid from.
+                            </motion.p>
+                        </motion.div>
+
+                        <Reveal delay={0.15}>
+                            <aside aria-label="Proof of purchase" className="rounded-card border border-line bg-surface p-5">
+                                <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2.5 text-sm">
+                                    <dt className="text-dim">Paid</dt>
+                                    <dd className="num m-0 text-ink">{formatUsdc(paid.receipt.amountUsdcMinor)} USDC</dd>
+                                    <dt className="text-dim">On</dt>
+                                    <dd className="m-0 text-ink">{new Date(paid.receipt.at).toLocaleDateString()}</dd>
+                                    <dt className="text-dim">Settlement</dt>
+                                    <dd className="m-0 break-all font-mono text-ink">
+                                        {link === null ? (
+                                            <span title={paid.receipt.transaction}>{shortHash(paid.receipt.transaction)}</span>
+                                        ) : (
+                                            <a
+                                                href={link.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                title={paid.receipt.transaction}
+                                                className="text-ink no-underline [border-bottom:1px_solid_var(--color-line)] hover:[border-bottom-color:var(--color-lime)]"
+                                            >
+                                                {shortHash(paid.receipt.transaction)} <span aria-hidden="true">↗</span>
+                                                <span className="sr-only"> (opens {link.name} in a new tab)</span>
+                                            </a>
+                                        )}
+                                    </dd>
+                                    <dt className="text-dim">Written by</dt>
+                                    <dd className="m-0 text-ink">{paid.provider} {paid.model}</dd>
+                                </dl>
+                                {link === null && (
+                                    // An old receipt predates the network being stored. Guessing it from this
+                                    // server's chain could point at a transaction that is not theirs.
+                                    <p className="mt-4 text-xs leading-relaxed text-dim">
+                                        {chain === null
+                                            ? "This purchase was recorded before the settlement network was stored, so there is no explorer link. The hash above is still the one onchain."
+                                            : `Settled on ${chain}. No explorer is configured for it, so the hash is shown without a link.`}
+                                    </p>
+                                )}
+                            </aside>
+                        </Reveal>
+                    </div>
+                </section>
+
+                <div className="shell grid items-start gap-10 py-[clamp(2.5rem,5vw,3.5rem)] lg:grid-cols-[1fr_17rem]">
+                    <div className="min-w-0">
+                        {paid.brief.themes.map((theme) => {
+                            const claims = new Map(theme.claims.map((c) => [c.id, c]));
+                            return (
+                                <section key={theme.themeId} className="mb-12 last:mb-0">
+                                    <Reveal>
+                                        <div className="mb-4 flex items-baseline gap-3.5">
+                                            <h2 className="text-xl font-semibold tracking-[-0.02em]">{theme.themeId}</h2>
+                                            <span className="rounded-full border border-dashed border-line px-2.5 py-1 font-mono text-[0.6875rem] text-dim">
+                                                {theme.gap ? "gap" : count(theme.fits.length, "company", "companies")}
+                                            </span>
+                                        </div>
+                                    </Reveal>
+                                    {theme.gap ? (
+                                        <p className="measure">
+                                            {theme.gapReason ?? "No company cleared the evidence bar for this theme."}{" "}
+                                            Nothing was invented to fill it.
+                                        </p>
+                                    ) : (
+                                        <div className="border-t border-line">
+                                            {theme.fits.map((fit, i) => (
+                                                <EvidenceRow
+                                                    key={fit.asset + fit.symbol}
+                                                    fit={fit}
+                                                    claims={claims}
+                                                    sources={sources}
+                                                    label={`fit ${fit.fit}/5`}
+                                                    defaultOpen={i === 0}
+                                                />
+                                            ))}
+                                        </div>
+                                    )}
+                                </section>
+                            );
+                        })}
+                    </div>
+
+                    <aside aria-label="Filings and notes" className="grid gap-4 lg:sticky lg:top-24">
+                        <div className="rounded-card border border-line bg-surface p-4">
+                            <h3 className="mb-3 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-dim">
+                                Filings read
+                            </h3>
+                            <ul className="m-0 grid list-none gap-2.5 p-0 font-mono text-xs">
+                                {paid.brief.sources.map((s) => (
+                                    <li key={s.id} className="grid gap-0.5">
+                                        <SourceLink source={s} />
+                                        <span className="text-[0.6875rem] text-dim">{s.publisher}</span>
+                                    </li>
+                                ))}
+                                {paid.brief.sources.length === 0 && <li>No filings are listed in this brief.</li>}
+                            </ul>
+                        </div>
+                        <div className="rounded-card border border-line bg-surface p-4">
+                            <h3 className="mb-3 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-dim">
+                                What a quote proves
+                            </h3>
+                            <WhatAQuoteProves />
+                        </div>
+                    </aside>
+                </div>
+            </main>
+            <Footer><span>{paid.brief.disclaimer}</span></Footer>
+        </Shell>
+    );
 }
 
-/** What a buyer comes back to. The link is the key; the transaction beside it is proof. */
-export function Receipt({ id }: { id: string }) {
-  const [paid, setPaid] = useState<Paid | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    // `get` retries a cold start; a 404 is an answer and is not retried
-    get<Paid>(`/receipt/${id}`)
-      .then(setPaid)
-      .catch((e: unknown) => {
-        setError(
-          e instanceof ApiError
-            ? e.message
-            : "Could not reach the agent. It may be restarting; try again shortly.",
-        );
-      });
-  }, [id]);
-
-  // the tab should not promise a brief the link does not open
-  useEffect(() => {
-    if (error !== null) document.title = "That link does not open a brief: Surplus";
-  }, [error]);
-
-  if (error !== null) {
+function Shell({ children }: { children: React.ReactNode }) {
     return (
-      <header className="stage" style={{ minHeight: "100vh", display: "grid", alignItems: "center" }}>
-        <div className="wrap">
-          <h1>That link does not open a brief.</h1>
-          {/* The server's reason is its own sentence. Run together with the next one it read as a
-              fragment, and the useful part is not the reason but the way back in. */}
-          <p className="lede">{error}</p>
-          <p className="lede">
-            If you paid and lost your link, connect the wallet you paid with on the front page and the
-            agent will hand it back.
-          </p>
-          <div className="cta"><a className="btn" href="/">Find my briefs <span aria-hidden="true">↗</span></a></div>
-        </div>
-      </header>
+        <>
+            <TopBar
+                nav={<><NavLink href="/">Research</NavLink><NavLink href="/#recover">Find my briefs</NavLink></>}
+                right={<><Chip><Led />Base Sepolia</Chip><Button href="/desk" tone="ghost" size="sm">Open desk</Button></>}
+            />
+            {children}
+        </>
     );
-  }
-
-  if (paid === null) {
-    return (
-      <header className="stage" style={{ minHeight: "100vh", display: "grid", alignItems: "center" }}>
-        <div className="wrap"><p className="lede">Opening your brief…</p></div>
-      </header>
-    );
-  }
-
-  const sources = new Map(paid.brief.sources.map((s) => [s.id, s]));
-
-  return (
-    <>
-      <header className="stage">
-        <div className="wrap">
-          <div className="bar">
-            <span className="mark">
-              <svg width="22" height="12" viewBox="0 0 22 12" fill="none" aria-hidden="true">
-                <path d="M1 8c3-7 6.5-7 9.5 0s6.5 7 9.5 0" stroke="#F4EDE0" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-              Surplus
-            </span>
-            <nav aria-label="Sections"><a href="/">Briefs</a></nav>
-          </div>
-          <div className="hero">
-            <div>
-              <h1>Your brief.</h1>
-              <p className="lede">
-                Bought for {formatUsdc(paid.receipt.amountUsdcMinor)} USDC on{" "}
-                {new Date(paid.receipt.at).toLocaleDateString()}. Keep this link: it is the only way back.
-              </p>
-              <p className="lede" style={{ fontSize: ".8125rem" }}>
-                Settlement {paid.receipt.transaction.slice(0, 18)}… · {paid.provider} {paid.model}
-              </p>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="work" id="main">
-        <div className="wrap">
-          {paid.brief.themes.map((theme) => {
-            const claims = new Map(theme.claims.map((c) => [c.id, c]));
-            return (
-              <section key={theme.themeId} style={{ marginBottom: "3rem" }}>
-                <h2>{theme.themeId}</h2>
-                {theme.gap ? (
-                  <p>{theme.gapReason ?? "No company cleared the evidence bar for this theme."}</p>
-                ) : (
-                  <ul className="legs">
-                    {theme.fits.map((fit) => {
-                      const claim = fit.claimIds[0] === undefined ? undefined : claims.get(fit.claimIds[0]);
-                      const quote = claim?.quotes?.[0];
-                      const source = quote === undefined ? undefined : sources.get(quote.sourceId);
-                      return (
-                        <li key={fit.symbol}>
-                          <details className="leg" open>
-                            <summary>
-                              <span className="sym">{fit.symbol}</span>
-                              <span className="theme">{claim?.text ?? ""}</span>
-                              <span className="amt num">fit {fit.fit}/5</span>
-                            </summary>
-                            <div className="evidence">
-                              {quote !== undefined && <blockquote>“{quote.text}”</blockquote>}
-                              <p className="cite">
-                                <span>{source?.title ?? "source not listed"}{source?.publishedAt === null || source === undefined ? "" : `, filed ${source.publishedAt}`}</span>
-                                {quote !== undefined && <span className="ok">quote found verbatim</span>}
-                              </p>
-                              <p className="scores">evidence <b>{fit.evidence}</b>/5</p>
-                            </div>
-                          </details>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </section>
-            );
-          })}
-        </div>
-      </main>
-
-      <footer><div className="wrap">{paid.brief.disclaimer}</div></footer>
-    </>
-  );
 }

@@ -128,22 +128,50 @@ export interface Me {
     address: string | null;
 }
 
+/**
+ * Every term the mandate carries, matching `MandateTerms` in core and `parseTermsUpdate` on the server.
+ *
+ * The earlier version of this type listed only the terms the desk happened to display, which meant the
+ * desk could not show an owner a constraint their own mandate holds. Amounts stay decimal strings and
+ * percentages stay basis points: converting either in the browser is how rounding gets into money.
+ */
+export interface MandateTerms {
+    /** Token addresses the agent may buy. Set by the registry, editable by the owner. */
+    eligible: string[];
+    themes: { id: string; targetBps: number }[];
+    maxCompanyBps: number;
+    investShareBps: number;
+    maxSlippageBps: number;
+    driftToleranceBps: number;
+    approvalExpirySeconds: number;
+    maxTradeUsdc: string;
+    minTradeUsdc: string;
+    reserveTargetUsdc: string;
+    /** Optional in core: absent means the mandate does not carry the constraint at all. */
+    investOnlyWhenAhead?: boolean;
+}
+
 export interface Mandate {
     version: number;
     hash: string;
     prevHash: string | null;
     createdAt: string;
-    terms: {
-        themes: { id: string; targetBps: number }[];
-        maxCompanyBps: number;
-        investShareBps: number;
-        maxSlippageBps: number;
-        driftToleranceBps: number;
-        approvalExpirySeconds: number;
-        maxTradeUsdc: string;
-        minTradeUsdc: string;
-        reserveTargetUsdc: string;
-    };
+    terms: MandateTerms;
+}
+
+/** A mandate update, as the owner's edits leave the form. Only changed terms are sent. */
+export type TermsUpdate = Partial<MandateTerms>;
+
+export interface MandateSaved extends Mandate {
+    /** What actually changed, named by the server rather than guessed at by the page. */
+    changed: string[];
+    note: string;
+}
+
+export interface MandateHistory {
+    /** Whether the stored chain of versions still verifies. False means the file was altered. */
+    chainVerified: boolean;
+    versions: Mandate[];
 }
 
 /** What stands between the books as they are and the smallest trade the mandate allows. */
@@ -231,8 +259,29 @@ export interface BriefSource {
     id: string;
     title: string;
     publisher: string;
+    /** The filing itself. The API has always sent this; the page used not to show it. */
     url: string;
     publishedAt: string | null;
+}
+
+/** What `/receipt/:id` answers. The brief is the same shape the owner's desk reads. */
+export interface PaidReceipt {
+    receipt: {
+        transaction: string;
+        amountUsdcMinor: string;
+        at: string;
+        /** null on receipts written before the network was stored. Never inferred from config. */
+        network: string | null;
+    };
+    brief: {
+        id: string;
+        createdAt: string;
+        disclaimer: string;
+        sources: BriefSource[];
+        themes: BriefTheme[];
+    };
+    provider: string;
+    model: string;
 }
 
 export interface OwnerBrief {
@@ -307,6 +356,9 @@ export const api = {
     logout: () => post<{ signedOut: boolean }>("/auth/logout"),
 
     mandate: () => call<Mandate>("/mandate"),
+    mandateHistory: () => call<MandateHistory>("/mandate/history"),
+    /** Sends only the terms that changed; the server carries the rest over. Never retried. */
+    updateMandate: (terms: TermsUpdate) => post<MandateSaved>("/mandate", terms),
     brief: () => call<OwnerBrief>("/invest/brief"),
     ledger: () => call<InvestLedger>("/invest/ledger"),
 

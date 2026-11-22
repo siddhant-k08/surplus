@@ -20,7 +20,7 @@ Full history, decisions, verified facts and open questions: read `docs/HANDOFF.m
 
 - `packages/core` (`@surplus/core`): all domain logic, TypeScript strict, ESM, tests in `packages/core/test` (vitest 2.x, pinned; do not upgrade to a newer major). `src/index.ts` re-exports every module.
 - `scripts/`: runnable demos and read-only spikes (`spike-*.mjs`, `survey-*.mjs`, `demo-sim.ts`, `demo-live.ts`, `demo-research.ts`), typechecked by `scripts/tsconfig.json`.
-- `apps/web` (`@surplus/web`): Vite, React and TS. Never import `@surplus/core` as a value here; it reaches for `node:fs` and `node:crypto` and will break the browser build. Use `import type` and keep small helpers local. Built with `npm run build:web`; the API serves `apps/web/dist`.
+- `apps/web` (`@surplus/web`): Vite, React, TS, Tailwind v4 and `motion`. Tests in `apps/web/test` (vitest, no extra config: they cover pure logic only). The whole look lives in `src/theme.css` as `@theme` tokens; components use those tokens and never raw hex. Motion goes through `src/motion.tsx`, which wraps `LazyMotion` with `domAnimation` and re-exports `m` as `motion`: importing `motion` from the package directly ships the heavy bundle and `strict` mode throws to stop it. Never import `@surplus/core` as a value here; it reaches for `node:fs` and `node:crypto` and will break the browser build. Use `import type` and keep small helpers local. Built with `npm run build:web`; the API serves `apps/web/dist`.
 - `api/index.ts`: the serverless entry point, used with `vercel.json`. It caches one assembly per instance and serves the same Express app the long-running server does. Typechecked by `api/tsconfig.json` (`tsc -p api`, part of `npm run typecheck`).
 - `apps/api` (`@surplus/api`): never resolve paths against the cwd here; npm runs workspace scripts from `apps/api`, so use `src/paths.ts` (`REPO_ROOT`, `loadRootEnv`, `fromRepoRoot`). The x402 paid research endpoint, Express 5 plus `@x402/*` 2.x, tests with vitest and supertest. See `apps/api/README.md`. The web UI is still not built.
 - `docs/briefs/`: research briefs saved by `demo-research.ts`.
@@ -36,6 +36,7 @@ npm run typecheck:scripts   # scripts
 X402_PAY_TO=0x... npm run api   # the x402 endpoint on Base Sepolia
 npm run buy -w @surplus/api     # buy one brief from it (needs X402_BUYER_PRIVATE_KEY, testnet only)
 npm run web                     # the owner desk on :5173, proxying the API
+npm run api:files               # the API against the JSONL files, ignoring DATABASE_URL (local review)
 npm run build:web               # build it; the API then serves apps/web/dist
 npm run db:import -w @surplus/api       # copy the JSONL books into Postgres (add -- --apply to write)
 npm run db:export -w @surplus/api       # copy them back out as JSONL, for a backup you hold

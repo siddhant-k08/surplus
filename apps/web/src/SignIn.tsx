@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { api } from "./api";
+import { Button, Chip, Footer, Led, Wordmark } from "./Chrome";
+import { MaskedLine, motion, riseItem, stagger } from "./motion";
 import { connect, hasWallet, signTypedData, describeWalletError, ensureChain, WalletError } from "./wallet";
 
 /**
@@ -42,35 +44,49 @@ export function SignIn({ onSignedIn }: { onSignedIn: (address: string) => void }
     }
 
     return (
-        <header className="stage" style={{ minHeight: "100vh", display: "grid", alignItems: "center" }}>
-            <div className="wrap">
-                <div style={{ maxWidth: "34rem" }}>
-                    <h1>The owner desk.</h1>
-                    <p className="lede">
-                        Sign in with the wallet that approves trades. Signing in lets you read the books and
-                        ask for a proposal. It does not authorise a trade: each one is signed on its own.
-                    </p>
-
-                    <div className="cta">
-                        <button className="btn" onClick={run} disabled={busy || !hasWallet()}>
-                            {busy ? "Waiting for your wallet…" : "Sign in with wallet"}
-                        </button>
-                    </div>
-
-                    {/* A missing wallet is a circumstance, not a failure. Coral is for what went wrong. */}
-                    {!hasWallet() && (
-                        <p className="note">
-                            No browser wallet found. Install one to sign in, or drive the owner routes from a
-                            script with the owner token.
-                        </p>
-                    )}
-                    {error !== null && (
-                        <p className="note error" role="alert">
-                            {error}
-                        </p>
-                    )}
-                </div>
+        <>
+            <div className="shell flex items-center gap-7 py-4">
+                <Wordmark />
+                <nav aria-label="Sections" className="ml-auto flex items-center gap-3">
+                    <Chip><Led />Base Sepolia</Chip>
+                    <Button href="/" tone="ghost" size="sm">Storefront</Button>
+                </nav>
             </div>
-        </header>
+
+            <main id="main" className="shell grid min-h-[72vh] content-center py-16">
+                <motion.div variants={stagger()} initial="hidden" animate="shown" className="max-w-[46rem]">
+                    <motion.p
+                        variants={riseItem}
+                        className="m-0 mb-5 inline-flex items-center gap-2 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.16em] text-lime before:h-px before:w-6 before:bg-lime before:content-['']"
+                    >
+                        Owner only
+                    </motion.p>
+                    <h1 className="text-[clamp(2.2rem,4.6vw,3.4rem)] font-medium leading-[1.02] tracking-[-0.045em]">
+                        <MaskedLine delay={0.12}>The treasury desk.</MaskedLine>
+                    </h1>
+                    <motion.p variants={riseItem} className="measure mt-6 text-[1.0625rem]">
+                        Sign in with the wallet that approves trades. Signing in lets you read the books and ask for a
+                        proposal. It does not authorise a trade: each one is signed on its own.
+                    </motion.p>
+                    <motion.div variants={riseItem} className="mt-8">
+                        <Button onClick={run} disabled={busy || !hasWallet()}>
+                            {busy ? "Waiting for your wallet…" : "Sign in with wallet"} <span aria-hidden="true">↗</span>
+                        </Button>
+                    </motion.div>
+
+                    <div className="mt-4 grid gap-2" aria-live="polite">
+                        {/* A missing wallet is a circumstance, not a failure. Lime and red are for other things. */}
+                        {!hasWallet() && (
+                            <p className="measure m-0 text-sm text-dim">
+                                No browser wallet found. Install one to sign in, or drive the owner routes from a
+                                script with the owner token.
+                            </p>
+                        )}
+                        {error !== null && <p className="measure m-0 text-sm text-flag" role="alert">{error}</p>}
+                    </div>
+                </motion.div>
+            </main>
+            <Footer />
+        </>
     );
 }

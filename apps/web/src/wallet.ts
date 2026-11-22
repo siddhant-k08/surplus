@@ -109,19 +109,61 @@ export async function ensureChain(wanted: number): Promise<void> {
 }
 
 /**
- * Signs an EIP-712 payload exactly as the server offered it.
+ * Serialises typed data for a wallet, with bigint amounts as decimal strings.
  *
- * The payload is passed through untouched. Rebuilding it here would be a second implementation of the
- * thing the signature is supposed to pin down, and any drift between the two would show up as a
- * signature the server rejects for no visible reason.
+ * `JSON.stringify` throws on a bigint, and a bigint is the correct representation for a uint256, so the
+ * payment scheme hands us one: an EIP-3009 authorisation carries `value`, `validAfter` and `validBefore`
+ * that way. Without this the wallet is never reached and the buyer is told "Do not know how to serialize
+ * a BigInt", which is true about our code and useless about their purchase.
+ *
+ * A decimal string is what `eth_signTypedData_v4` expects for a uint256 anyway, and it is exactly how
+ * the server already sends its own amounts, so this converts rather than reinterprets. Values are never
+ * rounded or narrowed through a float.
+ */
+export function toSignableJson(payload: unknown): string {
+    return JSON.stringify(payload, (_key, value: unknown) =>
+        typeof value === "bigint" ? value.toString() : value,
+    );
+}
+
+/**
+ * Signs an EIP-712 payload exactly as it was offered.
+ *
+ * The payload is passed through untouched apart from that serialisation. Rebuilding it here would be a
+ * second implementation of the thing the signature is supposed to pin down, and any drift between the
+ * two would show up as a signature the server rejects for no visible reason.
  */
 export async function signTypedData(address: string, payload: unknown): Promise<string> {
     const signature = await provider().request({
         method: "eth_signTypedData_v4",
-        params: [address, JSON.stringify(payload)],
+        params: [address, toSignableJson(payload)],
     });
     if (typeof signature !== "string") throw new WalletError("The wallet returned no signature.");
     return signature;
+}
+
+/**
+ * How much USDC the wallet holds, as a decimal string.
+ *
+ * Read through the wallet's own provider rather than a public RPC: it is already connected to the
+ * right chain, the page gains no new host to trust, and nothing leaves the browser. A failure is a
+ * missing number, never an error on screen: a balance is a convenience, and the purchase works
+ * without it.
+ *
+ * `balanceOf(address)` is selector 0x70a08231 followed by the address padded to 32 bytes. Six
+ * decimals, like every USDC amount in this project, and the division is done on the digits so the
+ * value never passes through a float.
+ */
+export async function readUsdcBalance(address: string, token: string): Promise<string> {
+    const padded = address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+    const raw = (await provider().request({
+        method: "eth_call",
+        params: [{ to: token, data: `0x70a08231${padded}` }, "latest"],
+    })) as string;
+    const minor = BigInt(raw === "0x" || raw === "" ? "0x0" : raw);
+    const whole = minor / 1_000_000n;
+    const frac = (minor % 1_000_000n).toString().padStart(6, "0");
+    return `${whole}.${frac}`;
 }
 
 /** Turns a wallet rejection into something worth showing a person. */

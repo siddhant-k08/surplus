@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { formatUsdc, recoverReceipts, recoveryOffer, type RecoveredReceipt } from "./api";
 import { connect, describeWalletError, hasWallet, signTypedData } from "./wallet";
+import { Button } from "./Chrome";
+import { Reveal } from "./motion";
 
 /**
  * Getting back to a brief that was paid for.
@@ -33,45 +35,57 @@ export function Recover() {
     };
 
     return (
-        <section className="recover">
-            <h2 style={{ marginTop: "3rem" }}>Lost your link?</h2>
-            <p>
-                Your receipt link is shown once, when you pay. If you lost it, connect the wallet you paid
-                with and sign a message: it proves the wallet is yours and nothing else. No account, no email.
-            </p>
-            <div className="cta">
-                <button className="textlink" onClick={() => void run()} disabled={busy || !hasWallet()}>
+        <section>
+            <Reveal>
+                <h2 className="text-[clamp(1.7rem,3vw,2.3rem)] font-medium leading-[1.1] tracking-[-0.035em]">
+                    Sign with it and the agent hands your briefs back.
+                </h2>
+                <p className="measure mt-4">
+                    Your receipt link is shown once, when you pay. If you lost it, connect the wallet you paid with
+                    and sign a message: it proves the wallet is yours and nothing else. No account, no email.
+                </p>
+            </Reveal>
+
+            <div className="mt-6">
+                <Button tone="ghost" onClick={() => void run()} disabled={busy || !hasWallet()}>
                     {busy ? "Check your wallet…" : "Find my briefs"} <span aria-hidden="true">↗</span>
-                </button>
+                </Button>
             </div>
 
-            {!hasWallet() && (
-                <p className="note">
-                    This needs the browser wallet you paid with. Open this page in that browser.
-                </p>
-            )}
-            {error !== null && <p className="note error" role="alert">{error}</p>}
-
-            {found !== null && found.length === 0 && (
-                <p className="note" role="status">
-                    That wallet has not bought anything here. If you paid from a different wallet, connect
-                    that one instead.
-                </p>
-            )}
+            <div className="mt-4 grid gap-2" aria-live="polite">
+                {!hasWallet() && (
+                    <p className="measure m-0 text-sm text-dim">
+                        This needs the browser wallet you paid with. Open this page in that browser.
+                    </p>
+                )}
+                {error !== null && <p className="measure m-0 text-sm text-flag" role="alert">{error}</p>}
+                {found !== null && found.length === 0 && (
+                    <p className="measure m-0 text-sm text-dim" role="status">
+                        That wallet has not bought anything here. If you paid from a different wallet, connect that
+                        one instead.
+                    </p>
+                )}
+            </div>
 
             {found !== null && found.length > 0 && (
-                <ul className="legs" role="status">
+                <ul className="mt-6 list-none border-t border-line p-0" role="status">
                     {found.map((r) => (
-                        <li key={r.id}>
-                            <div className="leg">
-                                <div className="leg-row">
-                                    <a className="sym" href={r.url}>Open brief</a>
-                                    <span className="theme">
-                                        {r.briefId} · {formatUsdc(r.amountUsdcMinor)} USDC ·{" "}
-                                        {new Date(r.at).toLocaleDateString()}
-                                    </span>
-                                </div>
-                            </div>
+                        <li key={r.id} className="border-b border-line">
+                            <a
+                                href={r.url}
+                                className="group flex flex-wrap items-baseline gap-x-4 gap-y-1 py-4 no-underline"
+                            >
+                                <span className="font-mono text-sm text-ink underline decoration-line underline-offset-4 group-hover:decoration-lime">
+                                    Open brief
+                                </span>
+                                <span className="text-sm text-dim">{r.briefId}</span>
+                                <span className="ml-auto font-mono text-sm text-ink">
+                                    {formatUsdc(r.amountUsdcMinor)} USDC
+                                </span>
+                                <span className="font-mono text-xs text-dim">
+                                    {new Date(r.at).toLocaleDateString()}
+                                </span>
+                            </a>
                         </li>
                     ))}
                 </ul>

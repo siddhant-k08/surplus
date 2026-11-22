@@ -1,0 +1,239 @@
+import { describe, it, expect } from "vitest";
+import { explorerTx, networkName, shortHash } from "../src/explorer";
+import { stepStates, activeStep } from "../src/steps";
+import {
+    percentToBps, bpsToPercent, isAmount, toSeconds, parseThemeTargets, formatThemeTargets,
+    changedOnly, parseAddresses,
+} from "../src/terms";
+import { termsFromDraft } from "../src/MandatePanel";
+import { evidenceCount, count } from "../src/Evidence";
+import type { MandateTerms, Proposal, SyncResult, BriefClaim } from "../src/api";
+
+const TX = "0x" + "cd".repeat(32);
+
+describe("explorer links", () => {
+    it("links a settlement to the chain it actually settled on", () => {
+        expect(explorerTx("eip155:84532", TX)?.url).toBe(`https://sepolia.basescan.org/tx/${TX}`);
+        expect(explorerTx("eip155:8453", TX)?.url).toBe(`https://basescan.org/tx/${TX}`);
+    });
+
+    it("refuses to link when the network was never recorded", () => {
+        // the old-receipt case: guessing here would point a buyer at a transaction that is not theirs
+        expect(explorerTx(null, TX)).toBeNull();
+        expect(explorerTx(undefined, TX)).toBeNull();
+        expect(explorerTx("", TX)).toBeNull();
+    });
+
+    it("refuses an unknown chain and a malformed hash rather than building a dead link", () => {
+        expect(explorerTx("eip155:1", TX)).toBeNull();
+        expect(explorerTx("solana:mainnet", TX)).toBeNull();
+        expect(explorerTx("eip155:84532", "0xnope")).toBeNull();
+    });
+
+    it("names a network it cannot link to, so the page can still say where it settled", () => {
+        expect(networkName("eip155:8453")).toBe("Base");
+        expect(networkName("eip155:1")).toBe("eip155:1");
+        expect(networkName(null)).toBeNull();
+    });
+
+    it("shortens a hash without losing its ends", () => {
+        expect(shortHash(TX)).toBe(`${TX.slice(0, 10)}…${TX.slice(-6)}`);
+        expect(shortHash("0xabc")).toBe("0xabc");
+    });
+});
+
+describe("the owner's step rail", () => {
+    const proposal = (state: string): Proposal => ({ state } as Proposal);
+    const synced = { investableUsdcMinor: "0" } as SyncResult;
+
+    it("starts on sync, with nothing else reachable", () => {
+        const s = stepStates({ proposal: null, investableMinor: "0", synced: null, fills: null });
+        expect(s).toEqual(["now", "later", "later", "later", "later"]);
+        expect(activeStep(s)).toBe(0);
+    });
+
+    it("separates cannot-propose-yet from will-propose-later", () => {
+        // after a sync that found nothing, proposing is blocked rather than merely upcoming, and the
+        // two must not look the same to someone waiting
+        const s = stepStates({ proposal: null, investableMinor: "0", synced, fills: null });
+        expect(s[1]).toBe("blocked");
+        const later = stepStates({ proposal: null, investableMinor: "0", synced: null, fills: null });
+        expect(later[1]).toBe("later");
+    });
+
+    it("moves to proposing once there is investable surplus", () => {
+        const s = stepStates({ proposal: null, investableMinor: "50000", synced, fills: null });
+        expect(s).toEqual(["done", "now", "later", "later", "later"]);
+    });
+
+    it("puts review now and signing next while a proposal stands", () => {
+        const s = stepStates({ proposal: proposal("PROPOSED"), investableMinor: "50000", synced, fills: null });
+        expect(s).toEqual(["done", "done", "now", "next", "later"]);
+    });
+
+    it("sends an expired approval back to signing, and blocks executing", () => {
+        const s = stepStates({
+            proposal: proposal("APPROVED"), investableMinor: "50000", synced, fills: null, expired: true,
+        });
+        expect(s[3]).toBe("now");
+        expect(s[4]).toBe("blocked");
+    });
+
+    it("is finished once fills exist", () => {
+        const s = stepStates({
+            proposal: proposal("SETTLED"), investableMinor: "0", synced,
+            fills: { id: "p", simulated: true, warnings: [], fills: [] },
+        });
+        expect(s.every((x) => x === "done")).toBe(true);
+    });
+});
+
+describe("mandate units", () => {
+    it("converts percent to basis points on the digits, never through a float", () => {
+        expect(percentToBps("40")).toBe(4000);
+        expect(percentToBps("0.07")).toBe(7);
+        expect(percentToBps("100")).toBe(10000);
+        expect(percentToBps("12.5")).toBe(1250);
+        expect(percentToBps("0.5")).toBe(50);
+    });
+
+    it("refuses a percent it cannot represent exactly in basis points", () => {
+        expect(percentToBps("0.001")).toBeNull();
+        expect(percentToBps("101")).toBeNull();
+        expect(percentToBps("-1")).toBeNull();
+        expect(percentToBps("half")).toBeNull();
+        expect(percentToBps("")).toBeNull();
+    });
+
+    it("round trips basis points through the display form", () => {
+        for (const bps of [0, 7, 50, 1250, 4000, 10000]) {
+            expect(percentToBps(bpsToPercent(bps))).toBe(bps);
+        }
+        expect(bpsToPercent(4000)).toBe("40");
+        expect(bpsToPercent(1250)).toBe("12.5");
+    });
+
+    it("accepts the same amount shape the server does, and no other", () => {
+        expect(isAmount("1.50")).toBe(true);
+        expect(isAmount("0")).toBe(true);
+        expect(isAmount("1.234567")).toBe(true);
+        expect(isAmount("1.2345678")).toBe(false);
+        expect(isAmount("-1")).toBe(false);
+        expect(isAmount("1e6")).toBe(false);
+    });
+
+    it("reads and writes theme targets as percentages", () => {
+        expect(parseThemeTargets("ai-compute 50\nplatform-giants 30")).toEqual([
+            { id: "ai-compute", targetBps: 5000 },
+            { id: "platform-giants", targetBps: 3000 },
+        ]);
+        expect(parseThemeTargets("ai-compute: 50")).toEqual([{ id: "ai-compute", targetBps: 5000 }]);
+        expect(formatThemeTargets([{ id: "x", targetBps: 2500 }])).toBe("x 25");
+        expect(parseThemeTargets("no percentage here")).toBeNull();
+        expect(parseThemeTargets("")).toBeNull();
+    });
+
+    it("takes a whole number of seconds and nothing else", () => {
+        expect(toSeconds("600")).toBe(600);
+        expect(toSeconds("0")).toBeNull();
+        expect(toSeconds("1.5")).toBeNull();
+    });
+});
+
+const terms = (over: Partial<MandateTerms> = {}): MandateTerms => ({
+    eligible: ["0x" + "b2".repeat(20)],
+    themes: [{ id: "ai-compute", targetBps: 5000 }],
+    maxCompanyBps: 4000,
+    investShareBps: 5000,
+    maxSlippageBps: 50,
+    driftToleranceBps: 100,
+    approvalExpirySeconds: 600,
+    maxTradeUsdc: "1.000000",
+    minTradeUsdc: "0.050000",
+    reserveTargetUsdc: "0.500000",
+    ...over,
+});
+
+describe("what gets sent to the mandate", () => {
+    it("sends only what changed, so the server's list of changes stays true", () => {
+        const before = terms();
+        const after = terms({ investShareBps: 2500 });
+        expect(changedOnly(before, after)).toEqual({ investShareBps: 2500 });
+    });
+
+    it("sends nothing at all when nothing was touched", () => {
+        expect(changedOnly(terms(), terms())).toEqual({});
+    });
+
+    it("never resets a term the owner did not edit", () => {
+        // the whole point: a partial update carries the rest over on the server, so a term absent from
+        // the payload is a term left alone
+        const sent = changedOnly(terms(), terms({ reserveTargetUsdc: "2.000000" }));
+        expect(Object.keys(sent)).toEqual(["reserveTargetUsdc"]);
+        expect("eligible" in sent).toBe(false);
+        expect("themes" in sent).toBe(false);
+    });
+
+    it("builds terms from a draft, keeping amounts as strings", () => {
+        const current = terms();
+        const r = termsFromDraft(current, {
+            investShareBps: "25", maxCompanyBps: "40", maxSlippageBps: "0.5", driftToleranceBps: "1",
+            reserveTargetUsdc: "2.00", minTradeUsdc: "0.05", maxTradeUsdc: "1.00",
+            approvalExpirySeconds: "600", themes: "ai-compute 50", eligible: "0x" + "b2".repeat(20),
+            investOnlyWhenAhead: "yes",
+        });
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        expect(r.terms.investShareBps).toBe(2500);
+        expect(r.terms.maxSlippageBps).toBe(50);
+        expect(r.terms.reserveTargetUsdc).toBe("2.00");
+        expect(typeof r.terms.maxTradeUsdc).toBe("string");
+        expect(r.terms.investOnlyWhenAhead).toBe(true);
+    });
+
+    it("names every field it cannot accept instead of sending a guess", () => {
+        const r = termsFromDraft(terms(), {
+            investShareBps: "oops", maxCompanyBps: "40", maxSlippageBps: "0.5", driftToleranceBps: "1",
+            reserveTargetUsdc: "2.0000000", minTradeUsdc: "0.05", maxTradeUsdc: "1.00",
+            approvalExpirySeconds: "0", themes: "broken", eligible: "",
+        });
+        expect(r.ok).toBe(false);
+        if (r.ok) return;
+        expect(r.bad.length).toBe(5);
+        expect(r.bad.join(" ")).toMatch(/percentage/);
+        expect(r.bad.join(" ")).toMatch(/six decimals/);
+        expect(r.bad.join(" ")).toMatch(/seconds/);
+        expect(r.bad.join(" ")).toMatch(/theme/);
+        expect(r.bad.join(" ")).toMatch(/eligible token address/);
+    });
+
+    it("reads addresses one per line and drops blanks", () => {
+        expect(parseAddresses("0xaa\n\n  0xbb  \n")).toEqual(["0xaa", "0xbb"]);
+    });
+});
+
+describe("evidence counting", () => {
+    const claims = new Map<string, BriefClaim>([
+        ["c1", { id: "c1", type: "fact", text: "a", sourceIds: ["s1"], quotes: [{ sourceId: "s1", text: "q1" }, { sourceId: "s1", text: "q2" }] }],
+        ["c2", { id: "c2", type: "fact", text: "b", sourceIds: ["s1"] }],
+    ]);
+
+    it("counts every claim and every quote, not just the first of each", () => {
+        // the bug this replaces: the page rendered claimIds[0] and quotes[0] and showed no sign of more
+        expect(evidenceCount({ claimIds: ["c1", "c2"] }, claims)).toEqual({ claims: 2, quotes: 2, missing: 0 });
+    });
+
+    it("counts a cited claim that is not in the brief as missing rather than ignoring it", () => {
+        expect(evidenceCount({ claimIds: ["c1", "gone"] }, claims)).toEqual({ claims: 1, quotes: 2, missing: 1 });
+    });
+
+    it("says nothing is there when a fit cites nothing", () => {
+        expect(evidenceCount({ claimIds: [] }, claims)).toEqual({ claims: 0, quotes: 0, missing: 0 });
+    });
+
+    it("pluralises without writing (s) at a reader", () => {
+        expect(count(1, "claim")).toBe("1 claim");
+        expect(count(2, "claim")).toBe("2 claims");
+        expect(count(2, "company", "companies")).toBe("2 companies");
+    });
+});
