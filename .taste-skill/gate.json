@@ -1,0 +1,52 @@
+{
+ "start": "2026-11-22T15:41:40.605Z",
+ "round": 0,
+ "idle": 0,
+ "errors": 0,
+ "status": "active",
+ "history": [
+  {
+   "at": "2026-11-22T15:45:01.404Z",
+   "mode": "hook",
+   "host": "claude",
+   "decision": "block",
+   "reason": "a build is active in /home/prawn/Desktop/Code/surplus, but no page was found in /home/prawn/Desktop/Code/surplus, so nothing was checked. If you are stopping to",
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-22T15:45:19.424Z",
+   "mode": "hook",
+   "host": "claude",
+   "decision": "allow",
+   "reason": "no page was found in /home/prawn/Desktop/Code/surplus; told once, stop allowed",
+   "stopHookActive": true
+  },
+  {
+   "at": "2026-11-22T15:58:30.968Z",
+   "mode": "hook",
+   "host": "claude",
+   "decision": "allow",
+   "reason": "no page was found in /home/prawn/Desktop/Code/surplus; told once, stop allowed",
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-22T16:03:21.490Z",
+   "mode": "hook",
+   "host": "claude",
+   "decision": "allow",
+   "reason": "no page was found in /home/prawn/Desktop/Code/surplus; told once, stop allowed",
+   "stopHookActive": false
+  }
+ ],
+ "max": 3,
+ "marker": {
+  "page": null,
+  "dir": "/home/prawn/Desktop/Code/surplus",
+  "kind": "software",
+  "start": "2026-11-22T15:41:40.605Z",
+  "by": "start.mjs"
+ },
+ "setupTold": true,
+ "session": "5eca983e-d50d-4995-9078-6bc52b9fdd52",
+ "at": "2026-11-22T15:45:01.404Z"
+}
