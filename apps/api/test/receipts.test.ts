@@ -325,3 +325,85 @@ describe("getting a lost receipt link back", () => {
         expect((await store.forPayer(BUYER.address)).length).toBe(1);
     });
 });
+
+describe("the public themes and filings pages", () => {
+    // its own fixture: the shared one is deliberately empty, and these routes are about content
+    const withContent: SavedBrief = {
+        ...saved,
+        brief: {
+            ...brief,
+            sources: [
+                {
+                    id: "TSLA-10K", tier: 1, title: "Tesla 10-K", publisher: "SEC EDGAR",
+                    url: "https://sec.gov/tsla", publishedAt: "2026-01-29",
+                    retrievedAt: "2026-11-20T00:00:00.000Z", excerpt: "an excerpt",
+                },
+                {
+                    id: "GOOGL-10K", tier: 1, title: "Alphabet 10-K", publisher: "SEC EDGAR",
+                    url: "https://sec.gov/googl", publishedAt: "2026-02-05",
+                    retrievedAt: "2026-11-20T00:00:00.000Z", excerpt: "an excerpt",
+                },
+            ],
+            themes: [
+                {
+                    themeId: "ai-compute",
+                    gap: false,
+                    claims: [{ id: "c1", type: "fact", text: "a claim", sourceIds: ["TSLA-10K"], quotes: [{ sourceId: "TSLA-10K", text: "a quote" }] }],
+                    fits: [
+                        { asset: "0x1", symbol: "TSLAc", fit: 3, evidence: 2, claimIds: ["c1"] },
+                        { asset: "0x2", symbol: "GOOGLc", fit: 5, evidence: 2, claimIds: ["c1"] },
+                    ],
+                },
+                { themeId: "longevity-biotech", gap: true, gapReason: "nothing cleared the bar", claims: [], fits: [] },
+            ],
+        },
+    };
+
+    const build = () =>
+        buildServer({
+            config,
+            mandates: mandateFor(),
+            readBrief: () => withContent,
+            catalogueBriefs: async () => [withContent, withContent],
+        }).app;
+
+    it("lists themes with how often each was researched", async () => {
+        const res = await request(build()).get("/catalogue/themes");
+        expect(res.status).toBe(200);
+        expect(res.body.briefs).toBe(2);
+        const ai = res.body.themes.find((t: { id: string }) => t.id === "ai-compute");
+        expect(ai.briefs).toBe(2);
+        expect(res.body.themes.find((t: { id: string }) => t.id === "longevity-biotech").gaps).toBe(2);
+    });
+
+    it("counts a company once however many briefs it appears in", async () => {
+        // the same brief twice must not double the companies, or the page overstates the work
+        const res = await request(build()).get("/catalogue/themes");
+        const ai = res.body.themes.find((t: { id: string }) => t.id === "ai-compute");
+        expect(ai.companies).toBe(2);
+        expect(new Set(ai.symbols).size).toBe(2);
+    });
+
+    it("lists each filing once, newest first, with the url the API already had", async () => {
+        const res = await request(build()).get("/catalogue/filings");
+        expect(res.status).toBe(200);
+        expect(res.body.filings.map((f: { id: string }) => f.id)).toEqual(["GOOGL-10K", "TSLA-10K"]);
+        expect(res.body.filings[0].url).toBe("https://sec.gov/googl");
+        expect(res.body.filings[0].citedBy).toBe(2);
+    });
+
+    it("never carries a claim or a quote, because those are what a buyer paid for", async () => {
+        const body = JSON.stringify((await request(build()).get("/catalogue/filings")).body)
+            + JSON.stringify((await request(build()).get("/catalogue/themes")).body);
+        expect(body).not.toContain("a quote");
+        expect(body).not.toContain("a claim");
+        // the stored excerpt is filing text the agent pulled for the brief, so it is not free either
+        expect(body).not.toContain("an excerpt");
+    });
+
+    it("is absent when the server was built without a catalogue, rather than answering empty", async () => {
+        const bare = buildServer({ config, mandates: mandateFor(), readBrief: () => saved });
+        expect((await request(bare.app).get("/catalogue/themes")).status).toBe(404);
+        expect((await request(bare.app).get("/catalogue/filings")).status).toBe(404);
+    });
+});

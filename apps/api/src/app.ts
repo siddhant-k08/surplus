@@ -241,6 +241,7 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
         storageCheck: () => backends.check(),
         facilitatorCheck: () => facilitatorReach(config.facilitatorUrl),
         readBrief: newestCatalogueBrief, findBrief: briefById,
+        catalogueBriefs: () => catalogue.list(),
         ...(execution.executor !== null && { positions: () => execution.executor!.positions() }),
         ...(execution.executor !== null && {
             executionStatus: async () => {
@@ -272,8 +273,11 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
     const webDist = fromRepoRoot("apps/web/dist");
     if (existsSync(webDist)) {
         app.use(express.static(webDist, { index: "index.html" }));
-        // a single page app: anything unmatched that is not an API path falls back to index.html
-        app.get(/^(?!\/(?:health|brief|research|ledger|mandate|invest|auth|receipt)\b).*/, (_req, res) => {
+        // A single page app: anything unmatched that is not an API path falls back to index.html.
+        // `catalogue` is on the list because the app has pages at /themes and /filings while the API
+        // has data at /catalogue/themes and /catalogue/filings: without it, a catalogue path the
+        // server did not register would answer a machine with a web page instead of a 404.
+        app.get(/^(?!\/(?:health|brief|catalogue|research|ledger|mandate|invest|auth|receipt)\b).*/, (_req, res) => {
             res.sendFile(join(webDist, "index.html"));
         });
     }

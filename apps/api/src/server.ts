@@ -237,6 +237,14 @@ export interface ServerDeps {
      * Allowed to return a promise, because a brief may be stored in a database rather than a file.
      */
     readBrief?: () => SavedBrief | Promise<SavedBrief>;
+    /**
+     * Every brief in the owner's catalogue, newest first.
+     *
+     * Separate from `readBrief` because the public themes and filings pages describe the whole body
+     * of work, not the latest piece of it. Absent means those routes are not mounted at all rather
+     * than answering an empty list that looks like "the agent has read nothing".
+     */
+    catalogueBriefs?: () => Promise<SavedBrief[]>;
     /** Already loaded, because storage is async and `buildServer` is not. */
     ledger?: Ledger;
     /** Where new entries go. Absent means nothing is persisted. */
@@ -596,6 +604,71 @@ export function buildServer(deps: ServerDeps): BuiltServer {
     );
 
     // free: enough to see what the endpoint sells and on which network, without paying
+    /**
+     * What the agent researches, and what it has read. Both public, both derived from the catalogue.
+     *
+     * Neither leaks anything a buyer paid for. A theme id is the name of a question; a filing is a
+     * public SEC document with a public URL. The claims and quotes that connect the two are the
+     * product, and they stay behind the paywall.
+     */
+    if (deps.catalogueBriefs !== undefined) {
+        const catalogueBriefs = deps.catalogueBriefs;
+
+        app.get("/catalogue/themes", async (_req: Request, res: Response) => {
+            const briefs = await catalogueBriefs();
+            const seen = new Map<string, { id: string; briefs: number; companies: number; gaps: number; symbols: string[] }>();
+            for (const saved of briefs) {
+                for (const theme of saved.brief.themes) {
+                    const row = seen.get(theme.themeId) ?? { id: theme.themeId, briefs: 0, companies: 0, gaps: 0, symbols: [] };
+                    row.briefs += 1;
+                    if (theme.gap) row.gaps += 1;
+                    for (const fit of theme.fits) {
+                        if (!row.symbols.includes(fit.symbol)) row.symbols.push(fit.symbol);
+                    }
+                    row.companies = row.symbols.length;
+                    seen.set(theme.themeId, row);
+                }
+            }
+            res.json({
+                themes: [...seen.values()].sort((a, b) => b.briefs - a.briefs || a.id.localeCompare(b.id)),
+                briefs: briefs.length,
+            });
+        });
+
+        app.get("/catalogue/filings", async (_req: Request, res: Response) => {
+            const briefs = await catalogueBriefs();
+            const seen = new Map<string, {
+                id: string; title: string; publisher: string; url: string;
+                publishedAt: string | null; citedBy: number;
+            }>();
+            for (const saved of briefs) {
+                for (const source of saved.brief.sources) {
+                    const row = seen.get(source.id);
+                    if (row === undefined) {
+                        seen.set(source.id, {
+                            id: source.id,
+                            title: source.title,
+                            publisher: source.publisher,
+                            url: source.url,
+                            publishedAt: source.publishedAt ?? null,
+                            citedBy: 1,
+                        });
+                    } else {
+                        row.citedBy += 1;
+                    }
+                }
+            }
+            // newest first, and an undated filing sorts last rather than pretending to be old
+            const filings = [...seen.values()].sort((a, b) => {
+                if (a.publishedAt === b.publishedAt) return a.title.localeCompare(b.title);
+                if (a.publishedAt === null) return 1;
+                if (b.publishedAt === null) return -1;
+                return b.publishedAt.localeCompare(a.publishedAt);
+            });
+            res.json({ filings, briefs: briefs.length });
+        });
+    }
+
     app.get("/health", async (_req: Request, res: Response) => {
         let briefId: string | null = null;
         let createdAt: string | null = null;
