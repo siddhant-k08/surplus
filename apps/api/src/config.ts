@@ -21,6 +21,14 @@ export interface ApiConfig {
     port: number;
     network: CaipNetwork;
     facilitatorUrl: string;
+    /**
+     * How long to wait on the facilitator before giving up.
+     *
+     * The client's own default is 90 seconds, which is the wrong order of magnitude for a buyer standing
+     * in front of a page: the free facilitator answers in well under a second, so anything past a few
+     * seconds is a fault, not slowness, and waiting longer only delays telling them.
+     */
+    facilitatorTimeoutMs: number;
     payTo: string;
     priceUsd: string;
     /** The owner's catalogue, served by GET /brief and used by the investing loop. */
@@ -166,6 +174,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         );
     }
 
+    const facilitatorTimeoutRaw = (env.FACILITATOR_TIMEOUT_MS ?? "15000").trim();
+    const facilitatorTimeoutMs = Number(facilitatorTimeoutRaw);
+    if (!Number.isInteger(facilitatorTimeoutMs) || facilitatorTimeoutMs < 1000) {
+        throw new Error(`FACILITATOR_TIMEOUT_MS must be an integer of at least 1000, got ${facilitatorTimeoutRaw}`);
+    }
+
     const ageRaw = (env.BRIEF_MAX_AGE_SECONDS ?? "86400").trim();
     const briefMaxAgeSeconds = Number(ageRaw);
     if (!Number.isInteger(briefMaxAgeSeconds) || briefMaxAgeSeconds < 0) {
@@ -199,6 +213,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         port,
         network,
         facilitatorUrl: (env.X402_FACILITATOR_URL ?? "https://x402.org/facilitator").trim(),
+        facilitatorTimeoutMs,
         payTo,
         priceUsd,
         briefsDir: fromRepoRoot((env.BRIEFS_DIR ?? "docs/briefs").trim()),

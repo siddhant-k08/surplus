@@ -15,6 +15,18 @@ describe("loadConfig", () => {
         expect(c.priceUsd).toBe("$0.01"); // small on purpose: a demo buyer should not need much test USDC
     });
 
+    it("gives up on the facilitator long before its own 90 second default", () => {
+        // 90s is the client's default and the wrong order of magnitude for someone waiting on a page
+        expect(loadConfig(base).facilitatorTimeoutMs).toBe(15000);
+        expect(loadConfig({ ...base, FACILITATOR_TIMEOUT_MS: "8000" }).facilitatorTimeoutMs).toBe(8000);
+    });
+
+    it("refuses a facilitator timeout that is not a sane number of milliseconds", () => {
+        for (const bad of ["0", "-1", "900", "1.5", "soon", ""]) {
+            expect(() => loadConfig({ ...base, FACILITATOR_TIMEOUT_MS: bad })).toThrow(/FACILITATOR_TIMEOUT_MS/);
+        }
+    });
+
     it("refuses mainnet unless it is explicitly authorized", () => {
         expect(() => loadConfig({ ...base, X402_NETWORK: BASE_MAINNET })).toThrow(/MAINNET_ENABLED/);
         const c = loadConfig({ ...base, X402_NETWORK: BASE_MAINNET, MAINNET_ENABLED: "true" });

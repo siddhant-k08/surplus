@@ -72,6 +72,14 @@ describe("the receipt store", () => {
     });
 
     it("refuses a malformed stored line rather than guessing", () => {
+        // a line written before the network existed parses, and gains no network from anywhere
+        const older = parseReceiptLine(JSON.stringify({
+            id: "a".repeat(12), briefId: "b", source: "catalogue",
+            transaction: TX, amountUsdcMinor: "10000", at: new Date().toISOString(),
+        }), "f");
+        expect(older.network).toBeUndefined();
+        const newer = parseReceiptLine(JSON.stringify({ ...older, network: "eip155:8453" }), "f");
+        expect(newer.network).toBe("eip155:8453");
         expect(() => parseReceiptLine("{not json", "f")).toThrow();
         expect(() => parseReceiptLine(JSON.stringify({ id: "x" }), "f")).toThrow(/briefId is missing/);
     });
@@ -129,6 +137,29 @@ describe("the receipt route", () => {
         expect(res.status).toBe(200);
         expect(res.body.brief.id).toBe("brief-test");
         expect(res.body.receipt.transaction).toBe(TX);
+    });
+
+    it("reports the network a new receipt settled on", async () => {
+        const { app, receipts } = build();
+        const r = { ...receipt(), network: "eip155:84532" };
+        await receipts.issue(r);
+        const res = await request(app).get(`/receipt/${r.id}`);
+        expect(res.status).toBe(200);
+        expect(res.body.receipt.network).toBe("eip155:84532");
+    });
+
+    it("leaves the network null on a receipt written before it was stored", async () => {
+        // The old rows are real and must stay readable. Filling this in from the running config would
+        // point a buyer's transaction at whichever chain this server happens to be on today, which is
+        // not evidence of where their sale settled.
+        const { app, receipts } = build();
+        const old = receipt();
+        expect("network" in old).toBe(false);
+        await receipts.issue(old);
+        const res = await request(app).get(`/receipt/${old.id}`);
+        expect(res.status).toBe(200);
+        expect(res.body.receipt.network).toBeNull();
+        expect(res.body.brief.id).toBe("brief-test");
     });
 
     it("answers the same way for an unknown id and a malformed one, so it cannot be probed", async () => {

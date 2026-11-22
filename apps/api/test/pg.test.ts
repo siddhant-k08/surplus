@@ -273,6 +273,23 @@ describeDb("receipts in Postgres", () => {
         expect(await store.count()).toBe(1);
     });
 
+    it("stores the settlement network, and leaves it undefined on a row without one", async () => {
+        // the column was added after receipts already existed, so it is nullable and old rows stay null
+        // its own schema: tests after this one assert absolute counts in the shared one
+        const only = await scratchSchema();
+        try {
+            const store = new PgReceiptStore(only.sql);
+            const withNetwork = receipt({ transaction: "0x" + "b1".repeat(32), network: "eip155:84532" });
+            const without = receipt({ transaction: "0x" + "b2".repeat(32) });
+            await store.issue(withNetwork);
+            await store.issue(without);
+            expect((await store.find(withNetwork.id))?.network).toBe("eip155:84532");
+            expect((await store.find(without.id))?.network).toBeUndefined();
+        } finally {
+            await only.drop();
+        }
+    }, 60_000);
+
     it("issues one receipt per settlement, however often it is replayed", async () => {
         const store = new PgReceiptStore(scratch.sql);
         const r = receipt({ transaction: "0x" + "cd".repeat(32) });

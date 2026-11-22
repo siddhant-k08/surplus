@@ -28,7 +28,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express } from "express";
 import type { ApiConfig } from "./config";
-import { buildServer } from "./server";
+import { buildServer, facilitatorReach } from "./server";
 import { fromRepoRoot } from "./paths";
 import type { Backends } from "./backends";
 import type { Treasury } from "@surplus/core";
@@ -239,6 +239,7 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
         throttle: backends.throttle,
         storage: backends.kind,
         storageCheck: () => backends.check(),
+        facilitatorCheck: () => facilitatorReach(config.facilitatorUrl),
         readBrief: newestCatalogueBrief, findBrief: briefById,
         ...(execution.executor !== null && { positions: () => execution.executor!.positions() }),
         ...(execution.executor !== null && {

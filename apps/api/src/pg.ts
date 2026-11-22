@@ -102,12 +102,15 @@ export async function migrate(sql: Sql): Promise<void> {
             transaction        text not null,
             amount_usdc_minor  text not null,
             at                 timestamptz not null,
-            payer              text
+            payer              text,
+            network            text
         )
     `;
     await sql`create index if not exists receipts_transaction_idx on receipts (lower(transaction))`;
     // added after the table existed, so an already-deployed database gets it too
     await sql`alter table receipts add column if not exists payer text`;
+    // added after receipts already existed, so the column is nullable and old rows stay null
+    await sql`alter table receipts add column if not exists network text`;
     await sql`create index if not exists receipts_payer_idx on receipts (lower(payer))`;
     await sql`
         create table if not exists briefs (
@@ -287,6 +290,7 @@ export class PgReceiptStore implements ReceiptStore {
                 amount_usdc_minor: receipt.amountUsdcMinor,
                 at: new Date(receipt.at),
                 payer: receipt.payer ?? null,
+                network: receipt.network ?? null,
             }])}
             on conflict (id) do nothing
         `;
@@ -325,6 +329,7 @@ interface Row {
     amount_usdc_minor: string;
     at: Date;
     payer: string | null;
+    network: string | null;
 }
 
 /** Reads a receipt row through the same validator the file lines go through. */
@@ -338,6 +343,7 @@ const fromRow = (r: Row): Receipt =>
             amountUsdcMinor: r.amount_usdc_minor,
             at: r.at.toISOString(),
             ...(r.payer !== null && { payer: r.payer }),
+            ...(r.network !== null && { network: r.network }),
         }),
         `receipt ${r.id}`,
     );

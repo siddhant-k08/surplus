@@ -33,6 +33,14 @@ export interface Receipt {
      * is public, so recovery takes a signature from it.
      */
     payer?: string | undefined;
+    /**
+     * The CAIP-2 network the settlement happened on, when it was recorded.
+     *
+     * A transaction hash means nothing without the chain it is on: the same hash shown against the wrong
+     * explorer is worse than no link at all. Absent on every receipt written before this field existed,
+     * and those must not be guessed at from the running configuration, which can have changed since.
+     */
+    network?: string | undefined;
 }
 
 /**
@@ -82,6 +90,8 @@ export function parseReceiptLine(line: string, where: string): Receipt {
         at: str("at"),
         // absent on receipts written before the payer was recorded, and on a settlement that reported none
         ...(typeof r.payer === "string" && r.payer !== "" && { payer: r.payer }),
+        // absent on every receipt written before the network was recorded; never defaulted
+        ...(typeof r.network === "string" && r.network !== "" && { network: r.network }),
     };
 }
 

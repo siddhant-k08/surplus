@@ -96,6 +96,37 @@ export interface SettlementFacts {
 }
 
 /**
+ * Can this instance reach the payment facilitator, and how fast.
+ *
+ * Selling depends on it: settlement goes through the facilitator, so an instance that cannot reach it
+ * cannot complete a purchase however healthy everything else looks. One request hung here for 90
+ * seconds and the only way to find that out was a buyer losing a purchase and a dig through host logs.
+ *
+ * It is reported, not fatal. An unreachable facilitator stops sales but breaks neither the books nor
+ * storage, and flapping this endpoint on someone else's outage would make it useless for the two faults
+ * it exists to catch. The timeout is short on purpose: this answers a question, it does not wait on one.
+ */
+export async function facilitatorReach(url: string): Promise<{ ok: boolean; ms: number; detail?: string }> {
+    const started = Date.now();
+    try {
+        const res = await fetch(`${url.replace(/\/+$/, "")}/supported`, {
+            method: "GET",
+            headers: { accept: "application/json" },
+            signal: AbortSignal.timeout(3000),
+        });
+        return res.ok
+            ? { ok: true, ms: Date.now() - started }
+            : { ok: false, ms: Date.now() - started, detail: `answered ${res.status}` };
+    } catch (e) {
+        return {
+            ok: false,
+            ms: Date.now() - started,
+            detail: e instanceof Error && e.name === "TimeoutError" ? "no answer in 3s" : "unreachable",
+        };
+    }
+}
+
+/**
  * Turns a settled payment into ledger revenue, or explains why it did not.
  *
  * Kept separate from the hook so the money rules can be tested without a real payment. The amount is booked
@@ -157,6 +188,8 @@ export async function persistSale(args: {
     transaction: string;
     amountUsdcMinor: bigint;
     payer?: string;
+    /** The network this settled on, stored so a receipt can link to the right explorer later. */
+    network?: string;
 }): Promise<number> {
     const { served } = args;
     try {
@@ -170,6 +203,7 @@ export async function persistSale(args: {
                 at: new Date().toISOString(),
                 // the buyer's only way back if this response never reaches them
                 ...(args.payer !== undefined && { payer: args.payer }),
+                ...(args.network !== undefined && { network: args.network }),
             });
         }
         let persistedId = args.persistedId;
@@ -234,6 +268,8 @@ export interface ServerDeps {
      * has since lost its database is exactly the state a monitor needs to catch.
      */
     storageCheck?: () => Promise<{ ok: boolean; detail?: string }>;
+    /** Injected like storageCheck, so a test never reaches the network to answer a health check. */
+    facilitatorCheck?: () => Promise<{ ok: boolean; ms: number; detail?: string }>;
     /**
      * The ceiling on the free routes that do work. One is made per server otherwise.
      *
@@ -336,6 +372,9 @@ export function mandateView(m: MandateVersion) {
             maxTradeUsdc: m.terms.maxTradeUsdc.toString(),
             minTradeUsdc: m.terms.minTradeUsdc.toString(),
             reserveTargetUsdc: m.terms.reserveTargetUsdc.toString(),
+            // Optional in core, so it is reported only when the owner has actually set it. Sending false
+            // for an unset term would show a constraint in the desk that the mandate does not carry.
+            ...(m.terms.investOnlyWhenAhead !== undefined && { investOnlyWhenAhead: m.terms.investOnlyWhenAhead }),
         },
     };
 }
@@ -376,7 +415,10 @@ export function buildServer(deps: ServerDeps): BuiltServer {
     const sales: BookedSale[] = ledger ? salesFromLedger(ledger.all()) : [];
     let persistedId = ledger ? (ledger.all().at(-1)?.id ?? 0) : 0;
 
-    const facilitator = new HTTPFacilitatorClient({ url: config.facilitatorUrl });
+    const facilitator = new HTTPFacilitatorClient({
+        url: config.facilitatorUrl,
+        timeoutMs: config.facilitatorTimeoutMs,
+    });
     const resourceServer = new x402ResourceServer(facilitator)
         .register(config.network, new ExactEvmScheme())
         .onAfterSettle(async (ctx) => {
@@ -414,6 +456,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                     transaction: result.transaction,
                     amountUsdcMinor: amount,
                     ...(result.payer !== undefined && { payer: result.payer }),
+                    network: config.network,
                 });
             }
         });
@@ -572,6 +615,9 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             ? { ok: true, detail: "not checked" }
             : await deps.storageCheck();
         const books = reconcileInternal(treasury.ledger);
+        const reach = deps.facilitatorCheck === undefined
+            ? { ok: true, ms: 0, detail: "not checked" }
+            : await deps.facilitatorCheck();
         const healthy = storage.ok && books.ok;
 
         res.status(healthy ? 200 : 503).json({
@@ -584,6 +630,9 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 books: books.ok ? "reconciled" : "unreconciled",
                 ...(books.ok ? {} : { bookIssues: books.issues }),
                 catalogue: briefId === null ? "empty" : "ok",
+                facilitator: reach.ok ? "ok" : "unreachable",
+                facilitatorMs: reach.ms,
+                ...(reach.detail !== undefined && { facilitatorDetail: reach.detail }),
             },
             network: config.network,
             facilitator: config.facilitatorUrl,
@@ -592,6 +641,10 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             asset: config.expectedAsset,
             route: BRIEF_ROUTE,
             ledgerPublic: config.publicLedger,
+            // Where this instance is actually running, which turns out to decide whether it can sell at
+            // all: from one region the payment facilitator was simply unreachable. The host sets this, so
+            // it is the ground truth that a dashboard setting and a log field only claim to describe.
+            region: process.env.VERCEL_REGION ?? "local",
             latestBrief: briefId,
             latestBriefCreatedAt: createdAt,
             salesBooked: sales.length,
@@ -692,6 +745,9 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                     transaction: receipt.transaction,
                     amountUsdcMinor: receipt.amountUsdcMinor,
                     at: receipt.at,
+                    // null on receipts written before this was stored. Deliberately not filled in from
+                    // config: this server's network today is not evidence of where an old sale settled.
+                    network: receipt.network ?? null,
                 },
                 brief: found.brief,
                 provider: found.provider,
