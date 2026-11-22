@@ -1,12 +1,5 @@
 import { erc20Abi } from "viem";
-import {
-    connect as wagmiConnect,
-    disconnect as wagmiDisconnect,
-    getAccount,
-    readContract,
-    signTypedData as wagmiSignTypedData,
-    switchChain,
-} from "wagmi/actions";
+import { getAccount, readContract, signTypedData as wagmiSignTypedData, switchChain } from "wagmi/actions";
 import { config } from "./wagmi";
 
 /**
@@ -16,57 +9,16 @@ import { config } from "./wagmi";
  * x402 payment stack wants a `signTypedData(address, payload)` it can call, and so do the sign-in and
  * receipt-recovery flows. Everything here goes through the same wagmi store the hooks read, so there
  * is exactly one answer to "which wallet is connected" no matter who asks.
+ *
+ * Connecting is deliberately not here. It is one button and one modal, OnchainKit's, mounted in
+ * `Connect.tsx`; a second way to connect would be a second way for the page and the wallet to
+ * disagree about who is signed in, which is the bug this whole layer exists to prevent.
  */
 
 export class WalletError extends Error {}
 
 /** Coinbase Wallet covers extension, mobile and a Smart Wallet passkey; injected is what is installed. */
 export type WalletKind = "coinbase" | "injected";
-
-const TYPE: Record<WalletKind, string> = { coinbase: "coinbaseWallet", injected: "injected" };
-
-/** Coinbase Wallet needs nothing installed, so it is always a real option. */
-export const canUseCoinbase = (): boolean => typeof window !== "undefined";
-
-/** Whether a browser extension is actually present. Offering a button that cannot work is worse than one fewer. */
-export const hasWallet = (): boolean =>
-    typeof window !== "undefined" && (window as { ethereum?: unknown }).ethereum !== undefined;
-
-function connectorFor(kind: WalletKind) {
-    const wanted = config.connectors.find((c) => c.type === TYPE[kind]);
-    if (wanted === undefined) throw new WalletError("That wallet is not available in this build.");
-    return wanted;
-}
-
-/** The wallet kind currently connected, if any. */
-export function connectedKind(): WalletKind | null {
-    const type = getAccount(config).connector?.type;
-    if (type === TYPE.coinbase) return "coinbase";
-    if (type === TYPE.injected) return "injected";
-    return null;
-}
-
-/**
- * Connects a wallet and returns the account it offers.
- *
- * Asking for the connector that is already connected is not an error: it answers with the account it
- * already has, rather than throwing at a person who clicked the button they were already using.
- */
-export async function connect(kind: WalletKind = "injected"): Promise<string> {
-    const already = getAccount(config);
-    if (already.isConnected && already.address !== undefined && already.connector?.type === TYPE[kind]) {
-        return already.address;
-    }
-    const result = await wagmiConnect(config, { connector: connectorFor(kind) });
-    const first = result.accounts[0];
-    if (first === undefined) throw new WalletError("The wallet connected but offered no account.");
-    return first;
-}
-
-/** Forgets the connected wallet, so the next connect can choose a different one. */
-export async function disconnect(): Promise<void> {
-    await wagmiDisconnect(config);
-}
 
 /** The account already connected, if any. Never prompts. */
 export function currentAccount(): string | null {
