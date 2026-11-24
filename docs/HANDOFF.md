@@ -78,7 +78,7 @@ Verified facts worth keeping:
 - USDC on Base Sepolia is `0x036CbD53842c5426634e7929541eC2318f3dCF7e` (Circle's contract address list, read 21 Nov 2026). The same page gives Base mainnet as `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, matching the address already verified here, which is what makes the testnet one credible. The running server's own challenge then resolved `$3.00` to amount `3000000` against that asset with `extra {name: USDC, version: 2}`, confirming it independently.
 - `npm audit --omit=dev` is clean with the new dependencies. The 6 reported vulnerabilities are dev-only.
 
-Price decided 21 Nov 2026: `$0.01` by default, down from `$3.00`, so a demo buyer needs almost no test USDC. This has a consequence worth knowing before wiring real revenue into the investing loop. With the demo mandate (reserve target 2.00, opening reserve 1.50, invest share 5000 bps), a single `$0.01` sale is less than the model cost of the brief, so surplus is zero and nothing is invested. The `$3.00` figure in `demo-live.ts` is what makes that scene work. Before joining the two, either lower `reserveTargetUsdc` for the demo mandate or accumulate enough sales; do not quietly raise the price back.
+Price decided 21 Nov 2026: `$0.01` by default, down from `$3.00`, so a demo buyer needs almost no test USDC. This has a consequence worth knowing before wiring real revenue into the investing loop. With the demo mandate (reserve target 2.00, opening reserve 1.50, invest share 5000 bps), a single `$0.01` sale is less than the model cost of the brief, so surplus is zero and nothing is invested. The `$3.00` figure in `demo-live.ts` is what makes that scene work. Before joining the two, either lower `reserveTargetUsdc` for the demo mandate or accumulate enough sales; do not quietly raise the price back. **Superseded 23 Nov 2026**: the price is now `$0.25` and the reasoning is in the pricing entry near the end of this document. It was raised loudly, with the reason recorded, because at `$0.01` the agent could never invest at all.
 
 Buyer client added: `apps/api/src/buy.ts`, run with `npm run buy -w @surplus/api`. It prints the challenge, pays, prints the settlement, then reads `/ledger` to show the booked sale. Verified from the installed packages: `wrapFetchWithPaymentFromConfig` and `decodePaymentResponseHeader` from `@x402/fetch`, client-side `ExactEvmScheme` from `@x402/evm` root (not `/exact/server`, which is the seller side), `privateKeyToAccount` from `viem/accounts`. The buyer key is read from `.env` as `X402_BUYER_PRIVATE_KEY` and never printed or logged.
 
@@ -157,7 +157,7 @@ Arithmetic for a demo where the whole chain is real, worth getting right before 
 - at `$0.01` a brief it would take about 150 sales, so the current price cannot demonstrate the investing path
 - lowering `minTradeUsdc` would be the wrong fix: it exists because gas is 2 to 4 percent of a 0.10 leg
 
-Recommendation: set `BRIEF_PRICE_USD=$1.00` for the recorded demo and make three real purchases, keeping `$0.01` for cheap functional testing. Do not lower `minTradeUsdc`.
+Recommendation: set `BRIEF_PRICE_USD=$1.00` for the recorded demo and make three real purchases, keeping `$0.01` for cheap functional testing. Do not lower `minTradeUsdc`. **Superseded 23 Nov 2026**: the default is now `$0.25`, derived from cost rather than picked for a demo, and the reserve target moved to `$0.42` of runway. Keeping `$0.01` for testing is still wrong for the same reason it was wrong in production: it is below what a brief costs.
 
 ## Investing endpoints, 21 Nov 2026
 
@@ -1482,6 +1482,108 @@ retired paths, and four cover `signableTypedData`. Every page was loaded against
 **Not visually reviewed: the desk once signed in, and the mandate editor**, unchanged from before and
 still needing an owner wallet signature. The browser pane also hid itself partway through the review,
 so the later checks are DOM and text rather than screenshots.
+
+## Pricing, and why the agent has never invested, 23 Nov 2026
+
+Agreed with Siddhant on 23 Nov. No code written yet; this is the plan the next milestone implements.
+
+### The finding
+
+The investing book holds four entry types: one opening balance, three payments, seven cost accruals,
+one reserve top-up. **No fills, simulated or real.** The allocator, approval state machine, swap
+planner, journal, drift detection and position reconciliation have never run end to end against the
+agent's own revenue.
+
+It is an economics problem, not a bug:
+
+```
+cost per brief   $0.021087   (gemini-3.1-flash-lite, ~70.6k in / 2.3k out over 3 calls)
+sale price       $0.010000
+break-even       2.1 sales per brief
+
+7 briefs made, 3 sold.  Revenue $0.030000, costs $0.147614, behind by $0.117614.
+```
+
+Every brief produced puts the agent further behind, because one costs roughly twice what it sells
+for. `surplus.investable` is therefore always zero and `propose` always answers "nothing investable".
+
+### Three corrections to the record
+
+- **`investOnlyWhenAhead` is not what blocks it.** The stored mandate is version 2 and does not carry
+  the term at all; `investing.ts` tests `=== true`, so the gate is off. The `true` in `app.ts:70` is
+  a first-run default that a stored mandate overrides and never re-applies.
+- **The live reserve target is `$0.50`, not `$2.00`.** Same reason: `$2.00` is the first-run default
+  in `app.ts`. The reserve currently holds `$0.02`, so the gap is `$0.48`.
+- **`surplus.investable` is credited in exactly one place**, `settleBrief` sweeping `revenue - costs`
+  (`surplus.ts:167`). Opening float lands in `cash.operating` against `equity.opening` and never
+  becomes investable. So the line in CLAUDE.md saying "whatever a mainnet book invests is owner
+  capital (`OPENING_FLOAT_USDC`)" describes an intent the money rules do not implement: a mainnet
+  book, which cannot receive testnet revenue, has nothing to invest at all. Fix the doc or implement
+  an explicit owner-capital entry, but do not leave them disagreeing.
+
+### What the price has to clear
+
+Revenue must beat costs, then fill the `$0.48` reserve gap, then leave `$0.10` of surplus so the 50%
+share clears the `$0.05` minimum trade. **Cumulative revenue must beat cumulative costs by `$0.58`
+before one minimum trade is possible.** On the existing 7 briefs that is about `$0.73` of sales: 73
+sales at `$0.01`, or three at `$0.25`.
+
+### Decisions
+
+1. **Catalogue brief goes to `$0.25`.** The rule, which matters more than the number: price at
+   roughly **4x the generation cost of the model actually shipped**. At 1x the agent only breaks even
+   if every brief sells; at 4x a single sale pays for the brief outright, so producing research stops
+   being self-harm, and the next three sales fund the reserve and the first trade. Flash is estimated
+   at about `$0.06` per brief, which puts 4x at `$0.24`. **Measure the real Flash cost on the first
+   run**: the Gemini 3.8 Flash pricing in this document comes from secondary sources only.
+   If the demo ships on Sonnet (~`$0.16`), the same rule gives about `$0.65`.
+2. **`/research` stays at `$2.00`.** Its cost is marginal rather than amortized, the margin is
+   already large, and `RESEARCH_MAX_USD` enforcing "a generated brief never costs more than the buyer
+   paid" stays untouched.
+3. **Express the reserve as runway**, not a fixed figure: enough to generate roughly 20 more briefs,
+   which at today's cost is about `$0.42`. Same order as the current `$0.50`, but it is a policy that
+   moves correctly when the model changes, and it is explicable to a reader.
+4. This **deliberately reverses** the note at line 81 of this document, "do not quietly raise the
+   price back". The `$0.01` was right when the only goal was proving a purchase with minimal test
+   USDC. It is wrong now that the goal is the agent funding itself, because at `$0.01` the agent is
+   arithmetically incapable of ever investing. Raised loudly, with the reason recorded.
+
+### Agreed order of work after the pricing change
+
+1. **Close the loop once, end to end**, with real revenue and simulated fills: sale, settle, sweep,
+   propose, owner signs, execute, reconcile. The proof is the cycle completing, not the fill being
+   real. This has never happened and it is the single biggest missing demonstration.
+2. **Build the sell path.** `quoteBuy` hardwires USDC as `tokenIn`, so the agent can accumulate and
+   cannot exit. A mandate with no exit rule cannot express take-profit, rebalance or a drawdown
+   limit. Largest genuine capability gap in the system.
+3. **Skin in the game.** Join a position back to the brief and theme that justified it and show it on
+   the brief, so the research half and the treasury half are one product rather than two sharing a
+   wallet. Needs step 1 to have happened before there is anything to show.
+4. **Run the facilitator in-process.** `@x402/core/facilitator` exports `x402Facilitator`, and
+   `@x402/evm/exact/facilitator` exports the facilitator-side `ExactEvmScheme` (distinct from the
+   `@x402/evm/exact/server` one already wired in `server.ts`). `x402ResourceServer` takes a
+   `FacilitatorClient` interface of `verify`, `settle` and `getSupported`, documented as implementable
+   for "HTTP-based or local facilitators", so a local adapter replaces `HTTPFacilitatorClient` with no
+   network hop. It needs a wallet holding ETH to pay settlement gas, and it should use a key separate
+   from the trading key. This removes the facilitator timeout and unreachable-region failure modes,
+   and it is the only route to mainnet revenue without a paid provider. Not a prerequisite for
+   anything above it.
+5. **Mainnet last**, behind `MAINNET_ENABLED`, a spend cap and a throwaway wallet. Siddhant instructed
+   on 23 Nov to set the eligibility question aside and focus on the product; it is recorded here
+   because it still gates any real purchase of tokenized stocks and needs qualified advice, not an
+   opinion from this project.
+
+### Also agreed
+
+`docs/PDF-PROMPT.md` holds a brief for Claude Design to produce an explainer PDF, in the site's own
+soot-and-lime system. On Siddhant's instruction it describes **Surplus complete**, not Surplus as it
+stands, so it is written in the present tense about the finished design: the full money loop
+including the exit, skin in the game, and the agent funding its own investing. The honesty mechanism
+is a single framing line on the cover saying the document describes the complete design, plus a page
+of permanent boundaries (no custody, no trading on a buyer's behalf, no model touching money). It
+covers why anyone buys verified public data and who already sells research for a living. It carries
+no build-status page and no roadmap, so **it will describe behaviour that does not exist yet**; keep
+that in mind before sending it anywhere that reads it as a statement of fact.
 
 ## Next milestones, in order
 
