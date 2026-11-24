@@ -119,7 +119,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     const payTo = required(env, "X402_PAY_TO");
     if (!/^0x[0-9a-fA-F]{40}$/.test(payTo)) throw new Error("X402_PAY_TO must be a 20 byte hex address");
 
-    const priceUsd = (env.BRIEF_PRICE_USD ?? "$0.01").trim();
+    /*
+     * The catalogue price, and the rule behind the number.
+     *
+     * A brief is generated once and sold many times, so its cost is amortized, but the agent cannot
+     * know in advance how many copies will move. Pricing at roughly four times the generation cost of
+     * the model in production means a single sale pays for the brief outright: producing research
+     * stops being self-harm even when a brief sells once, and the sales after it fund the reserve and
+     * the first investment.
+     *
+     * It was $0.01 while the only goal was proving a purchase with minimal test USDC. At that price,
+     * against a measured $0.021087 to generate one, every brief put the agent further behind, so
+     * `surplus.investable` was always zero and the whole investing half could never run. Raised
+     * deliberately; see the 23 Nov 2026 entry in docs/HANDOFF.md.
+     */
+    const priceUsd = (env.BRIEF_PRICE_USD ?? "$0.25").trim();
     if (!/^\$\d+(\.\d{1,6})?$/.test(priceUsd)) throw new Error(`BRIEF_PRICE_USD must look like "$3.00", got ${priceUsd}`);
 
     const portRaw = (env.PORT ?? "4021").trim();

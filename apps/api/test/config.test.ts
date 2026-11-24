@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { loadConfig, BASE_SEPOLIA, BASE_MAINNET, USDC } from "../src/config";
+import { unitEconomics } from "../src/briefs";
+import { parseUsdc } from "@surplus/core";
 
 const PAY_TO = "0x" + "a".repeat(40);
 const base = { X402_PAY_TO: PAY_TO, OWNER_TOKEN: "owner-token-for-tests-only", OWNER_ADDRESS: "0x" + "9".repeat(40) } as NodeJS.ProcessEnv;
@@ -12,7 +14,9 @@ describe("loadConfig", () => {
         expect(c.mode).toBe("testnet");
         expect(c.expectedAsset).toBe(USDC[BASE_SEPOLIA]);
         expect(c.port).toBe(4021);
-        expect(c.priceUsd).toBe("$0.01"); // small on purpose: a demo buyer should not need much test USDC
+        // four times the measured $0.021087 it costs to generate one, so a single sale pays for the
+        // brief rather than putting the agent further behind: see the 23 Nov 2026 HANDOFF entry
+        expect(c.priceUsd).toBe("$0.25");
     });
 
     it("gives up on the facilitator long before its own 90 second default", () => {
@@ -85,5 +89,49 @@ describe("loadConfig", () => {
     it("rejects an invalid port", () => {
         expect(() => loadConfig({ ...base, PORT: "0" })).toThrow(/PORT/);
         expect(() => loadConfig({ ...base, PORT: "abc" })).toThrow(/PORT/);
+    });
+});
+
+/**
+ * The check that was missing while the agent sold briefs below cost for days.
+ *
+ * The failure had no symptom of its own: `surplus.investable` simply stayed at zero and the whole
+ * investing half never ran. These pin the arithmetic that now says so out loud on every boot.
+ */
+describe("whether a sale pays for the brief it sells", () => {
+    const u = parseUsdc;
+
+    it("reports the average cost and how far one sale covers it", () => {
+        // the real figures: $0.147614 over 7 briefs is $0.021087 each, and $0.25 covers that 11.9x
+        const e = unitEconomics(u("0.25"), u("0.147614"), 7);
+        expect(e).not.toBeNull();
+        expect(e!.perBriefUsdcMinor).toBe(u("0.021087"));
+        expect(e!.covers).toBeCloseTo(11.85, 1);
+        expect(e!.belowCost).toBe(false);
+    });
+
+    it("flags the price the agent actually ran on", () => {
+        const e = unitEconomics(u("0.01"), u("0.147614"), 7);
+        expect(e!.belowCost).toBe(true);
+        expect(e!.covers).toBeLessThan(1);
+    });
+
+    it("does not flag a price that exactly meets cost", () => {
+        // a brief sold at cost leaves the agent flat, which is not the error this warns about
+        const e = unitEconomics(u("0.021087"), u("0.147614"), 7);
+        expect(e!.belowCost).toBe(false);
+        expect(e!.covers).toBe(1);
+    });
+
+    it("has no opinion on an empty catalogue, which is not a pricing fault", () => {
+        expect(unitEconomics(u("0.25"), 0n, 0)).toBeNull();
+        expect(unitEconomics(u("0.25"), u("1.00"), -1)).toBeNull();
+    });
+
+    it("treats a catalogue that cost nothing as uncosted rather than underpriced", () => {
+        const e = unitEconomics(u("0.25"), 0n, 3);
+        expect(e!.perBriefUsdcMinor).toBe(0n);
+        expect(e!.covers).toBeNull();
+        expect(e!.belowCost).toBe(false);
     });
 });

@@ -1,8 +1,9 @@
-import { formatUsdc } from "@surplus/core";
+import { formatUsdc, parseUsdc } from "@surplus/core";
 import { loadConfig } from "./config";
 import { loadRootEnv } from "./paths";
 import { assemble } from "./app";
 import { BRIEF_ROUTE } from "./server";
+import { unitEconomics } from "./briefs";
 
 /**
  * The long-running server: one process, a port, and a disk or a database behind it.
@@ -38,6 +39,36 @@ async function main(): Promise<void> {
             `(cap $${config.researchMaxUsd} per brief, $${config.researchTotalMaxUsd} total, reuse within ${config.briefMaxAgeSeconds}s)`,
         );
         console.log(`  catalogue   ${config.briefsDir} (served by GET /brief, funded by the mandate)`);
+        /*
+         * Whether a sale actually pays for a brief.
+         *
+         * This is the check that was missing when the price sat at $0.01 against a $0.021 brief: the
+         * agent ran for days selling below cost, and the only symptom was an investing half that
+         * silently never had anything to invest. It warns rather than refusing to start, because an
+         * empty catalogue has no average and an operator may discount on purpose, but it says so on
+         * every boot so the mistake cannot be quiet again.
+         */
+        const economics = unitEconomics(
+            parseUsdc(config.priceUsd.slice(1)),
+            a.catalogueCost.totalUsdcMinor,
+            a.catalogueCost.briefs,
+        );
+        if (economics !== null) {
+            console.log(
+                `  unit cost   ${formatUsdc(economics.perBriefUsdcMinor)} USDC per brief over ` +
+                `${a.catalogueCost.briefs} briefs` +
+                (economics.covers === null
+                    ? ""
+                    : `; one sale at ${config.priceUsd} covers it ${economics.covers.toFixed(1)}x`),
+            );
+            if (economics.belowCost) {
+                console.log(
+                    `  WARNING     ${config.priceUsd} is below the ` +
+                    `${formatUsdc(economics.perBriefUsdcMinor)} it costs to make a brief. Every sale puts ` +
+                    "the agent further behind and nothing will ever become investable.",
+                );
+            }
+        }
         console.log(
             `  ledger      ${books.sales} ` +
             `(${treasury.ledger.all().length} entries restored, ${sales.length} sales, ` +

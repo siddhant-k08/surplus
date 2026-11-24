@@ -15,7 +15,7 @@ Everything else has a default (see `.env.example`). The server reads `.env` at s
 | Route | Cost | What it does |
 | --- | --- | --- |
 | `GET /health` | free | network, facilitator, price, payTo, newest brief id, sales booked |
-| `GET /brief` | `BRIEF_PRICE_USD` (default `$0.01`) | the newest brief from `BRIEFS_DIR`, with every claim's quote |
+| `GET /brief` | `BRIEF_PRICE_USD` (default `$0.25`) | the newest brief from `BRIEFS_DIR`, with every claim's quote |
 | `POST /research` | `RESEARCH_PRICE_USD` (default `$2.00`) | a brief generated for the themes you send |
 | `GET /ledger` | free | the chronological ledger and the sales booked so far |
 
@@ -31,7 +31,7 @@ curl -s localhost:4021/health | python3 -m json.tool
 curl -sD - -o /dev/null localhost:4021/brief | grep -i '^payment-required' | sed 's/^[^:]*: //' | tr -d '\r' | base64 -d | python3 -m json.tool
 ```
 
-The decoded challenge should name `eip155:84532`, the Base Sepolia USDC address, your `payTo`, and the price in atomic units (`$0.01` becomes `10000`, USDC having 6 decimals).
+The decoded challenge should name `eip155:84532`, the Base Sepolia USDC address, your `payTo`, and the price in atomic units (`$0.25` becomes `250000`, USDC having 6 decimals).
 
 ## Buying one, end to end
 

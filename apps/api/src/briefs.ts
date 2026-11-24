@@ -106,3 +106,33 @@ export class MemoryBriefBackend implements BriefBackend {
 export function savedFromDocument(file: string, document: unknown): SavedBrief {
     return parseSavedBrief(file, JSON.stringify(document));
 }
+
+/**
+ * Whether a sale pays for the brief it sells.
+ *
+ * A catalogue brief is generated once and sold many times, so its cost is amortized and the agent
+ * cannot know in advance how many copies will move. The only figure available at start-up is what
+ * the catalogue has already cost, so this is the honest version of the question: averaged over the
+ * briefs on hand, does one sale cover one brief?
+ *
+ * It exists because the answer was no for days and nothing said so. At $0.01 against a $0.021 brief,
+ * every sale put the agent further behind, `surplus.investable` stayed at zero, and the entire
+ * investing half could never run. The symptom was silence.
+ *
+ * Returns null when there is nothing to average, which is not a fault: a fresh deployment has an
+ * empty catalogue, and a catalogue of briefs that cost nothing to make is not a pricing error.
+ */
+export function unitEconomics(
+    priceUsdcMinor: bigint,
+    totalCostUsdcMinor: bigint,
+    briefs: number,
+): { perBriefUsdcMinor: bigint; covers: number | null; belowCost: boolean } | null {
+    if (briefs <= 0) return null;
+    const perBrief = totalCostUsdcMinor / BigInt(briefs);
+    return {
+        perBriefUsdcMinor: perBrief,
+        // a ratio for the eye only: every comparison that decides anything stays in integers
+        covers: perBrief === 0n ? null : Number(priceUsdcMinor) / Number(perBrief),
+        belowCost: perBrief > 0n && priceUsdcMinor < perBrief,
+    };
+}

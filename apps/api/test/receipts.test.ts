@@ -199,7 +199,7 @@ describe("the public catalogue", () => {
         const { app } = buildServer({ config, mandates: mandateFor(), readBrief: () => saved, receipts });
         const res = await request(app).get("/catalogue");
         expect(res.status).toBe(200);
-        expect(res.body.briefPriceUsd).toBe("$0.01");
+        expect(res.body.briefPriceUsd).toBe("$0.25");
         expect(res.body.researchPriceUsd).toBe("$2.00");
         expect(res.body.latest.id).toBe("brief-test");
         // the teaser must never carry a claim or a quote

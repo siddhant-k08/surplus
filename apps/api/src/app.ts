@@ -62,7 +62,12 @@ const initialTerms: MandateTerms = {
     investShareBps: 5000,
     maxTradeUsdc: u("1.00"),
     minTradeUsdc: u("0.05"),
-    reserveTargetUsdc: u("2.00"),
+    /*
+     * The reserve is runway, not a round number: roughly 20 further briefs at the measured
+     * $0.021087 each. Expressed this way it tracks what the agent actually costs to operate and
+     * moves correctly when the model changes, where a fixed figure silently stops meaning anything.
+     */
+    reserveTargetUsdc: u("0.42"),
     maxSlippageBps: 100,
     driftToleranceBps: 100,
     approvalExpirySeconds: 600,
@@ -93,6 +98,8 @@ export interface Assembled {
     webDist: string | null;
     /** Why fills are simulated, or the address real ones would come from. */
     execution: ReturnType<typeof openExecutor>;
+    /** What the catalogue cost to produce, so the banner can check the price against it. */
+    catalogueCost: { totalUsdcMinor: bigint; briefs: number };
 }
 
 export async function assemble(config: ApiConfig): Promise<Assembled> {
@@ -294,5 +301,9 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
         books,
         webDist: existsSync(webDist) ? webDist : null,
         execution,
+        catalogueCost: {
+            totalUsdcMinor: await catalogue.totalCostUsdcMinor(),
+            briefs: (await catalogue.list()).length,
+        },
     };
 }
