@@ -24,6 +24,13 @@ Full history, decisions, verified facts and open questions: read `docs/HANDOFF.m
 - `api/index.ts`: the serverless entry point, used with `vercel.json`. It caches one assembly per instance and serves the same Express app the long-running server does. Typechecked by `api/tsconfig.json` (`tsc -p api`, part of `npm run typecheck`).
 - `apps/api` (`@surplus/api`): never resolve paths against the cwd here; npm runs workspace scripts from `apps/api`, so use `src/paths.ts` (`REPO_ROOT`, `loadRootEnv`, `fromRepoRoot`). The x402 paid research endpoint, Express 5 plus `@x402/*` 2.x, tests with vitest and supertest. See `apps/api/README.md`.
 - `docs/briefs/`: research briefs saved by `demo-research.ts`.
+- The mandate panel (`apps/web/src/MandatePanel.tsx`, `src/terms.ts`) edits every term the mandate
+  carries, including the three exit rules. An empty box there means the rule is not set at all, which
+  is a state and not a missing value, so clearing one sends an explicit `null`: the server carries over
+  any term an update omits, and an omitted key would leave the agent still allowed to sell on a rule
+  the owner had just cleared. For the same reason a term the mandate does not carry must not read as a
+  change when the form drafts it as a default; `investOnlyWhenAhead` did, and offered a new version,
+  a new hash and the invalidation of every outstanding approval to save "no → no".
 
 ## Commands (from repo root, Node 22)
 
@@ -49,7 +56,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 30 files, 389 tests. API 13 files, 254 tests (220 without `DATABASE_URL`, which skips 34). Web 2 files, 53 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 30 files, 389 tests. API 13 files, 254 tests (220 without `DATABASE_URL`, which skips 34). Web 2 files, 64 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 

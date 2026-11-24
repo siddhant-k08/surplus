@@ -3,10 +3,11 @@ import { AnimatePresence } from "motion/react";
 import { Button } from "./Chrome";
 import { Reveal , motion } from "./motion";
 import { count } from "./Evidence";
-import { api, ApiError, type Mandate, type MandateHistory, type MandateTerms } from "./api";
+import { api, ApiError, type ExitTerm, type Mandate, type MandateHistory, type MandateTerms } from "./api";
 import {
-    bpsToPercent, changedOnly, describeChange, formatAddresses, formatThemeTargets, isAmount,
-    LABELS, parseAddresses, parseThemeTargets, percentToBps, toSeconds,
+    bpsToPercent, changedOnly, describeChange, EXIT_TERMS, formatAddresses, formatExitPercent,
+    formatThemeTargets, isAmount, LABELS, parseAddresses, parseExitPercent, parseThemeTargets,
+    percentToBps, toSeconds,
 } from "./terms";
 
 /**
@@ -30,6 +31,12 @@ const BPS_FIELDS = [
     { key: "driftToleranceBps", hint: "How far the price may move before your signature stops being valid." },
 ] as const;
 
+const EXIT_FIELDS = [
+    { key: "takeProfitBps", hint: "Sell a holding once it is up this much on what was paid for it." },
+    { key: "stopLossBps", hint: "Sell a holding once it is down this much. Below 100%, since a position cannot lose more than all of it." },
+    { key: "rebalanceBandBps", hint: "How far a theme may sit above its target share before it is trimmed back. Only ever sells, spread across that theme's holdings in proportion." },
+] as const;
+
 const AMOUNT_FIELDS = [
     { key: "reserveTargetUsdc", hint: "Filled from revenue before any surplus exists. Never invested." },
     { key: "minTradeUsdc", hint: "Below this, gas eats the trade, so the money stays uninvested." },
@@ -49,6 +56,9 @@ function draftFrom(terms: MandateTerms): Draft {
         themes: formatThemeTargets(terms.themes),
         eligible: formatAddresses(terms.eligible),
         investOnlyWhenAhead: terms.investOnlyWhenAhead === true ? "yes" : "no",
+        takeProfitBps: formatExitPercent(terms.takeProfitBps),
+        stopLossBps: formatExitPercent(terms.stopLossBps),
+        rebalanceBandBps: formatExitPercent(terms.rebalanceBandBps),
     };
 }
 
@@ -74,6 +84,26 @@ export function termsFromDraft(
         }
         return v;
     };
+    /*
+     * The exit rules, where an empty box is a legal answer meaning the agent may not sell on that rule.
+     *
+     * A malformed box keeps whatever the mandate already says rather than falling through to nothing.
+     * The save is blocked either way, but a typo must never read in the review as "take profit removed".
+     */
+    const exit: { -readonly [K in ExitTerm]?: number } = {};
+    for (const key of EXIT_TERMS) {
+        const rule = parseExitPercent(draft[key] ?? "");
+        if (!rule.ok) {
+            bad.push(`${LABELS[key]} must be a percentage above zero, or empty for no rule`);
+            if (current[key] !== undefined) exit[key] = current[key];
+            continue;
+        }
+        if (rule.bps !== undefined) exit[key] = rule.bps;
+    }
+    if (exit.stopLossBps !== undefined && exit.stopLossBps >= 10_000) {
+        bad.push("Stop loss must be below 100%, since a position cannot lose more than all of it");
+    }
+
     const seconds = toSeconds(draft.approvalExpirySeconds ?? "");
     if (seconds === null) bad.push("Approval expiry must be a whole number of seconds above zero");
     const themes = parseThemeTargets(draft.themes ?? "");
@@ -95,6 +125,7 @@ export function termsFromDraft(
         ...(draft.investOnlyWhenAhead === undefined
             ? {}
             : { investOnlyWhenAhead: draft.investOnlyWhenAhead === "yes" }),
+        ...exit,
     };
     return bad.length > 0 ? { ok: false, bad } : { ok: true, terms };
 }
@@ -166,6 +197,18 @@ export function MandatePanel({ mandate, onSaved }: { mandate: Mandate; onSaved: 
                         ))}
                     </Group>
 
+                    <Group title="When to sell">
+                        <p className="m-0 text-[0.8125rem] leading-relaxed text-dim">
+                            Leave a box empty and the agent will not sell on that rule. With all three empty it
+                            proposes no sale at all: silence is not permission, so an exit has to be one you set
+                            or one you ask for by name.
+                        </p>
+                        {EXIT_FIELDS.map((f) => (
+                            <Field key={f.key} id={f.key} label={LABELS[f.key]} hint={f.hint} suffix="%"
+                                value={draft[f.key] ?? ""} onChange={(v) => set(f.key, v)} />
+                        ))}
+                    </Group>
+
                     <Group title="Execution and your signature">
                         {BPS_FIELDS.slice(2).map((f) => (
                             <Field key={f.key} id={f.key} label={LABELS[f.key]} hint={f.hint} suffix="%"
@@ -188,11 +231,13 @@ export function MandatePanel({ mandate, onSaved }: { mandate: Mandate; onSaved: 
                         </label>
                     </Group>
 
+                    <div className="lg:col-span-2 grid">
                     <Group title="Eligible tokens">
                         <Field id="eligible" label={`One token address per line · ${mandate.terms.eligible.length} now`} rows={6} mono
                             hint="Base's official registry crossed with the Coinbase tokenized stocks API. Removing an address stops the agent buying it; it does not sell what is held."
                             value={draft.eligible ?? ""} onChange={(v) => set("eligible", v)} />
                     </Group>
+                    </div>
                 </div>
 
                 {/* The review, before the save. */}

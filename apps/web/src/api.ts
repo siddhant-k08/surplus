@@ -149,7 +149,18 @@ export interface MandateTerms {
     reserveTargetUsdc: string;
     /** Optional in core: absent means the mandate does not carry the constraint at all. */
     investOnlyWhenAhead?: boolean;
+    /**
+     * When the agent may sell on its own. All three are optional, and all three mean something by being
+     * absent: with none of them set the agent proposes no sale at all. Absence is the mandate
+     * withholding permission, not a value waiting to be filled in.
+     */
+    takeProfitBps?: number;
+    stopLossBps?: number;
+    rebalanceBandBps?: number;
 }
+
+/** The terms whose absence is a state, and which therefore need a way to be removed. */
+export type ExitTerm = "takeProfitBps" | "stopLossBps" | "rebalanceBandBps";
 
 export interface Mandate {
     version: number;
@@ -159,8 +170,14 @@ export interface Mandate {
     terms: MandateTerms;
 }
 
-/** A mandate update, as the owner's edits leave the form. Only changed terms are sent. */
-export type TermsUpdate = Partial<MandateTerms>;
+/**
+ * A mandate update, as the owner's edits leave the form. Only changed terms are sent.
+ *
+ * An exit term may also be sent as null, which is how removal is said. The server carries over every
+ * term an update does not mention, so leaving one out cannot remove it, and for these three the
+ * difference matters: unsetting them is how an owner takes back permission to sell.
+ */
+export type TermsUpdate = Partial<Omit<MandateTerms, ExitTerm>> & { [K in ExitTerm]?: number | null };
 
 export interface MandateSaved extends Mandate {
     /** What actually changed, named by the server rather than guessed at by the page. */

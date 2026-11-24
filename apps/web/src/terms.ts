@@ -1,4 +1,4 @@
-import type { MandateTerms, TermsUpdate } from "./api";
+import type { ExitTerm, MandateTerms, TermsUpdate } from "./api";
 
 /**
  * Turning the owner's typing into mandate terms, without a float touching money.
@@ -42,6 +42,33 @@ export function toSeconds(input: string): number | null {
     if (!/^\d{1,7}$/.test(raw)) return null;
     const n = Number(raw);
     return n > 0 ? n : null;
+}
+
+/** The three terms whose absence is a state, in the order they read on screen. */
+export const EXIT_TERMS: readonly ExitTerm[] = ["takeProfitBps", "stopLossBps", "rebalanceBandBps"];
+
+/**
+ * An exit rule as typed, where an empty box means the rule is not set at all.
+ *
+ * These are the only terms where blank has to be a legal answer rather than a validation failure. With
+ * none of the three set the agent proposes no sale on its own, and an owner who set a stop loss by
+ * mistake needs a way back to that state, so the form has to be able to say "no rule" as clearly as it
+ * says "15 percent". `bps` absent on a successful parse is exactly that answer.
+ *
+ * The floor is 1 bp because a rule of zero is not a rule: a take profit of nothing would sell every
+ * position the moment it was bought.
+ */
+export function parseExitPercent(input: string): { ok: true; bps?: number } | { ok: false } {
+    const raw = input.trim();
+    if (raw === "") return { ok: true };
+    const bps = percentToBps(raw);
+    if (bps === null || bps < 1) return { ok: false };
+    return { ok: true, bps };
+}
+
+/** An exit rule for the form: a percent string, or empty when the mandate does not carry it. */
+export function formatExitPercent(bps: number | undefined): string {
+    return bps === undefined ? "" : bpsToPercent(bps);
 }
 
 /** Addresses one per line, trimmed. Empty lines dropped; validity is the server's to judge. */
@@ -92,8 +119,22 @@ export function changedOnly(before: MandateTerms, after: MandateTerms): TermsUpd
     for (const k of ["maxTradeUsdc", "minTradeUsdc", "reserveTargetUsdc"] as const) {
         if (before[k] !== after[k]) out[k] = after[k];
     }
-    if (before.investOnlyWhenAhead !== after.investOnlyWhenAhead && after.investOnlyWhenAhead !== undefined) {
+    /*
+     * Absent and false are the same instruction: do not apply the constraint.
+     *
+     * The checkbox cannot show "absent", so a mandate that never carried the term drafts as unticked
+     * and parses back as false. Comparing those directly made the panel offer "Invest only when ahead:
+     * no → no" as a change to save on every such mandate, which is a new version, a new hash and every
+     * outstanding approval invalidated, for nothing. Only a move to or from true is a real change.
+     */
+    if ((before.investOnlyWhenAhead ?? false) !== (after.investOnlyWhenAhead ?? false)
+        && after.investOnlyWhenAhead !== undefined) {
         out.investOnlyWhenAhead = after.investOnlyWhenAhead;
+    }
+    for (const k of EXIT_TERMS) {
+        // Null, not an omitted key: the server carries over anything an update does not mention, so
+        // dropping a removed rule from the body would leave the agent still allowed to sell on it.
+        if (before[k] !== after[k]) out[k] = after[k] ?? null;
     }
     return out;
 }
@@ -114,6 +155,14 @@ export function describeChange(key: keyof MandateTerms, before: MandateTerms, af
         case "minTradeUsdc":
         case "reserveTargetUsdc":
             return `${LABELS[key]}: ${before[key]} → ${after[key]} USDC`;
+        case "takeProfitBps":
+        case "stopLossBps":
+        case "rebalanceBandBps": {
+            // "not set" rather than a blank or a zero, because removing a rule is a real change and has
+            // to read as one in the review the owner signs off.
+            const rule = (v: number | undefined): string => (v === undefined ? "not set" : bps(v));
+            return `${LABELS[key]}: ${rule(before[key])} → ${rule(after[key])}`;
+        }
         default:
             return `${LABELS[key]}: ${bps(before[key])} → ${bps(after[key])}`;
     }
@@ -131,4 +180,7 @@ export const LABELS: Record<keyof MandateTerms, string> = {
     minTradeUsdc: "Smallest trade worth making",
     reserveTargetUsdc: "Protected reserve",
     investOnlyWhenAhead: "Invest only when ahead",
+    takeProfitBps: "Take profit at",
+    stopLossBps: "Stop loss at",
+    rebalanceBandBps: "Trim a theme past",
 };

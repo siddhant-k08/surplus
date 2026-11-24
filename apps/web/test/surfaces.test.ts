@@ -3,7 +3,7 @@ import { explorerTx, networkName, shortHash } from "../src/explorer";
 import { stepStates, activeStep } from "../src/steps";
 import {
     percentToBps, bpsToPercent, isAmount, toSeconds, parseThemeTargets, formatThemeTargets,
-    changedOnly, parseAddresses,
+    changedOnly, describeChange, formatExitPercent, parseAddresses, parseExitPercent,
 } from "../src/terms";
 import { termsFromDraft } from "../src/MandatePanel";
 import { evidenceCount, count } from "../src/Evidence";
@@ -209,8 +209,130 @@ describe("what gets sent to the mandate", () => {
         expect(r.bad.join(" ")).toMatch(/eligible token address/);
     });
 
+    it("does not offer to save a constraint the mandate never carried", () => {
+        // The checkbox cannot show "absent", so an untouched mandate without the term drafts as
+        // unticked and parses back as false. Offering that as a change would write a new version, and
+        // invalidate every outstanding approval, to say what the mandate already said.
+        const current = terms();
+        expect(current.investOnlyWhenAhead).toBeUndefined();
+        const r = termsFromDraft(current, {
+            investShareBps: "50", maxCompanyBps: "40", maxSlippageBps: "0.5", driftToleranceBps: "1",
+            reserveTargetUsdc: "0.500000", minTradeUsdc: "0.050000", maxTradeUsdc: "1.000000",
+            approvalExpirySeconds: "600", themes: "ai-compute 50", eligible: "0x" + "b2".repeat(20),
+            investOnlyWhenAhead: "no",
+        });
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        expect(changedOnly(current, r.terms)).toEqual({});
+    });
+
+    it("still sends the constraint when it is actually turned on", () => {
+        const r = termsFromDraft(terms(), {
+            investShareBps: "50", maxCompanyBps: "40", maxSlippageBps: "0.5", driftToleranceBps: "1",
+            reserveTargetUsdc: "0.500000", minTradeUsdc: "0.050000", maxTradeUsdc: "1.000000",
+            approvalExpirySeconds: "600", themes: "ai-compute 50", eligible: "0x" + "b2".repeat(20),
+            investOnlyWhenAhead: "yes",
+        });
+        if (!r.ok) return;
+        expect(changedOnly(terms(), r.terms)).toEqual({ investOnlyWhenAhead: true });
+        expect(changedOnly(terms({ investOnlyWhenAhead: true }), r.terms)).toEqual({});
+    });
+
     it("reads addresses one per line and drops blanks", () => {
         expect(parseAddresses("0xaa\n\n  0xbb  \n")).toEqual(["0xaa", "0xbb"]);
+    });
+});
+
+describe("the exit rules, where empty is an answer", () => {
+    /**
+     * The `terms()` fixture as the form would hold it, so each test varies only the rule it is about
+     * and `changedOnly` reports that rule and nothing else.
+     */
+    const draft = (over: Record<string, string> = {}) => ({
+        investShareBps: "50", maxCompanyBps: "40", maxSlippageBps: "0.5", driftToleranceBps: "1",
+        reserveTargetUsdc: "0.500000", minTradeUsdc: "0.050000", maxTradeUsdc: "1.000000",
+        approvalExpirySeconds: "600", themes: "ai-compute 50", eligible: "0x" + "b2".repeat(20),
+        ...over,
+    });
+
+    it("reads an empty box as no rule rather than as a zero", () => {
+        // A zero would sell every position the moment it was bought. Absence has to stay absence.
+        const r = termsFromDraft(terms(), draft());
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        expect("takeProfitBps" in r.terms).toBe(false);
+        expect("stopLossBps" in r.terms).toBe(false);
+        expect("rebalanceBandBps" in r.terms).toBe(false);
+    });
+
+    it("sends nothing when the mandate had no rules and the owner set none", () => {
+        const r = termsFromDraft(terms(), draft());
+        if (!r.ok) return;
+        expect(changedOnly(terms(), r.terms)).toEqual({});
+    });
+
+    it("turns a typed percentage into basis points", () => {
+        const r = termsFromDraft(terms(), draft({ takeProfitBps: "25", rebalanceBandBps: "5" }));
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        expect(r.terms.takeProfitBps).toBe(2500);
+        expect(r.terms.rebalanceBandBps).toBe(500);
+        expect(changedOnly(terms(), r.terms)).toEqual({ takeProfitBps: 2500, rebalanceBandBps: 500 });
+    });
+
+    it("sends null to remove a rule, never an absent key", () => {
+        // The one that matters. The server carries over every term an update does not mention, so an
+        // omitted key would leave the agent still allowed to sell on a rule the owner just cleared.
+        const current = terms({ stopLossBps: 1500 });
+        const r = termsFromDraft(current, draft({ stopLossBps: "" }));
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        const sent = changedOnly(current, r.terms);
+        expect(sent).toEqual({ stopLossBps: null });
+        expect("stopLossBps" in sent).toBe(true);
+    });
+
+    it("refuses a stop loss of the whole position", () => {
+        const r = termsFromDraft(terms(), draft({ stopLossBps: "100" }));
+        expect(r.ok).toBe(false);
+        if (r.ok) return;
+        expect(r.bad.join(" ")).toMatch(/cannot lose more than all of it/);
+    });
+
+    it("refuses a rule of zero, which is not a rule", () => {
+        const r = termsFromDraft(terms(), draft({ takeProfitBps: "0" }));
+        expect(r.ok).toBe(false);
+        if (r.ok) return;
+        expect(r.bad.join(" ")).toMatch(/Take profit at must be a percentage above zero/);
+    });
+
+    it("keeps the live rule when the box is malformed, so a typo never reads as a removal", () => {
+        const current = terms({ takeProfitBps: 2500 });
+        const r = termsFromDraft(current, draft({ takeProfitBps: "2.5.5" }));
+        expect(r.ok).toBe(false);
+        if (r.ok) return;
+        // the save is blocked either way; what matters is that it was not about to clear the rule
+        const rebuilt = termsFromDraft(current, draft({ takeProfitBps: "25" }));
+        if (!rebuilt.ok) return;
+        expect(changedOnly(current, rebuilt.terms)).toEqual({});
+    });
+
+    it("says setting and clearing a rule in words the owner can check", () => {
+        const none = terms();
+        const set = terms({ rebalanceBandBps: 500 });
+        expect(describeChange("rebalanceBandBps", none, set)).toBe("Trim a theme past: not set → 5%");
+        expect(describeChange("rebalanceBandBps", set, none)).toBe("Trim a theme past: 5% → not set");
+    });
+
+    it("round-trips a rule through the form and back", () => {
+        expect(formatExitPercent(undefined)).toBe("");
+        expect(formatExitPercent(500)).toBe("5");
+        expect(parseExitPercent("")).toEqual({ ok: true });
+        expect(parseExitPercent("  ")).toEqual({ ok: true });
+        expect(parseExitPercent("5")).toEqual({ ok: true, bps: 500 });
+        expect(parseExitPercent("0")).toEqual({ ok: false });
+        expect(parseExitPercent("0.004")).toEqual({ ok: false });
+        expect(parseExitPercent("nope")).toEqual({ ok: false });
     });
 });
 
