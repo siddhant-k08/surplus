@@ -426,7 +426,15 @@ export class InvestingEngine {
         }
 
         const quoted = await market.quote(alloc.legs);
-        const created = this.treasury.createProposal({ id, legs: alloc.legs, quotedPrices: quoted.prices, held });
+        // The brief goes on the proposal so every fill it books can be traced back to the research that
+        // argued for it, which is what `backing` reads and what the buyer sees on their own brief.
+        const created = this.treasury.createProposal({
+            id,
+            legs: alloc.legs,
+            quotedPrices: quoted.prices,
+            held,
+            briefId: saved.brief.id,
+        });
         this.proposalIds.add(id);
         await this.flush();
         if (!created.ok) return { ok: false, reasons: created.reasons };

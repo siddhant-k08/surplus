@@ -5,6 +5,8 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import {
     Treasury,
+    backing,
+    BASE_REGISTRY,
     flushNewEntries,
     realizedSales,
     reconcileInternal,
@@ -666,6 +668,62 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 return b.publishedAt.localeCompare(a.publishedAt);
             });
             res.json({ filings, briefs: briefs.length });
+        });
+    }
+
+    /**
+     * What the agent has put behind its own research, in public.
+     *
+     * This is the one claim Surplus makes that a buyer cannot check from the brief alone: that the agent
+     * spends its own revenue on the companies its research points at. A proof that only the owner can
+     * read is not a proof, so this route takes no token. It carries less than `/invest/ledger` does: how
+     * much went into which token under which theme of which brief, and the transaction when there was
+     * one. It says nothing about costs, the reserve, what is uninvested, or the owner's float.
+     *
+     * `simulated` is the field that matters most. While fills are simulated this whole response
+     * describes money the agent decided to spend, not money that moved, and anything rendering it has
+     * to say so.
+     */
+    if (deps.engine !== undefined) {
+        const engine = deps.engine;
+        const symbols = new Map(BASE_REGISTRY.map((t) => [t.address.toLowerCase(), t.symbol]));
+
+        app.get("/catalogue/backing", (_req: Request, res: Response) => {
+            const r = backing(engine.treasury.ledger.all());
+            res.json({
+                // The headline: everything the agent has committed on the strength of its own briefs.
+                // Deliberately not the same as `totalUsdcIn`, which includes positions no brief justified.
+                attributedUsdcMinor: r.briefs.reduce((a, b) => a + b.usdcIn, 0n).toString(),
+                totalUsdcMinor: r.totalUsdcIn.toString(),
+                unattributed: {
+                    usdcMinor: r.unattributed.usdcIn.toString(),
+                    fills: r.unattributed.fills,
+                },
+                briefs: r.briefs.map((b) => ({
+                    briefId: b.briefId,
+                    usdcMinor: b.usdcIn.toString(),
+                    mode: b.mode,
+                    simulated: b.simulated,
+                    fills: b.fills,
+                    onchainFills: b.onchainFills,
+                    firstAt: b.firstAt,
+                    lastAt: b.lastAt,
+                    themes: b.themes.map((t) => ({
+                        theme: t.theme,
+                        usdcMinor: t.usdcIn.toString(),
+                        assets: t.assets.map((a) => ({
+                            asset: a.asset,
+                            // A token outside Base's registry should never have been bought, so a missing
+                            // symbol is reported as missing rather than filled in from the ledger memo.
+                            symbol: symbols.get(a.asset) ?? null,
+                            usdcMinor: a.usdcIn.toString(),
+                            fills: a.fills,
+                            onchainFills: a.onchainFills,
+                            transactions: a.transactions,
+                        })),
+                    })),
+                })),
+            });
         });
     }
 

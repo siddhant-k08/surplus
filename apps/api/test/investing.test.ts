@@ -595,6 +595,65 @@ describe("the owner routes", () => {
         expect(res.body.entries.every((e: { mode: string }) => e.mode === "sim")).toBe(true);
     });
 
+    it("publishes what the agent put behind its own research, with no token", async () => {
+        const { app } = await build();
+        await auth(request(app).post("/invest/sync"));
+        const prop = await auth(request(app).post("/invest/propose")).send({ id: "p1" });
+        await auth(request(app).post("/invest/approve"))
+            .send({ id: "p1", signature: await signOffer(ownerAccount, prop.body.toSign) });
+        const exec = await auth(request(app).post("/invest/execute")).send({ id: "p1" });
+        expect(exec.status).toBe(200);
+
+        // No Authorization header: a proof only the owner can read is not a proof.
+        const res = await request(app).get("/catalogue/backing");
+        expect(res.status).toBe(200);
+        expect(res.body.briefs).toHaveLength(1);
+
+        const brief = res.body.briefs[0];
+        expect(brief.briefId).toBe("brief-test");
+        expect(brief.themes).toHaveLength(1);
+        expect(brief.themes[0].theme).toBe("ai-compute");
+        // the fills were simulated, and the response has to say so rather than leave it to be assumed
+        expect(brief.simulated).toBe(true);
+        expect(brief.onchainFills).toBe(0);
+        expect(brief.mode).toBe("sim");
+
+        // every asset names itself from Base's registry, and the parts add to the headline
+        const assets = brief.themes[0].assets as { symbol: string; usdcMinor: string }[];
+        expect(assets.map((a) => a.symbol).sort()).toEqual(["MSFTc", "NVDAc"]);
+        expect(assets.reduce((a, x) => a + BigInt(x.usdcMinor), 0n)).toBe(BigInt(brief.themes[0].usdcMinor));
+        expect(BigInt(brief.usdcMinor)).toBe(BigInt(res.body.attributedUsdcMinor));
+        expect(res.body.unattributed).toEqual({ usdcMinor: "0", fills: 0 });
+
+        // what it spent is what the proposal said it would
+        expect(BigInt(res.body.attributedUsdcMinor)).toBe(BigInt(prop.body.totalUsdcIn));
+    });
+
+    it("tells a reader nothing about costs, the reserve or the owner's float", async () => {
+        // The route is public, so what it leaves out matters as much as what it carries. Everything in
+        // the list below is in /invest/ledger, which needs the owner's token.
+        const { app } = await build();
+        await auth(request(app).post("/invest/sync"));
+        const prop = await auth(request(app).post("/invest/propose")).send({ id: "p1" });
+        await auth(request(app).post("/invest/approve"))
+            .send({ id: "p1", signature: await signOffer(ownerAccount, prop.body.toSign) });
+        await auth(request(app).post("/invest/execute")).send({ id: "p1" });
+
+        const body = JSON.stringify((await request(app).get("/catalogue/backing")).body);
+        for (const leak of ["expense", "reserve", "equity", "retained", "cash.operating", "revenue"]) {
+            expect(body).not.toContain(leak);
+        }
+    });
+
+    it("answers empty rather than erroring before the agent has invested anything", async () => {
+        const { app } = await build();
+        const res = await request(app).get("/catalogue/backing");
+        expect(res.status).toBe(200);
+        expect(res.body.briefs).toEqual([]);
+        expect(res.body.attributedUsdcMinor).toBe("0");
+        expect(res.body.totalUsdcMinor).toBe("0");
+    });
+
     it("rejects a propose or approve with no id where one is required", async () => {
         const { app } = await build();
         expect((await auth(request(app).post("/invest/approve")).send({})).status).toBe(400);
