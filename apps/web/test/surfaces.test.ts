@@ -311,15 +311,15 @@ const backed: Backing = {
                     theme: "ai-compute",
                     usdcMinor: "303242",
                     assets: [
-                        { asset: "0xaaa", symbol: "GOOGLc", usdcMinor: "67387", fills: 1, onchainFills: 0, transactions: [] },
-                        { asset: "0xbbb", symbol: "METAc", usdcMinor: "55135", fills: 1, onchainFills: 0, transactions: [] },
+                        { asset: "0xaaa", symbol: "GOOGLc", usdcMinor: "67387", fills: 1, sales: 0, onchainFills: 0, transactions: [] },
+                        { asset: "0xbbb", symbol: "METAc", usdcMinor: "55135", fills: 1, sales: 0, onchainFills: 0, transactions: [] },
                     ],
                 },
                 {
                     theme: "platform-giants",
                     usdcMinor: "187054",
                     assets: [
-                        { asset: "0xbbb", symbol: "METAc", usdcMinor: "67869", fills: 1, onchainFills: 0, transactions: [] },
+                        { asset: "0xbbb", symbol: "METAc", usdcMinor: "67869", fills: 1, sales: 0, onchainFills: 0, transactions: [] },
                     ],
                 },
             ],

@@ -296,6 +296,8 @@ export interface BackedAsset {
     symbol: string | null;
     usdcMinor: string;
     fills: number;
+    /** Exits out of this holding. A holding fully sold is absent, not listed at zero. */
+    sales: number;
     onchainFills: number;
     transactions: string[];
 }
@@ -312,6 +314,7 @@ export interface BriefBacking {
     mode: string;
     simulated: boolean;
     fills: number;
+    sales: number;
     onchainFills: number;
     firstAt: string;
     lastAt: string;
