@@ -413,6 +413,32 @@ export interface ExecuteResult {
     fills: { symbol: string; usdcIn: string; price: string; quantity: string }[];
 }
 
+/**
+ * Where each theme sits against its target, from live sell quotes.
+ *
+ * Read on demand rather than with the page: it costs one quote per token held, and a mandate page
+ * opened to change the reserve has no business spending that.
+ */
+export interface ThemeDrift {
+    theme: string;
+    valueUsdcMinor: string;
+    actualBps: number;
+    /** Renormalised over the themes that hold something, which is what the agent trims against. */
+    targetBps: number;
+    driftBps: number;
+    excessUsdcMinor: string;
+    overBand: boolean;
+}
+
+export interface DriftReading {
+    themes: ThemeDrift[];
+    totalUsdcMinor: string;
+    untargetedUsdcMinor: string;
+    /** The rule this is measured against, or null when the mandate states none. */
+    bandBps: number | null;
+    asOf: string;
+}
+
 export const api = {
     me: () => call<Me>("/auth/me"),
     nonce: () => post<LoginOffer>("/auth/nonce"),
@@ -424,6 +450,7 @@ export const api = {
     mandateHistory: () => call<MandateHistory>("/mandate/history"),
     /** Sends only the terms that changed; the server carries the rest over. Never retried. */
     updateMandate: (terms: TermsUpdate) => post<MandateSaved>("/mandate", terms),
+    drift: () => get<DriftReading>("/invest/drift"),
     brief: () => call<OwnerBrief>("/invest/brief"),
     ledger: () => call<InvestLedger>("/invest/ledger"),
 

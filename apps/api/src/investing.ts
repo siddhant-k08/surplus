@@ -9,6 +9,7 @@ import {
     attributeFills,
     exitPlan,
     positionsFromLedger,
+    themeDrift,
     themeHoldings,
     themeKey,
     realizedSales,
@@ -36,6 +37,7 @@ import {
     type ExitCandidate,
     type Skipped,
     type Drift,
+    type Position,
 } from "@surplus/core";
 
 /** Everything the engine needs from the outside world, injected so tests need no network. */
@@ -481,6 +483,64 @@ export class InvestingEngine {
      * The themes come from where the money went in, read off the fills themselves, so a sale is
      * attributed to the research that argued for the position rather than to whatever theme is current.
      */
+    /**
+     * Sell-side quotes for everything held, token in and USDC out, sized by the units held.
+     *
+     * One quote per token rather than per theme: the price of a token does not depend on why it is
+     * held. Shared by `exit` and `drift` so the two can never price the same portfolio differently,
+     * which would let the desk show a drift the proposal did not act on.
+     */
+    private async sellQuotes(
+        market: MarketData,
+        open: ReadonlyMap<string, Position>,
+        maxSlippageBps: number,
+    ): Promise<{
+        prices: ReadonlyMap<string, bigint>;
+        /** Tokens that could not be quoted, which a caller reporting to a person has to say out loud. */
+        errors: ReadonlyMap<string, string>;
+        decimals: Map<string, number>;
+        symbols: Map<string, string>;
+    }> {
+        const decimals = new Map(market.trusted.map((t) => [t.address, t.decimals]));
+        const symbols = new Map(market.trusted.map((t) => [t.address, t.symbol]));
+        const quoted = await market.quote(
+            [...open].map(([asset, p]) => ({
+                asset,
+                symbol: symbols.get(asset) ?? asset,
+                theme: this.themeOf(asset),
+                usdcIn: p.costUsdcIn,
+                maxSlippageBps,
+                side: "sell" as const,
+                unitsIn: p.units,
+            })),
+        );
+        return { prices: quoted.prices, errors: quoted.errors, decimals, symbols };
+    }
+
+    /**
+     * Where the themes sit against their targets, proposing nothing.
+     *
+     * The same measurement `exit` makes, without the refusals that belong to selling. An owner
+     * choosing a rebalance band has to be able to see the drift *before* the mandate carries the rule,
+     * so this must not require one: a reading that only appears once you have already set the number
+     * is no help in setting it.
+     */
+    async drift(): Promise<Drift> {
+        const positions = positionsFromLedger(this.treasury.ledger.all());
+        const open = new Map([...positions].filter(([, p]) => p.units > 0n || p.costUsdcIn > 0n));
+        if (open.size === 0) return { themes: [], totalUsdc: 0n, untargetedUsdc: 0n };
+
+        const terms = this.mandates.current().terms;
+        const market = await this.deps.market();
+        const { prices, decimals } = await this.sellQuotes(market, open, terms.maxSlippageBps);
+        return themeDrift({
+            holdings: themeHoldings(this.treasury.ledger.all()),
+            prices,
+            decimals,
+            terms,
+        });
+    }
+
     async exit(
         id: string,
         requested?: readonly { asset: string; units?: bigint }[],
@@ -513,28 +573,14 @@ export class InvestingEngine {
             };
         }
 
-        // Quote every open position the other way round: token in, USDC out, sized by the units held.
-        // One quote per token, not per theme: the price of a token does not depend on why it is held.
-        const decimals = new Map(market.trusted.map((t) => [t.address, t.decimals]));
-        const symbols = new Map(market.trusted.map((t) => [t.address, t.symbol]));
-        const quoted = await market.quote(
-            [...open].map(([asset, p]) => ({
-                asset,
-                symbol: symbols.get(asset) ?? asset,
-                theme: this.themeOf(asset),
-                usdcIn: p.costUsdcIn,
-                maxSlippageBps: terms.maxSlippageBps,
-                side: "sell" as const,
-                unitsIn: p.units,
-            })),
-        );
+        const { prices, errors, decimals, symbols } = await this.sellQuotes(market, open, terms.maxSlippageBps);
 
         // The same money split by theme, which is what a sale actually leaves and what a trim measures.
         const holdings = themeHoldings(this.treasury.ledger.all());
         const plan = exitPlan({
             positions: open,
             holdings,
-            prices: quoted.prices,
+            prices,
             decimals,
             symbols,
             terms,
@@ -551,7 +597,7 @@ export class InvestingEngine {
             };
         }
 
-        const created = this.treasury.createProposal({ id, legs: plan.legs, quotedPrices: quoted.prices });
+        const created = this.treasury.createProposal({ id, legs: plan.legs, quotedPrices: prices });
         this.proposalIds.add(id);
         await this.flush();
         if (!created.ok) return { ok: false, reasons: created.reasons, skipped: plan.skipped };
@@ -577,7 +623,7 @@ export class InvestingEngine {
             skipped: plan.skipped,
             drift: plan.drift,
             warnings: [
-                ...[...quoted.errors].map(([asset, why]) => `no quote for ${asset}: ${why}`),
+                ...[...errors].map(([asset, why]) => `no quote for ${asset}: ${why}`),
                 ...plan.skipped.map((x) => `${x.symbol} not sold: ${x.why}`),
                 // A caveat is a warning, not a footnote: it changes what the number beside it means.
                 ...plan.candidates.flatMap((c) => (c.caveat === undefined ? [] : [`${c.symbol}: ${c.caveat}`])),

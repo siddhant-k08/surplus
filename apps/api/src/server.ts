@@ -1194,6 +1194,29 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             }
         });
 
+        /**
+         * Where the themes sit against their targets, right now, proposing nothing.
+         *
+         * Separate from the exit route because an owner choosing a rebalance band needs the reading
+         * before the mandate carries the rule, and `POST /invest/exit` refuses outright when no exit
+         * rule is set. It costs one live sell quote per token held, so the desk asks for it rather
+         * than fetching it on every visit.
+         */
+        app.get("/invest/drift", owner, async (_req: Request, res: Response) => {
+            try {
+                const drift = await engine.drift();
+                res.json({
+                    ...driftView(drift),
+                    /** The rule this is measured against, or null when the mandate states none. */
+                    bandBps: mandates.current().terms.rebalanceBandBps ?? null,
+                    asOf: new Date().toISOString(),
+                });
+            } catch (e) {
+                // A quote source that is down is not a fault in the books, and must not read as one.
+                res.status(503).json({ error: e instanceof Error ? e.message : String(e) });
+            }
+        });
+
         /** What the agent holds, what it cost, and what selling it would realize. */
         app.get("/invest/holdings", owner, (_req: Request, res: Response) => {
             const symbols = new Map(BASE_REGISTRY.map((t) => [t.address.toLowerCase(), t.symbol]));

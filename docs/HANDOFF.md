@@ -1872,6 +1872,29 @@ to fix a real bug in the sell path rather than just enable a feature. See "Rebal
 
 ## Rebalancing, 25 Nov 2026
 
+### The desk shows the drift, 25 Nov 2026
+
+The band was editable before the drift was visible, which is backwards: five percent sounds careful
+right up until you can see the portfolio is three basis points off target, at which point it is
+obvious nothing will ever trim. `GET /invest/drift` is the reading, owner-gated and proposing nothing.
+
+It had to be a separate route from `POST /invest/exit`. That one refuses outright when the mandate
+states no exit rule, which is exactly the state an owner is in while deciding whether to set one, so
+a drift reading reachable only through it would appear only once it was no longer needed.
+
+`InvestingEngine.sellQuotes` is now shared by `exit` and `drift`, so the two cannot price the same
+portfolio differently and show the desk a drift the proposal would not act on.
+
+Two deliberate limits on the desk side. The panel compares against the band **in the form** rather
+than the saved one, so the owner sees the effect of a number before writing a mandate version for it.
+And because a client-side comparison cannot apply `minTradeUsdc`, it says "outside the band" and never
+"would be trimmed": only the server's `overBand` knows whether the excess is worth selling.
+
+One live read against the real books took **15 seconds** for seven tokens, which is why it is a button
+and not a page load. If that becomes annoying, the quoting inside `market.quote` is the place to look,
+and it is shared with the buy path.
+
+
 The last piece of the sell path. The allocator decides where *new* surplus goes and nothing ever
 corrected the weights after prices moved them, so a theme could run far above what the owner asked for
 and the agent had no way to notice, let alone act.

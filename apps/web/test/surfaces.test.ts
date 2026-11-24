@@ -9,7 +9,8 @@ import { termsFromDraft } from "../src/MandatePanel";
 import { evidenceCount, count } from "../src/Evidence";
 import { route, movedTo } from "../src/App";
 import { assetStake, forBrief, sharePct, themeStake, verb } from "../src/Backing";
-import type { MandateTerms, Proposal, SyncResult, BriefClaim, Backing } from "../src/api";
+import { driftSummary, driftWords, outsideBand } from "../src/Drift";
+import type { MandateTerms, Proposal, SyncResult, BriefClaim, Backing, DriftReading, ThemeDrift } from "../src/api";
 
 const TX = "0x" + "cd".repeat(32);
 
@@ -333,6 +334,71 @@ describe("the exit rules, where empty is an answer", () => {
         expect(parseExitPercent("0")).toEqual({ ok: false });
         expect(parseExitPercent("0.004")).toEqual({ ok: false });
         expect(parseExitPercent("nope")).toEqual({ ok: false });
+    });
+});
+
+describe("reading the drift against a band", () => {
+    const theme = (over: Partial<ThemeDrift> = {}): ThemeDrift => ({
+        theme: "ai-compute",
+        valueUsdcMinor: "877599",
+        actualBps: 6251,
+        targetBps: 6250,
+        driftBps: 1,
+        excessUsdcMinor: "196",
+        overBand: false,
+        ...over,
+    });
+    const reading = (themes: ThemeDrift[], bandBps: number | null = null): DriftReading => ({
+        themes,
+        totalUsdcMinor: "1403845",
+        untargetedUsdcMinor: "0",
+        bandBps,
+        asOf: "2026-11-25T04:00:00.000Z",
+    });
+
+    it("says nothing is trimmed when the mandate states no band", () => {
+        // The state the live mandate was in for weeks, and the one an owner is in while deciding.
+        expect(driftSummary(reading([theme()]), undefined))
+            .toBe("No band is set, so no theme is trimmed however far it drifts.");
+    });
+
+    it("measures against the band in the form, not the one that is saved", () => {
+        // A band typed but not saved is exactly what the reading is for: it answers "is this number
+        // worth saving" before the version is written.
+        const drifted = theme({ driftBps: 700 });
+        expect(outsideBand(drifted, 500)).toBe(true);
+        expect(outsideBand(drifted, 1000)).toBe(false);
+        expect(driftSummary(reading([drifted]), 500)).toBe("ai-compute sits outside a 5% band.");
+        expect(driftSummary(reading([drifted]), 1000))
+            .toBe("Every theme is inside a 10% band, so nothing would be trimmed.");
+    });
+
+    it("never calls a theme outside a band when no band is being considered", () => {
+        expect(outsideBand(theme({ driftBps: 9000 }), undefined)).toBe(false);
+    });
+
+    it("counts only themes above their target, since a sale cannot fix an under-weight one", () => {
+        const under = theme({ theme: "platform-giants", driftBps: -900 });
+        expect(outsideBand(under, 500)).toBe(false);
+        expect(driftSummary(reading([theme(), under]), 500))
+            .toBe("Every theme is inside a 5% band, so nothing would be trimmed.");
+    });
+
+    it("names both themes when both are out", () => {
+        const a = theme({ driftBps: 700 });
+        const b = theme({ theme: "platform-giants", driftBps: 800 });
+        expect(driftSummary(reading([a, b]), 500))
+            .toBe("ai-compute and platform-giants sit outside a 5% band.");
+    });
+
+    it("says there is nothing to compare before anything is held", () => {
+        expect(driftSummary(reading([]), 500)).toBe("Nothing is held yet, so there are no weights to compare.");
+    });
+
+    it("reads a drift in words, with the direction stated", () => {
+        expect(driftWords(0)).toBe("on target");
+        expect(driftWords(1)).toBe("0.01% above target");
+        expect(driftWords(-250)).toBe("2.5% below target");
     });
 });
 

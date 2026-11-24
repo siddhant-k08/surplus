@@ -785,7 +785,7 @@ describe("the owner routes", () => {
         expect(r.candidates[0]!.units).toBeLessThan(holding.units);
     });
 
-    it("reports the drift even when it refuses to sell", async () => {
+    it("refuses before quoting when no exit rule is set, so it reports no drift", async () => {
         const { app } = await build();
         await auth(request(app).post("/invest/sync"));
         const bought = await auth(request(app).post("/invest/propose")).send({ id: "p1" });
@@ -793,10 +793,44 @@ describe("the owner routes", () => {
             .send({ id: "p1", signature: await signOffer(ownerAccount, bought.body.toSign) });
         await auth(request(app).post("/invest/execute")).send({ id: "p1" });
 
-        // no exit rule, so nothing is sold, but the owner can still see where the weights sit
         const exit = await auth(request(app).post("/invest/exit")).send({ id: "x1" });
         expect(exit.status).toBe(409);
-        expect(exit.body.drift).toBeUndefined(); // refused before any quoting happened
+        // Nothing was quoted, so there is no reading to give. GET /invest/drift is where an owner
+        // with no rule set goes to see the weights, which is the case that matters when choosing one.
+        expect(exit.body.drift).toBeUndefined();
+    });
+
+    it("shows where the themes sit even though no exit rule is set", async () => {
+        // The reading has to exist before the rule does, or an owner could never choose a band from
+        // anything but a guess.
+        const { app } = await build();
+        await auth(request(app).post("/invest/sync"));
+        const bought = await auth(request(app).post("/invest/propose")).send({ id: "p1" });
+        await auth(request(app).post("/invest/approve"))
+            .send({ id: "p1", signature: await signOffer(ownerAccount, bought.body.toSign) });
+        await auth(request(app).post("/invest/execute")).send({ id: "p1" });
+
+        const res = await auth(request(app).get("/invest/drift"));
+        expect(res.status).toBe(200);
+        expect(res.body.bandBps).toBeNull();
+        expect(BigInt(res.body.totalUsdcMinor)).toBeGreaterThan(0n);
+        const ai = res.body.themes.find((t: { theme: string }) => t.theme === "ai-compute");
+        expect(ai.targetBps).toBe(10_000); // the only funded theme, so renormalised to the whole
+        expect(ai.overBand).toBe(false);   // no band, so nothing can be over it
+        expect(typeof res.body.asOf).toBe("string");
+    });
+
+    it("answers empty rather than erroring before the agent holds anything", async () => {
+        const { app } = await build();
+        const res = await auth(request(app).get("/invest/drift"));
+        expect(res.status).toBe(200);
+        expect(res.body.themes).toEqual([]);
+        expect(res.body.totalUsdcMinor).toBe("0");
+    });
+
+    it("keeps the drift reading to the owner", async () => {
+        const { app } = await build();
+        expect((await request(app).get("/invest/drift")).status).toBe(401);
     });
 
     it("refuses to sell when the mandate states no exit and nothing was named", async () => {

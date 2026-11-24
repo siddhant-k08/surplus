@@ -56,7 +56,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 30 files, 389 tests. API 13 files, 254 tests (220 without `DATABASE_URL`, which skips 34). Web 2 files, 64 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 30 files, 389 tests. API 13 files, 257 tests (223 without `DATABASE_URL`, which skips 34). Web 2 files, 71 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -92,6 +92,14 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
   by. `backing` (`packages/core/src/backing.ts`) reads those fields back and is what `GET
   /catalogue/backing` serves. A fill with neither field is reported as unattributed, never credited to
   a brief it cannot be shown to belong to.
+- `GET /invest/drift` is the read-only reading of where the themes sit, owner-gated and proposing
+  nothing. It is separate from `POST /invest/exit` because that route refuses outright when the mandate
+  states no exit rule, and an owner choosing a rebalance band needs the drift **before** the mandate
+  carries the rule: a reading that only appears once the number is set is no help in setting it. It
+  costs one live sell quote per token held, which is why the desk asks for it rather than loading it
+  with the page. The desk compares it against the band in the form rather than the saved one, and says
+  "outside the band" rather than "would be trimmed", because only the server's `overBand` also applies
+  the minimum trade size.
 - `GET /catalogue/backing` is public and takes no token: a proof only the owner can read is not a
   proof. It carries what went into which token under which theme of which brief, and nothing about
   costs, the reserve, uninvested money or the owner's float. Every surface rendering it says whether

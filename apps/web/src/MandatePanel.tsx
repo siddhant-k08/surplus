@@ -3,6 +3,7 @@ import { AnimatePresence } from "motion/react";
 import { Button } from "./Chrome";
 import { Reveal , motion } from "./motion";
 import { count } from "./Evidence";
+import { DriftPanel } from "./Drift";
 import { api, ApiError, type ExitTerm, type Mandate, type MandateHistory, type MandateTerms } from "./api";
 import {
     bpsToPercent, changedOnly, describeChange, EXIT_TERMS, formatAddresses, formatExitPercent,
@@ -239,6 +240,11 @@ export function MandatePanel({ mandate, onSaved }: { mandate: Mandate; onSaved: 
                     </Group>
                     </div>
                 </div>
+
+                {/* Live weights, beside the band they argue for. Read on demand: it costs a quote
+                    per token held, and the band in the form is what it is compared against, so the
+                    owner can see the effect of a number before saving it. */}
+                <DriftPanel bandBps={parsed.ok ? parsed.terms.rebalanceBandBps : mandate.terms.rebalanceBandBps} />
 
                 {/* The review, before the save. */}
                 <div className="mt-6 rounded-card border border-line border-l-[3px] border-l-lime bg-surface p-5" aria-live="polite">
