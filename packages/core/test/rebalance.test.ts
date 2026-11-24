@@ -56,8 +56,41 @@ describe("how far each theme has drifted from its target", () => {
         expect(ai.targetBps).toBe(6250);
         expect(ai.driftBps).toBe(2083);
         expect(ai.overBand).toBe(true);
-        // what has to go to put it back on target: 1.50 held against 62.5% of 1.80
-        expect(ai.excessUsdc).toBe(u("1.50") - u("1.125"));
+        // What has to go to put it back on target, solved for the weight *after* the sale: selling
+        // s leaves (1.50 - s) of (1.80 - s), and that equals 62.5% at s = 1.00, not at s = 0.375.
+        expect(ai.excessUsdc).toBe(u("1.00"));
+    });
+
+    it("sells enough to actually land on target, not merely toward it", () => {
+        // The property the first implementation got wrong. A sale takes money out of the portfolio as
+        // well as out of the theme, so trimming `value - target share` leaves the theme still over.
+        const r = themeDrift({
+            holdings: [held("ai-compute", NVDA, 5n), held("platform-giants", META, 3n)],
+            prices: at({ [NVDA]: 300_000n, [META]: 100_000n }),
+            decimals,
+            terms: baseTerms({ rebalanceBandBps: 500 }),
+        });
+        const ai = r.themes.find((t) => t.theme === "ai-compute")!;
+        const valueAfter = ai.valueUsdc - ai.excessUsdc;
+        const totalAfter = r.totalUsdc - ai.excessUsdc;
+        expect(Number((valueAfter * 10_000n) / totalAfter)).toBe(ai.targetBps);
+    });
+
+    it("never sells more of a theme than it holds", () => {
+        // The divisor shrinks as a target approaches the whole portfolio, so the solved amount can
+        // exceed the holding. Selling everything is the most a trim may ever do.
+        const r = themeDrift({
+            holdings: [held("ai-compute", NVDA, 1n), held("platform-giants", META, 99n)],
+            prices: FLAT,
+            decimals,
+            terms: baseTerms({
+                themes: [{ id: "ai-compute", targetBps: 1 }, { id: "platform-giants", targetBps: 9999 }],
+                rebalanceBandBps: 1,
+                minTradeUsdc: 1n,
+            }),
+        });
+        const ai = r.themes.find((t) => t.theme === "ai-compute")!;
+        expect(ai.excessUsdc).toBeLessThanOrEqual(ai.valueUsdc);
     });
 
     it("leaves a drift inside the band alone", () => {

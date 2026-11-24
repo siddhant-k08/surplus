@@ -1872,6 +1872,46 @@ to fix a real bug in the sell path rather than just enable a feature. See "Rebal
 
 ## Rebalancing, 25 Nov 2026
 
+### The first live trim, 25 Nov 2026, and the bug it found
+
+Nothing had drifted, so a trim was demonstrated by re-weighting rather than by faking a price: an
+owner changing their theme targets is a real rebalance trigger, and for a portfolio this young it is
+the likeliest one.
+
+Two refusals came first, both of them the rules working:
+
+- With ai-compute moved from 50% to 30%, the theme shed 0.176 USDC spread across **seven** holdings,
+  leaving every share between 0.019 and 0.030 against a 0.05 minimum trade. Nothing sold, and both
+  refusals were reported. This is the case `exit.test.ts` covers, happening on the live books.
+- The sizing then had to be solved per holding rather than per theme. ai-compute at 6% sheds enough
+  that the smallest of its seven legs clears the floor.
+
+The trim then ran end to end: 7 legs, all scoped to ai-compute, 0.645145 USDC, EIP-712 signed from the
+command line, executed, `SETTLED`, realized **+0.001753 USDC** booked per leg with gains and losses
+both present. platform-giants was untouched, which is the theme-scoping rule doing the thing it exists
+for.
+
+**And the result was wrong.** ai-compute landed at 3076 bps against a 1667 bps target, still over
+band. `excessUsdc` was `value - targetShare`, which ignores that a sale shrinks the portfolio as well
+as the theme: after selling `s` the theme sits at `(V - s)/(T - s)`, not `(V - s)/T`. Solving for the
+target gives `s = (V - wT)/(1 - w)`, larger by a factor of `1/(1 - w)`.
+
+The practical cost was not the arithmetic but the churn: a trim that never reaches its target leaves
+the theme over band, so the agent trims again on the next pass, and again, paying a fee each time to
+converge on what one correctly sized sale does in a step.
+
+Fixed in `rebalance.ts`, capped at what the theme holds, with a test that asserts the post-sale weight
+equals the target rather than asserting a magic number. Confirmed live: the reading now reports an
+excess of 0.128988 which lands ai-compute at exactly 1667 bps.
+
+A second live trim was not possible. After the first one ai-compute holds 0.234 USDC across seven
+tokens, so any proportional trim gives shares around 0.019, below the 0.05 floor again. The live books
+are too small and too fragmented for a second demonstration; the landing-on-target property is covered
+by test.
+
+Mandate versions 4, 5 and 6 are this demo: targets to 30%, to 6%, and back to the original 50/30/20.
+
+
 ### The desk shows the drift, 25 Nov 2026
 
 The band was editable before the drift was visible, which is backwards: five percent sounds careful

@@ -34,7 +34,12 @@ export interface ThemeWeight {
     targetBps: number;
     /** Positive when above target. */
     driftBps: number;
-    /** USDC minor units that would have to be sold to bring this theme back to its target. */
+    /**
+     * USDC minor units that have to be sold to bring this theme back to its target weight.
+     *
+     * Solved for the weight *after* the sale, since selling shrinks the portfolio as well as the
+     * theme. Capped at what the theme holds.
+     */
     excessUsdc: bigint;
     /** True when the drift is beyond the mandate's band and the excess is worth selling. */
     overBand: boolean;
@@ -94,9 +99,26 @@ export function themeDrift(i: DriftInput): Drift {
         const targetBps = liveTargetTotal === 0 ? 0 : Math.round(((targets.get(theme) ?? 0) * 10_000) / liveTargetTotal);
         const actualBps = Number((valueUsdc * 10_000n) / totalUsdc);
         const driftBps = actualBps - targetBps;
-        // What is above target, in money. Rounded down, so a trim never takes a theme below its target.
+        /*
+         * What has to be sold to land this theme on its target weight.
+         *
+         * Not `value - onTarget`, which is the tempting answer and the wrong one. A sale takes money
+         * out of the theme *and* out of the portfolio, so the denominator shrinks with the numerator:
+         * selling that amount leaves the theme at (V - s)/(T - s), which is still above target.
+         * Solving (V - s)/(T - s) = w gives s = (V - wT)/(1 - w).
+         *
+         * The naive form shipped first and a live trim proved it: ai-compute was trimmed from 6252 bps
+         * against a 1667 bps target and landed at 3076, still over band, so the agent would have
+         * trimmed again on the next pass, and again, paying a fee each time to converge on what one
+         * correctly sized sale reaches in a step.
+         *
+         * Rounded down and capped at what the theme actually holds, so a trim never oversells.
+         */
         const onTarget = mulBps(totalUsdc, targetBps);
-        const excessUsdc = valueUsdc > onTarget ? valueUsdc - onTarget : 0n;
+        const over = valueUsdc > onTarget ? valueUsdc - onTarget : 0n;
+        const room = BigInt(10_000 - targetBps);
+        const needed = room <= 0n ? 0n : (over * 10_000n) / room;
+        const excessUsdc = needed > valueUsdc ? valueUsdc : needed;
         themes.push({
             theme,
             valueUsdc,

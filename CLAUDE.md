@@ -56,7 +56,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 30 files, 389 tests. API 13 files, 257 tests (223 without `DATABASE_URL`, which skips 34). Web 2 files, 71 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 30 files, 391 tests. API 13 files, 257 tests (223 without `DATABASE_URL`, which skips 34). Web 2 files, 71 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -136,6 +136,13 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
   every funded theme look permanently over-weight: with targets of 50/30/20 and nothing held in the
   third, the first two are on target at 62.5/37.5, not 1251 bps over. The live books sit 1 bp off target
   under this rule and would be trimmed for nothing under the naive one.
+- **A trim is solved for the weight after the sale, not before it.** Selling takes money out of the
+  theme *and* out of the portfolio, so the denominator shrinks with the numerator: selling
+  `value - targetShare` leaves the theme at `(V - s)/(T - s)`, still above target. The amount is
+  `(V - wT)/(1 - w)`, capped at what the theme holds. The naive form shipped first and a live trim
+  found it: ai-compute went from 6252 bps against a 1667 bps target to 3076, still over band, so the
+  agent would have trimmed again next pass and again after that, paying a fee each time to converge
+  on what one correctly sized sale reaches in a step.
 - A trim is spread across a theme's holdings in proportion, never taken out of the first one. The mix
   inside a theme is not something the mandate asked the agent to have a view on, and emptying one
   company to fix a theme's weight would quietly be exactly that.

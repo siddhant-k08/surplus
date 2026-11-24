@@ -773,12 +773,14 @@ describe("the owner routes", () => {
         expect(r.candidates).toHaveLength(1);
         expect(r.candidates[0]!.reason).toBe("rebalance");
         expect(r.candidates[0]!.theme).toBe("ai-compute");
-        expect(r.candidates[0]!.valueUsdc).toBe(u("0.20"));
+        // Solved for the weight after the sale: 0.60 of 0.80 is back to 50% once 0.40 has gone, since
+        // the sale takes money out of the portfolio as well as out of the theme.
+        expect(r.candidates[0]!.valueUsdc).toBe(u("0.40"));
         const ai = r.drift.themes.find((t) => t.theme === "ai-compute")!;
         expect(ai.actualBps).toBe(7500);
         expect(ai.targetBps).toBe(5000);
         expect(ai.overBand).toBe(true);
-        // it trims rather than exits: a third of the holding's value goes, the rest stays
+        // it trims rather than exits: two thirds of the holding's value goes, the rest stays
         expect(r.candidates[0]!.valueUsdc).toBeLessThan(u("0.60"));
         const holding = themeHoldings(engine.treasury.ledger.all())
             .find((h) => h.theme === "ai-compute" && h.asset === NVDA.address.toLowerCase())!;

@@ -239,8 +239,9 @@ describe("trimming a theme that has drifted", () => {
         const trim = r.candidates[0]!;
         expect(trim.reason).toBe("rebalance");
         expect(trim.theme).toBe("ai-compute");
-        // 1.50 held against a target of 62.5% of 1.80
-        expect(trim.valueUsdc).toBe(u("0.375"));
+        // Solved for the weight after the sale: 1.50 of 1.80 is back to 62.5% once 1.00 has gone,
+        // a unit of rounding short because the trim is split across the theme's holdings.
+        expect(trim.valueUsdc).toBe(u("1.00") - 1n);
         expect(r.legs[0]).toMatchObject({ side: "sell", theme: "ai-compute", symbol: "NVDAc" });
         // and it sells only part of the holding, not the whole thing
         expect(r.legs[0]!.unitsIn!).toBeLessThan(5n * ONE18);
@@ -294,12 +295,13 @@ describe("trimming a theme that has drifted", () => {
             // is what this measures
             terms: baseTerms({ rebalanceBandBps: 100, minTradeUsdc: u("0.02") }),
         });
-        // ai-compute is 80% of 1.00 against a 62.5% target, so 0.175 has to go, split evenly across its
-        // two equal holdings rather than taken out of one of them
+        // ai-compute is 80% of 1.00 against a 62.5% target. Selling shrinks the portfolio too, so
+        // 0.466666 has to go rather than 0.175, split evenly across its two equal holdings rather
+        // than taken out of one of them.
         expect(r.candidates.map((c) => c.symbol).sort()).toEqual(["MSFTc", "NVDAc"]);
         expect(r.candidates.every((c) => c.reason === "rebalance")).toBe(true);
         const sold = r.candidates.reduce((a, c) => a + c.valueUsdc, 0n);
-        expect(sold).toBe(u("0.175"));
+        expect(sold).toBe(u("0.466666"));
         expect(r.candidates[0]!.valueUsdc).toBe(r.candidates[1]!.valueUsdc);
     });
 
@@ -331,6 +333,9 @@ describe("a theme that needs trimming but cannot be trimmed", () => {
         // ai-compute is well over its target, but its excess split across two equal holdings leaves
         // each share under the mandate's minimum trade. Taking it all out of one would silently be a
         // view on that company, so nothing is sold and both refusals are reported.
+        //
+        // The floor is raised above the default so the two halves fall under it: the theme still has
+        // to shed more than one trade's worth, which is what keeps it over band.
         const holdings = [
             { theme: "ai-compute", asset: NVDA, units: 4n * ONE18, costUsdcIn: u("0.40") },
             { theme: "ai-compute", asset: MSFT, units: 4n * ONE18, costUsdcIn: u("0.40") },
@@ -345,7 +350,7 @@ describe("a theme that needs trimming but cannot be trimmed", () => {
             prices: new Map([[NVDA, 100_000n], [MSFT, 100_000n], [META, 100_000n]]),
             decimals: new Map([[NVDA, 18], [MSFT, 18], [META, 18]]),
             symbols: new Map([[NVDA, "NVDAc"], [MSFT, "MSFTc"], [META, "METAc"]]),
-            terms: baseTerms({ rebalanceBandBps: 100 }),
+            terms: baseTerms({ rebalanceBandBps: 100, minTradeUsdc: u("0.30") }),
         });
         expect(r.legs).toEqual([]);
         expect(r.drift.themes.find((t) => t.theme === "ai-compute")!.overBand).toBe(true);
