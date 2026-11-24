@@ -21,7 +21,7 @@ export function parseTermsUpdate(
     const known = new Set([
         "eligible", "themes", "maxCompanyBps", "investShareBps", "maxSlippageBps",
         "driftToleranceBps", "approvalExpirySeconds", "maxTradeUsdc", "minTradeUsdc", "reserveTargetUsdc",
-        "investOnlyWhenAhead",
+        "investOnlyWhenAhead", "takeProfitBps", "stopLossBps",
     ]);
     for (const key of Object.keys(b)) {
         // a typo in a limit name would otherwise be accepted and silently change nothing
@@ -84,6 +84,26 @@ export function parseTermsUpdate(
         else investOnlyWhenAhead = b.investOnlyWhenAhead;
     }
 
+    /**
+     * An exit rule, which `null` removes.
+     *
+     * Removal has to be expressible. These are the only terms whose absence means something specific,
+     * namely that the agent may not sell on its own at all, and an owner who sets a stop loss by mistake
+     * needs a way back to that state. `validateTerms` decides whether the number itself is allowed.
+     */
+    const exitField = (name: "takeProfitBps" | "stopLossBps"): number | undefined => {
+        const v = b[name];
+        if (v === undefined) return current[name];
+        if (v === null) return undefined;
+        if (typeof v !== "number" || !Number.isInteger(v)) {
+            errors.push(`${name} must be an integer number of basis points, or null to remove it`);
+            return current[name];
+        }
+        return v;
+    };
+    const takeProfitBps = exitField("takeProfitBps");
+    const stopLossBps = exitField("stopLossBps");
+
     const terms: MandateTerms = {
         eligible,
         themes,
@@ -96,6 +116,8 @@ export function parseTermsUpdate(
         minTradeUsdc: amountField("minTradeUsdc", current.minTradeUsdc),
         reserveTargetUsdc: amountField("reserveTargetUsdc", current.reserveTargetUsdc),
         ...(investOnlyWhenAhead === undefined ? {} : { investOnlyWhenAhead }),
+        ...(takeProfitBps === undefined ? {} : { takeProfitBps }),
+        ...(stopLossBps === undefined ? {} : { stopLossBps }),
     };
 
     if (errors.length > 0) return { ok: false, errors };

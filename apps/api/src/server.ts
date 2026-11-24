@@ -6,6 +6,9 @@ import { ExactEvmScheme } from "@x402/evm/exact/server";
 import {
     Treasury,
     backing,
+    positionsFromLedger,
+    unsellable,
+    partlyUnrecorded,
     BASE_REGISTRY,
     flushNewEntries,
     realizedSales,
@@ -23,7 +26,23 @@ import {
     type InvestmentGap,
     type PositionReconciliation,
     type SavedBrief,
+    type ExitCandidate,
 } from "@surplus/core";
+
+/** One exit, as the owner's desk reads it. Money as decimal strings, never numbers. */
+const exitView = (c: ExitCandidate) => ({
+    asset: c.asset,
+    symbol: c.symbol,
+    theme: c.theme,
+    units: c.units.toString(),
+    valueUsdcMinor: c.valueUsdc.toString(),
+    costUsdcMinor: c.costUsdc.toString(),
+    moveBps: c.moveBps,
+    reason: c.reason,
+    // Why this move is not a market move, when it is not one. Surfaced on the candidate itself so the
+    // owner reading a -6596 bps "loss" sees the reason next to the number rather than nowhere.
+    caveat: c.caveat ?? null,
+});
 import type { ApiConfig } from "./config";
 import {
     MemorySessionStore, requireOwnerAccess, verifyLogin, loginPayload,
@@ -385,6 +404,8 @@ export function mandateView(m: MandateVersion) {
             // Optional in core, so it is reported only when the owner has actually set it. Sending false
             // for an unset term would show a constraint in the desk that the mandate does not carry.
             ...(m.terms.investOnlyWhenAhead !== undefined && { investOnlyWhenAhead: m.terms.investOnlyWhenAhead }),
+            ...(m.terms.takeProfitBps !== undefined && { takeProfitBps: m.terms.takeProfitBps }),
+            ...(m.terms.stopLossBps !== undefined && { stopLossBps: m.terms.stopLossBps }),
         },
     };
 }
@@ -705,6 +726,8 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                     mode: b.mode,
                     simulated: b.simulated,
                     fills: b.fills,
+                    /** Exits out of this brief's positions. A holding fully sold is gone from the list. */
+                    sales: b.sales,
                     onchainFills: b.onchainFills,
                     firstAt: b.firstAt,
                     lastAt: b.lastAt,
@@ -718,6 +741,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                             symbol: symbols.get(a.asset) ?? null,
                             usdcMinor: a.usdcIn.toString(),
                             fills: a.fills,
+                            sales: a.sales,
                             onchainFills: a.onchainFills,
                             transactions: a.transactions,
                         })),
@@ -1089,6 +1113,91 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             } catch (e) {
                 res.status(409).json({ error: e instanceof Error ? e.message : String(e) });
             }
+        });
+
+        /**
+         * Proposes a sale: the mandate's exit rules, or exactly what the owner named.
+         *
+         * Separate from `/invest/propose` because what goes in is different, and identical after that.
+         * The proposal it returns is approved and executed through the same two routes a buy uses, with
+         * the same signature and the same drift gate, because selling is no less consequential.
+         */
+        app.post("/invest/exit", owner, async (req: Request, res: Response) => {
+            const asked: unknown = req.body?.id;
+            if (asked !== undefined && (typeof asked !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(asked))) {
+                return void res.status(400).json({
+                    error: "id must be 1 to 64 characters of letters, digits, dot, underscore or hyphen",
+                });
+            }
+            const id = typeof asked === "string" ? asked : `x-${Date.now()}`;
+
+            // What the owner asked to sell, if anything. Validated here rather than trusted: these are
+            // token addresses and unit counts that end up in a signed proposal.
+            const raw: unknown = req.body?.sell;
+            let requested: { asset: string; units?: bigint }[] | undefined;
+            if (raw !== undefined) {
+                if (!Array.isArray(raw)) return void res.status(400).json({ error: "sell must be an array" });
+                requested = [];
+                for (const entry of raw as unknown[]) {
+                    const row = entry as { asset?: unknown; units?: unknown };
+                    if (typeof row?.asset !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(row.asset)) {
+                        return void res.status(400).json({ error: "each sell entry needs a 20 byte token address" });
+                    }
+                    if (row.units !== undefined && (typeof row.units !== "string" || !/^[1-9]\d{0,77}$/.test(row.units))) {
+                        return void res.status(400).json({
+                            error: "units must be a positive decimal string of token minor units; omit it to sell the whole position",
+                        });
+                    }
+                    requested.push({
+                        asset: row.asset.toLowerCase(),
+                        ...(typeof row.units === "string" && { units: BigInt(row.units) }),
+                    });
+                }
+            }
+
+            try {
+                const r = await engine.exit(id, requested);
+                res.status(r.ok ? 200 : 409).json(
+                    r.ok
+                        ? { ...r.view, toSign: r.toSign, warnings: r.warnings, selling: r.candidates.map(exitView), skipped: r.skipped }
+                        : { id, refused: r.reasons, skipped: r.skipped ?? [] },
+                );
+            } catch (e) {
+                res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+            }
+        });
+
+        /** What the agent holds, what it cost, and what selling it would realize. */
+        app.get("/invest/holdings", owner, (_req: Request, res: Response) => {
+            const symbols = new Map(BASE_REGISTRY.map((t) => [t.address.toLowerCase(), t.symbol]));
+            // Everything the books know about, closed positions included. A position bought and sold is
+            // part of what the agent did, and dropping it the moment it goes flat would make a round
+            // trip that broke even disappear without trace.
+            const positions = [...positionsFromLedger(engine.treasury.ledger.all())]
+                .map(([asset, p]) => ({
+                    asset,
+                    symbol: symbols.get(asset) ?? null,
+                    units: p.units.toString(),
+                    costUsdcMinor: p.costUsdcIn.toString(),
+                    realizedUsdcMinor: p.realizedUsdc.toString(),
+                    buys: p.buys,
+                    sells: p.sells,
+                    // Said plainly rather than left to be worked out: a position with a cost and no
+                    // recorded units cannot be sold, and that is not obvious from the numbers alone.
+                    sellable: unsellable(p) === null,
+                    why: unsellable(p),
+                    // Can be sold, but its cost basis covers units nobody wrote down, so what a sale
+                    // realizes is not a statement about the market. Said rather than left to be inferred.
+                    caveat: partlyUnrecorded(p),
+                }));
+            res.json({
+                positions,
+                realizedUsdcMinor: (-engine.treasury.ledger.balance("pnl.realized")).toString(),
+                exit: {
+                    takeProfitBps: mandates.current().terms.takeProfitBps ?? null,
+                    stopLossBps: mandates.current().terms.stopLossBps ?? null,
+                },
+            });
         });
 
         app.post("/invest/execute", owner, async (req: Request, res: Response) => {

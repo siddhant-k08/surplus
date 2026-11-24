@@ -111,6 +111,8 @@ describe("sending a swap without losing track of it", () => {
             nativeBalance: async () => 10_000_000_000_000n,
             chainId: async () => 8453,
             tokenBalance: async () => 0n,
+            tokenAllowance: async () => { calls.push("tokenAllowance"); return 0n; },
+            approveToken: async () => { calls.push("approveToken"); return HASH; },
         };
         return { chain: { ...base, ...over }, calls };
     }

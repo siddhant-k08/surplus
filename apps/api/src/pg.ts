@@ -140,6 +140,8 @@ export async function migrate(sql: Sql): Promise<void> {
             symbol           text not null,
             asset            text not null,
             usdc_in_minor    text not null,
+            side             text,
+            units_in_minor   text,
             tx_hash          text,
             raw_tx           text,
             amount_out_minor text,
@@ -169,6 +171,18 @@ export async function migrate(sql: Sql): Promise<void> {
             expires_at timestamptz not null
         )
     `;
+
+    /*
+     * Columns added after a table was first created.
+     *
+     * `create table if not exists` does nothing to a table that already exists, so a column added later
+     * never appears on a database that has been through an earlier version. These two arrived with the
+     * sell path and decide whether a journal record adds tokens to a position or takes them away; a
+     * database missing them would read every sale as a purchase. `add column if not exists` is
+     * idempotent and costs one statement at startup.
+     */
+    await sql`alter table executions add column if not exists side text`;
+    await sql`alter table executions add column if not exists units_in_minor text`;
 }
 
 /**

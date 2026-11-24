@@ -60,6 +60,9 @@ export interface ChainAccess {
     nativeBalance(): Promise<bigint>;
     /** Units of any token the wallet holds. The chain's own answer, for reconciliation. */
     tokenBalance(token: `0x${string}`): Promise<bigint>;
+    /** A sale sends the token, not USDC, so the router needs an allowance on the token itself. */
+    tokenAllowance(token: `0x${string}`, spender: `0x${string}`): Promise<bigint>;
+    approveToken(token: `0x${string}`, spender: `0x${string}`, amount: bigint): Promise<Hash>;
     /** Which chain is actually on the other end of the RPC. */
     chainId(): Promise<number>;
 }
@@ -170,6 +173,13 @@ export class SwapExecutor {
             tokenBalance: async (token) => publicClient.readContract({
                 address: token, abi: erc20Abi, functionName: "balanceOf", args: [account.address],
             }) as Promise<bigint>,
+            tokenAllowance: async (token, spender) => publicClient.readContract({
+                address: token, abi: erc20Abi, functionName: "allowance", args: [account.address, spender],
+            }) as Promise<bigint>,
+            approveToken: async (token, spender, amount) => wallet.writeContract({
+                address: token, abi: erc20Abi, functionName: "approve",
+                args: [spender, amount], account, chain: base,
+            }),
             chainId: async () => publicClient.getChainId(),
             receiptFor: async (hash) => {
                 try {
@@ -223,6 +233,28 @@ export class SwapExecutor {
     }
 
     /**
+     * The same thing for the token being sold.
+     *
+     * A sale sends the stock token to the router and gets USDC back, so the allowance that matters is on
+     * the token, not on USDC. Exactly what the order needs, never unlimited, for the same reason the
+     * USDC approval is exact.
+     */
+    private async ensureTokenAllowance(
+        token: `0x${string}`,
+        router: `0x${string}`,
+        amount: bigint,
+        symbol: string,
+    ): Promise<Hash | null> {
+        const current = await this.chain.tokenAllowance(token, router);
+        if (current >= amount) return null;
+
+        const hash = await this.chain.approveToken(token, router, amount);
+        const receipt = await this.chain.waitFor(hash);
+        if (receipt.status !== "success") throw new Error(`${symbol} approval failed in ${hash}`);
+        return hash;
+    }
+
+    /**
      * Executes one order: encode, approve if needed, send, and wait for a successful receipt.
      *
      * Nothing is reported as filled until the receipt says success. A submitted hash is not a fill; a
@@ -236,21 +268,37 @@ export class SwapExecutor {
             return this.resume(claimed);
         }
 
-        const { remaining } = await this.budget();
-        if (order.usdcIn > remaining) {
-            throw new ExecutorRefused(
-                `order of ${order.usdcIn} would pass the spend cap; ${remaining} of the cap is left`,
-            );
-        }
+        const selling = order.side === "sell";
+        const unitsIn = order.unitsIn ?? 0n;
 
-        const held = await this.balance();
-        if (held < order.usdcIn) {
-            throw new ExecutorRefused(`wallet holds ${held} USDC, needs ${order.usdcIn} for ${order.symbol}`);
+        if (selling) {
+            // A sale does not spend from the cap, it returns USDC, so the cap is not consulted. What it
+            // can run out of is the token itself.
+            if (unitsIn <= 0n) throw new ExecutorRefused(`sale of ${order.symbol} has no units to send`);
+            const units = await this.chain.tokenBalance(order.asset as `0x${string}`);
+            if (units < unitsIn) {
+                throw new ExecutorRefused(
+                    `wallet holds ${units} units of ${order.symbol}, needs ${unitsIn} to sell`,
+                );
+            }
+        } else {
+            const { remaining } = await this.budget();
+            if (order.usdcIn > remaining) {
+                throw new ExecutorRefused(
+                    `order of ${order.usdcIn} would pass the spend cap; ${remaining} of the cap is left`,
+                );
+            }
+
+            const held = await this.balance();
+            if (held < order.usdcIn) {
+                throw new ExecutorRefused(`wallet holds ${held} USDC, needs ${order.usdcIn} for ${order.symbol}`);
+            }
         }
 
         // Claimed before anything is built, so two callers racing on the same order cannot both proceed.
         const reserved = await this.journal.reserve({
             key, symbol: order.symbol, asset: order.asset, usdcInMinor: order.usdcIn,
+            ...(selling && { side: "sell" as const, unitsInMinor: unitsIn }),
         });
         if (reserved.status !== "pending") return this.resume(reserved);
 
@@ -264,7 +312,13 @@ export class SwapExecutor {
                 minOut: floor,
             });
 
-            await this.ensureAllowance(built.router, built.amountIn);
+            if (selling) {
+                await this.ensureTokenAllowance(
+                    order.asset as `0x${string}`, built.router, built.amountIn, order.symbol,
+                );
+            } else {
+                await this.ensureAllowance(built.router, built.amountIn);
+            }
 
             // Free, and read before anything is paid for. A swap that would revert is a swap not sent.
             await this.chain.simulate({ to: built.router, data: built.data });
@@ -375,7 +429,10 @@ export class SwapExecutor {
         for (const record of await this.journal.filled()) {
             const key = record.asset.toLowerCase();
             const seen = byAsset.get(key);
-            const units = record.amountOutMinor ?? 0n;
+            // A buy received units; a sale sent them. `amountOutMinor` on a sale is USDC, not tokens, so
+            // adding it would both inflate the position and lose the disposal, and the books would then
+            // report themselves short of tokens they had correctly sold.
+            const units = record.side === "sell" ? -(record.unitsInMinor ?? 0n) : (record.amountOutMinor ?? 0n);
             if (seen === undefined) byAsset.set(key, { symbol: record.symbol, units });
             else seen.units += units;
         }

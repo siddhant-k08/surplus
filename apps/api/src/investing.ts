@@ -7,6 +7,8 @@ import {
     swapPlan,
     swapPlanTotal,
     attributeFills,
+    exitPlan,
+    positionsFromLedger,
     realizedSales,
     investmentGap,
     preTradeChecks,
@@ -29,6 +31,8 @@ import {
     type SavedBrief,
     type TokenRecord,
     type Mode,
+    type ExitCandidate,
+    type Skipped,
 } from "@surplus/core";
 
 /** Everything the engine needs from the outside world, injected so tests need no network. */
@@ -465,6 +469,130 @@ export class InvestingEngine {
     }
 
     /**
+     * Builds a proposal to sell, from the mandate's exit rules or from a request the owner made by name.
+     *
+     * Deliberately the same machinery as `propose` from here on: one proposal, one policy check, one
+     * EIP-712 signature, one drift gate at execution. An exit that bypassed any of those would be the
+     * one trade the owner did not authorise, and selling is no less consequential than buying.
+     *
+     * The themes come from where the money went in, read off the fills themselves, so a sale is
+     * attributed to the research that argued for the position rather than to whatever theme is current.
+     */
+    async exit(
+        id: string,
+        requested?: readonly { asset: string; units?: bigint }[],
+    ): Promise<
+        | { ok: true; view: ProposalView; toSign: unknown; warnings: string[]; candidates: ExitCandidate[]; skipped: Skipped[] }
+        | { ok: false; reasons: string[]; skipped?: Skipped[] }
+    > {
+        const market = await this.deps.market();
+        const positions = positionsFromLedger(this.treasury.ledger.all());
+        const open = new Map([...positions].filter(([, p]) => p.units > 0n || p.costUsdcIn > 0n));
+        if (open.size === 0) {
+            return { ok: false, reasons: ["the agent holds nothing, so there is nothing to sell"] };
+        }
+
+        const terms = this.mandates.current().terms;
+        if (terms.takeProfitBps === undefined && terms.stopLossBps === undefined && (requested ?? []).length === 0) {
+            return {
+                ok: false,
+                reasons: [
+                    "the mandate states no exit rule and no sale was requested; " +
+                    "set takeProfitBps or stopLossBps, or name what to sell",
+                ],
+            };
+        }
+
+        // Quote every open position the other way round: token in, USDC out, sized by the units held.
+        const decimals = new Map(market.trusted.map((t) => [t.address, t.decimals]));
+        const symbols = new Map(market.trusted.map((t) => [t.address, t.symbol]));
+        const quoted = await market.quote(
+            [...open].map(([asset, p]) => ({
+                asset,
+                symbol: symbols.get(asset) ?? asset,
+                theme: this.themeOf(asset),
+                usdcIn: p.costUsdcIn,
+                maxSlippageBps: terms.maxSlippageBps,
+                side: "sell" as const,
+                unitsIn: p.units,
+            })),
+        );
+
+        const plan = exitPlan({
+            positions: open,
+            prices: quoted.prices,
+            decimals,
+            symbols,
+            themes: new Map([...open.keys()].map((a) => [a, this.themeOf(a)])),
+            terms,
+            ...(requested !== undefined && { requested }),
+        });
+        if (plan.legs.length === 0) {
+            return {
+                ok: false,
+                reasons: plan.skipped.length > 0
+                    ? plan.skipped.map((s) => `${s.symbol}: ${s.why}`)
+                    : ["no position meets the mandate's exit rules right now"],
+                skipped: plan.skipped,
+            };
+        }
+
+        const created = this.treasury.createProposal({ id, legs: plan.legs, quotedPrices: quoted.prices });
+        this.proposalIds.add(id);
+        await this.flush();
+        if (!created.ok) return { ok: false, reasons: created.reasons, skipped: plan.skipped };
+
+        const mandate = this.mandates.current();
+        const rec = this.treasury.proposal(id);
+        const approval: Approval = {
+            proposalHash: proposalHash(rec.proposal, mandate.hash),
+            mandateVersion: mandate.version,
+            mandateHash: mandate.hash,
+            // On a sale this bounds the notional being disposed of rather than money being spent. The
+            // proposal hash is what binds the exact units, so the owner signs an exact basket either way.
+            maxUsdcIn: rec.proposal.legs.reduce((a, l) => a + l.usdcIn, 0n),
+            expiresAt: new Date(this.now().getTime() + mandate.terms.approvalExpirySeconds * 1000).toISOString(),
+        };
+        this.offered.set(id, approval);
+
+        return {
+            ok: true,
+            view: this.view(id),
+            toSign: approvalTypedDataJson(approval, this.deps.chainId),
+            candidates: plan.candidates,
+            skipped: plan.skipped,
+            warnings: [
+                ...[...quoted.errors].map(([asset, why]) => `no quote for ${asset}: ${why}`),
+                ...plan.skipped.map((x) => `${x.symbol} not sold: ${x.why}`),
+                // A caveat is a warning, not a footnote: it changes what the number beside it means.
+                ...plan.candidates.flatMap((c) => (c.caveat === undefined ? [] : [`${c.symbol}: ${c.caveat}`])),
+            ],
+        };
+    }
+
+    /**
+     * The theme a position was bought under, from the fills themselves.
+     *
+     * A token bought under two themes takes the one that put the most money in, because a sale is one
+     * movement and has to be attributed to one of them. Positions that predate the theme field have
+     * none, and are attributed to `unattributed` rather than to a guess.
+     */
+    private themeOf(asset: string): string {
+        const totals = new Map<string, bigint>();
+        for (const tx of this.treasury.ledger.all()) {
+            if (tx.type !== "PURCHASE_SETTLED" || tx.theme === undefined) continue;
+            const line = tx.lines.find((l) => l.account === `positions.${asset}`);
+            if (line === undefined) continue;
+            totals.set(tx.theme, (totals.get(tx.theme) ?? 0n) + line.amount);
+        }
+        let best: string | null = null;
+        for (const [theme, total] of totals) {
+            if (best === null || total > totals.get(best)!) best = theme;
+        }
+        return best ?? "unattributed";
+    }
+
+    /**
      * Records an approval, but only against the owner's signature over the payload this server offered.
      *
      * There is no unsigned path. The bearer token on the route only decides who may reach it; the signature
@@ -519,7 +647,10 @@ export class InvestingEngine {
     async execute(id: string): Promise<
         | {
             ok: true;
-            fills: { symbol: string; usdcIn: string; price: string; quantity: string }[];
+            fills: {
+                symbol: string; usdcIn: string; price: string; quantity: string;
+                side?: "sell"; proceedsUsdc?: string; realizedUsdc?: string;
+            }[];
             /** Legs whose swap did not execute. Not booked, and the proposal is not settled. */
             unfilled: { symbol: string; usdcIn: string; reason: string }[];
             simulated: boolean;
@@ -568,6 +699,12 @@ export class InvestingEngine {
                 usdcIn: f.usdcIn.toString(),
                 price: f.price.toString(),
                 quantity: f.quantity.toString(),
+                // only on a sale, so a buy reads exactly as it always did
+                ...(f.side === "sell" && {
+                    side: "sell" as const,
+                    proceedsUsdc: f.proceedsUsdc!.toString(),
+                    realizedUsdc: f.realizedUsdc!.toString(),
+                }),
             })),
         };
     }
@@ -612,9 +749,15 @@ export class InvestingEngine {
         const perLeg = attributeFills(legs, plan, amounts);
         const realized = new Map<number, RealizedFill>();
         for (const [legIndex, quantity] of perLeg) {
-            // the transaction recorded against a leg is the first swap that bought for it
+            // The transaction recorded against a leg is the first swap that traded for it. The direction
+            // is part of the match: one token can have both a buy order and a sell order in one plan,
+            // and crediting a sale with the hash of the buy would point at the wrong transaction.
+            const leg = legs[legIndex]!;
             const position = plan.findIndex(
-                (o, p) => amounts.has(p) && o.asset.toLowerCase() === legs[legIndex]!.asset.toLowerCase(),
+                (o, p) =>
+                    amounts.has(p) &&
+                    o.asset.toLowerCase() === leg.asset.toLowerCase() &&
+                    (o.side ?? "buy") === (leg.side ?? "buy"),
             );
             realized.set(legIndex, { quantity, transaction: transactions.get(position) ?? "" });
         }

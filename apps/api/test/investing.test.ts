@@ -92,6 +92,27 @@ const quoteFor = (asset: string, usdcIn: bigint, now: Date): Quote => ({
     routeSummary: {},
 });
 
+/**
+ * A sale quote, shaped the way the aggregator really returns one: token in, USDC out.
+ *
+ * The direction matters to the gates, not only to the price. A sale quoted in the buy shape reads as a
+ * price of tokens per dollar, which against NAV looks like a deviation of thousands of basis points.
+ */
+const saleQuoteFor = (asset: string, unitsIn: bigint, now: Date): Quote => ({
+    tokenIn: asset,
+    tokenOut: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    amountIn: unitsIn,
+    amountOut: (unitsIn * PRICE) / 10n ** BigInt(DECIMALS),
+    amountInUsd: 1,
+    amountOutUsd: 1,
+    gasUsd: 0.003,
+    l1FeeUsd: null,
+    routerAddress: "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+    routeId: "r1",
+    timestamp: Math.floor(now.getTime() / 1000),
+    routeSummary: {},
+});
+
 const market = async (): Promise<MarketData> => {
     const now = new Date();
     return {
@@ -99,14 +120,18 @@ const market = async (): Promise<MarketData> => {
         liquidity: new Map([[NVDA.address.toLowerCase(), 5], [MSFT.address.toLowerCase(), 5]]),
         quote: async (legs: readonly Leg[]): Promise<LegQuotes> => {
             const out: LegQuotes = { prices: new Map(), quotes: new Map(), errors: new Map() };
-            const totals = new Map<string, bigint>();
+            const totals = new Map<string, { amountIn: bigint; sell: boolean }>();
             for (const l of legs) {
                 const key = l.asset.toLowerCase();
-                totals.set(key, (totals.get(key) ?? 0n) + l.usdcIn);
+                const sell = l.side === "sell";
+                const row = totals.get(key);
+                const add = sell ? (l.unitsIn ?? 0n) : l.usdcIn;
+                if (row === undefined) totals.set(key, { amountIn: add, sell });
+                else row.amountIn += add;
             }
-            for (const [asset, amountIn] of totals) {
+            for (const [asset, { amountIn, sell }] of totals) {
                 out.prices.set(asset, PRICE);
-                out.quotes.set(asset, quoteFor(asset, amountIn, now));
+                out.quotes.set(asset, sell ? saleQuoteFor(asset, amountIn, now) : quoteFor(asset, amountIn, now));
             }
             return out;
         },
@@ -652,6 +677,91 @@ describe("the owner routes", () => {
         expect(res.body.briefs).toEqual([]);
         expect(res.body.attributedUsdcMinor).toBe("0");
         expect(res.body.totalUsdcMinor).toBe("0");
+    });
+
+    it("sells a position on the owner's request, through the same signature and drift gate", async () => {
+        const { app } = await build();
+        await auth(request(app).post("/invest/sync"));
+        const bought = await auth(request(app).post("/invest/propose")).send({ id: "p1" });
+        await auth(request(app).post("/invest/approve"))
+            .send({ id: "p1", signature: await signOffer(ownerAccount, bought.body.toSign) });
+        await auth(request(app).post("/invest/execute")).send({ id: "p1" });
+
+        const holdings = await auth(request(app).get("/invest/holdings"));
+        expect(holdings.status).toBe(200);
+        const nvda = holdings.body.positions.find((p: { symbol: string }) => p.symbol === "NVDAc");
+        expect(nvda.sellable).toBe(true);
+        expect(BigInt(nvda.units)).toBeGreaterThan(0n);
+
+        // no exit rule is set, so the owner naming the position is what authorises the sale
+        const exit = await auth(request(app).post("/invest/exit"))
+            .send({ id: "x1", sell: [{ asset: NVDA.address }] });
+        expect(exit.status).toBe(200);
+        expect(exit.body.selling).toHaveLength(1);
+        expect(exit.body.selling[0].reason).toBe("owner_request");
+        expect(exit.body.selling[0].symbol).toBe("NVDAc");
+        expect(exit.body.selling[0].theme).toBe("ai-compute");
+
+        // executing before the owner signs is refused exactly as it is for a buy
+        expect((await auth(request(app).post("/invest/execute")).send({ id: "x1" })).status).toBe(409);
+
+        const approved = await auth(request(app).post("/invest/approve"))
+            .send({ id: "x1", signature: await signOffer(ownerAccount, exit.body.toSign) });
+        expect(approved.status).toBe(200);
+
+        const done = await auth(request(app).post("/invest/execute")).send({ id: "x1" });
+        expect(done.status).toBe(200);
+        expect(done.body.fills[0].side).toBe("sell");
+        expect(done.body.fills[0].proceedsUsdc).toBeDefined();
+
+        const after = await auth(request(app).get("/invest/holdings"));
+        const sold = after.body.positions.find((p: { symbol: string }) => p.symbol === "NVDAc");
+        expect(BigInt(sold.units)).toBe(0n);
+        expect(sold.sells).toBe(1);
+
+        const ledger = await auth(request(app).get("/invest/ledger"));
+        expect(ledger.body.reconcile.ok).toBe(true);
+        expect(ledger.body.balances[`positions.${NVDA.address.toLowerCase()}`] ?? "0").toBe("0");
+    });
+
+    it("refuses to sell when the mandate states no exit and nothing was named", async () => {
+        const { app } = await build();
+        await auth(request(app).post("/invest/sync"));
+        const bought = await auth(request(app).post("/invest/propose")).send({ id: "p1" });
+        await auth(request(app).post("/invest/approve"))
+            .send({ id: "p1", signature: await signOffer(ownerAccount, bought.body.toSign) });
+        await auth(request(app).post("/invest/execute")).send({ id: "p1" });
+
+        const exit = await auth(request(app).post("/invest/exit")).send({ id: "x1" });
+        expect(exit.status).toBe(409);
+        expect(exit.body.refused.join(" ")).toMatch(/states no exit rule/);
+    });
+
+    it("refuses to sell when the agent holds nothing", async () => {
+        const { app } = await build();
+        await auth(request(app).post("/invest/sync"));
+        const exit = await auth(request(app).post("/invest/exit")).send({ id: "x1" });
+        expect(exit.status).toBe(409);
+        expect(exit.body.refused.join(" ")).toMatch(/holds nothing/);
+    });
+
+    it("refuses a malformed sale request rather than signing something it guessed at", async () => {
+        const { app } = await build();
+        for (const body of [
+            { id: "x1", sell: "NVDAc" },
+            { id: "x1", sell: [{ asset: "not-an-address" }] },
+            { id: "x1", sell: [{ asset: NVDA.address, units: -5 }] },
+            { id: "x1", sell: [{ asset: NVDA.address, units: "0" }] },
+        ]) {
+            const res = await auth(request(app).post("/invest/exit")).send(body);
+            expect(res.status).toBe(400);
+        }
+    });
+
+    it("needs the owner's token for the sell routes too", async () => {
+        const { app } = await build();
+        expect((await request(app).post("/invest/exit").send({ id: "x1" })).status).toBe(401);
+        expect((await request(app).get("/invest/holdings")).status).toBe(401);
     });
 
     it("rejects a propose or approve with no id where one is required", async () => {

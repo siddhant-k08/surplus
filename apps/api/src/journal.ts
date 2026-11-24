@@ -26,10 +26,20 @@ export interface ExecutionRecord {
     symbol: string;
     asset: string;
     usdcInMinor: bigint;
+    /**
+     * Absent for a buy, so every record written before the sell path reads exactly as it did.
+     *
+     * Which way a swap went decides what `amountOutMinor` counts, and therefore whether a record adds
+     * tokens to the agent's position or takes them away.
+     */
+    side?: "sell" | undefined;
+    /** Sell only: the token units sent in, which is what leaves the wallet. */
+    unitsInMinor?: bigint | undefined;
     /** Known as soon as the transaction is signed, before it is broadcast. */
     txHash?: string | undefined;
     /** The signed transaction, so recovery can rebroadcast rather than rebuild. */
     rawTx?: string | undefined;
+    /** What the swap returned: token units on a buy, USDC minor units on a sale. */
     amountOutMinor?: bigint | undefined;
     gasUsed?: bigint | undefined;
     /** Why it failed, when it did. */
@@ -40,7 +50,10 @@ export interface ExecutionRecord {
 export interface ExecutionJournal {
     find(key: string): Promise<ExecutionRecord | null>;
     /** Claims the key. Returns what is already stored when it was claimed before, and writes nothing. */
-    reserve(r: { key: string; symbol: string; asset: string; usdcInMinor: bigint }): Promise<ExecutionRecord>;
+    reserve(r: {
+        key: string; symbol: string; asset: string; usdcInMinor: bigint;
+        side?: "sell"; unitsInMinor?: bigint;
+    }): Promise<ExecutionRecord>;
     /** Records the signed transaction before it is broadcast. */
     recordSigned(key: string, txHash: string, rawTx: string): Promise<void>;
     settle(key: string, outcome: {
@@ -71,7 +84,10 @@ export class MemoryJournal implements ExecutionJournal {
         return found === undefined ? null : clone(found);
     }
 
-    async reserve(r: { key: string; symbol: string; asset: string; usdcInMinor: bigint }): Promise<ExecutionRecord> {
+    async reserve(r: {
+        key: string; symbol: string; asset: string; usdcInMinor: bigint;
+        side?: "sell"; unitsInMinor?: bigint;
+    }): Promise<ExecutionRecord> {
         const existing = this.rows.get(r.key);
         if (existing !== undefined) return clone(existing);
         const row: ExecutionRecord = { ...r, status: "pending", at: this.now().toISOString() };
@@ -107,8 +123,12 @@ export class MemoryJournal implements ExecutionJournal {
     }
 
     async committedUsdcMinor(): Promise<bigint> {
+        // A sale does not spend USDC, it returns it, so it must not count against a spend cap. Counting
+        // it would mean the agent could exhaust its cap by exiting positions.
         let total = 0n;
-        for (const row of this.rows.values()) if (row.status !== "failed") total += row.usdcInMinor;
+        for (const row of this.rows.values()) {
+            if (row.status !== "failed" && row.side !== "sell") total += row.usdcInMinor;
+        }
         return total;
     }
 
@@ -127,6 +147,8 @@ interface Row {
     symbol: string;
     asset: string;
     usdc_in_minor: string;
+    side: string | null;
+    units_in_minor: string | null;
     tx_hash: string | null;
     raw_tx: string | null;
     amount_out_minor: string | null;
@@ -141,6 +163,8 @@ const fromRow = (r: Row): ExecutionRecord => ({
     symbol: r.symbol,
     asset: r.asset,
     usdcInMinor: BigInt(r.usdc_in_minor),
+    ...(r.side === "sell" && { side: "sell" as const }),
+    ...(r.units_in_minor !== null && { unitsInMinor: BigInt(r.units_in_minor) }),
     ...(r.tx_hash !== null && { txHash: r.tx_hash }),
     ...(r.raw_tx !== null && { rawTx: r.raw_tx }),
     ...(r.amount_out_minor !== null && { amountOutMinor: BigInt(r.amount_out_minor) }),
@@ -157,7 +181,10 @@ export class PgJournal implements ExecutionJournal {
         return rows[0] === undefined ? null : fromRow(rows[0]);
     }
 
-    async reserve(r: { key: string; symbol: string; asset: string; usdcInMinor: bigint }): Promise<ExecutionRecord> {
+    async reserve(r: {
+        key: string; symbol: string; asset: string; usdcInMinor: bigint;
+        side?: "sell"; unitsInMinor?: bigint;
+    }): Promise<ExecutionRecord> {
         // `do nothing` then read back: whoever claimed the key first owns it, and a second caller is
         // handed what is already there rather than a second swap
         await this.sql`
@@ -167,6 +194,8 @@ export class PgJournal implements ExecutionJournal {
                 symbol: r.symbol,
                 asset: r.asset,
                 usdc_in_minor: r.usdcInMinor.toString(),
+                side: r.side ?? null,
+                units_in_minor: r.unitsInMinor?.toString() ?? null,
                 at: this.now(),
             }])}
             on conflict (key) do nothing
@@ -208,7 +237,7 @@ export class PgJournal implements ExecutionJournal {
     async committedUsdcMinor(): Promise<bigint> {
         const [row] = await this.sql<{ total: string }[]>`
             select coalesce(sum(usdc_in_minor::numeric), 0)::text as total
-            from executions where status <> 'failed'
+            from executions where status <> 'failed' and side is distinct from 'sell'
         `;
         return BigInt(row?.total ?? "0");
     }
