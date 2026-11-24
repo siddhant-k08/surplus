@@ -193,3 +193,54 @@ describe("a mandate change and outstanding approvals", () => {
         expect(m.verifyChain()).toBe(true);
     });
 });
+
+
+describe("exit terms over HTTP", () => {
+    it("sets and clears a rebalance band", async () => {
+        const { app } = build();
+        expect((await auth(request(app).post("/mandate")).send({ rebalanceBandBps: 750 })).status).toBe(200);
+        expect((await auth(request(app).get("/mandate"))).body.terms.rebalanceBandBps).toBe(750);
+
+        // Removal has to be expressible: the absence of an exit term means the agent may not sell on
+        // its own, and an owner who set one by mistake needs a way back to that state.
+        expect((await auth(request(app).post("/mandate")).send({ rebalanceBandBps: null })).status).toBe(200);
+        expect((await auth(request(app).get("/mandate"))).body.terms.rebalanceBandBps).toBeUndefined();
+    });
+
+    it("sets and clears the price exits the same way", async () => {
+        const { app } = build();
+        await auth(request(app).post("/mandate")).send({ takeProfitBps: 2500, stopLossBps: 1500 });
+        const after = (await auth(request(app).get("/mandate"))).body.terms;
+        expect(after.takeProfitBps).toBe(2500);
+        expect(after.stopLossBps).toBe(1500);
+
+        await auth(request(app).post("/mandate")).send({ takeProfitBps: null });
+        const cleared = (await auth(request(app).get("/mandate"))).body.terms;
+        expect(cleared.takeProfitBps).toBeUndefined();
+        expect(cleared.stopLossBps).toBe(1500); // untouched
+    });
+
+    it("refuses an exit that would fire on any movement at all", async () => {
+        const { app } = build();
+        for (const body of [{ rebalanceBandBps: 0 }, { takeProfitBps: 0 }, { stopLossBps: 0 }]) {
+            expect((await auth(request(app).post("/mandate")).send(body)).status).toBe(400);
+        }
+        expect((await auth(request(app).post("/mandate")).send({ stopLossBps: 10_000 })).status).toBe(400);
+    });
+
+    it("refuses an exit that is not a whole number of basis points", async () => {
+        const { app } = build();
+        expect((await auth(request(app).post("/mandate")).send({ rebalanceBandBps: "750" })).status).toBe(400);
+        expect((await auth(request(app).post("/mandate")).send({ takeProfitBps: 12.5 })).status).toBe(400);
+    });
+
+    it("leaves a mandate with no exit terms hashing as it did", () => {
+        // canonicalJson drops undefined keys, so a stored chain written before the sell path verifies
+        const r = parseTermsUpdate({ maxSlippageBps: 50 }, terms);
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        expect(r.terms.takeProfitBps).toBeUndefined();
+        expect(r.terms.stopLossBps).toBeUndefined();
+        expect(r.terms.rebalanceBandBps).toBeUndefined();
+    });
+});

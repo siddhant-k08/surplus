@@ -154,3 +154,64 @@ describe("the underwater term and stored-mandate compatibility", () => {
             .toThrow(/must be true or false/);
     });
 });
+
+describe("every term reaches the file", () => {
+    /** A mandate with every optional term set, so nothing can be absent by accident. */
+    const everyTerm = () => baseTerms({
+        investOnlyWhenAhead: true,
+        takeProfitBps: 2500,
+        stopLossBps: 1500,
+        rebalanceBandBps: 500,
+    });
+
+    it("writes and reads back every term the mandate has", () => {
+        // The test that would have caught the real bug. serializeMandate once listed the fields it
+        // wrote, and the exit terms were not on the list: an owner set rebalanceBandBps, it was hashed
+        // into the version, and then dropped on the way to disk. The constraint was live in the running
+        // process and absent from the file, and the next boot refused to load the mandate at all.
+        //
+        // Written over the keys rather than over a list of names, so a term added later is covered here
+        // the moment it exists.
+        const v = new MandateStore().create(everyTerm());
+        const back = parseMandateFile(serializeMandate(v), "f")[0]!;
+
+        for (const key of Object.keys(v.terms) as (keyof typeof v.terms)[]) {
+            expect(back.terms[key], `terms.${key} did not survive the file`).toEqual(v.terms[key]);
+        }
+        expect(Object.keys(back.terms).sort()).toEqual(Object.keys(v.terms).sort());
+    });
+
+    it("keeps the hash verifiable, which is what a dropped term breaks", () => {
+        const live = new MandateStore();
+        const v1 = live.create(baseTerms());
+        const v2 = live.create(everyTerm());
+
+        const store = new MandateStore();
+        store.adopt(parseMandateFile(`${serializeMandate(v1)}\n${serializeMandate(v2)}`, "f"));
+        expect(store.verifyChain()).toBe(true);
+        expect(store.current().terms.rebalanceBandBps).toBe(500);
+    });
+
+    it("refuses a line whose term was written away, rather than loading a weaker mandate", () => {
+        // Exactly what the broken serializer produced: terms that no longer hash to the recorded hash.
+        const line = serializeMandate(new MandateStore().create(everyTerm()));
+        const stripped = line.replace(',"rebalanceBandBps":500', "");
+        expect(stripped).not.toBe(line);
+        expect(() => new MandateStore().adopt(parseMandateFile(stripped, "f")))
+            .toThrow(/hash does not match its terms/);
+    });
+
+    it("refuses a stored term it does not know, naming it", () => {
+        // A term added to the mandate but not taught to the parser would otherwise be ignored, loading a
+        // mandate missing one of its constraints. Refusing by name says what to fix.
+        const line = serializeMandate(new MandateStore().create(baseTerms()));
+        const extra = line.replace('"eligible"', '"maxDrawdownBps":900,"eligible"');
+        expect(() => parseMandateFile(extra, "f")).toThrow(/unknown stored term maxDrawdownBps/);
+    });
+
+    it("refuses an exit term that is not an integer", () => {
+        const line = serializeMandate(new MandateStore().create(everyTerm()));
+        expect(() => parseMandateFile(line.replace('"takeProfitBps":2500', '"takeProfitBps":25.5'), "f"))
+            .toThrow(/takeProfitBps must be an integer/);
+    });
+});

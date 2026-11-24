@@ -29,6 +29,24 @@ import {
     type ExitCandidate,
 } from "@surplus/core";
 
+/** How the portfolio sits against its targets, as the owner's desk reads it. */
+const driftView = (d: import("@surplus/core").Drift) => ({
+    totalUsdcMinor: d.totalUsdc.toString(),
+    /** Held under no theme the mandate funds, so never trimmed. */
+    untargetedUsdcMinor: d.untargetedUsdc.toString(),
+    themes: d.themes.map((t) => ({
+        theme: t.theme,
+        valueUsdcMinor: t.valueUsdc.toString(),
+        actualBps: t.actualBps,
+        // Renormalised over the themes that hold something: a theme the research found nothing for
+        // holds nothing, and counting its target would make every funded theme look over-weight.
+        targetBps: t.targetBps,
+        driftBps: t.driftBps,
+        excessUsdcMinor: t.excessUsdc.toString(),
+        overBand: t.overBand,
+    })),
+});
+
 /** One exit, as the owner's desk reads it. Money as decimal strings, never numbers. */
 const exitView = (c: ExitCandidate) => ({
     asset: c.asset,
@@ -406,6 +424,7 @@ export function mandateView(m: MandateVersion) {
             ...(m.terms.investOnlyWhenAhead !== undefined && { investOnlyWhenAhead: m.terms.investOnlyWhenAhead }),
             ...(m.terms.takeProfitBps !== undefined && { takeProfitBps: m.terms.takeProfitBps }),
             ...(m.terms.stopLossBps !== undefined && { stopLossBps: m.terms.stopLossBps }),
+            ...(m.terms.rebalanceBandBps !== undefined && { rebalanceBandBps: m.terms.rebalanceBandBps }),
         },
     };
 }
@@ -1159,8 +1178,16 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 const r = await engine.exit(id, requested);
                 res.status(r.ok ? 200 : 409).json(
                     r.ok
-                        ? { ...r.view, toSign: r.toSign, warnings: r.warnings, selling: r.candidates.map(exitView), skipped: r.skipped }
-                        : { id, refused: r.reasons, skipped: r.skipped ?? [] },
+                        ? {
+                            ...r.view, toSign: r.toSign, warnings: r.warnings,
+                            selling: r.candidates.map(exitView), skipped: r.skipped, drift: driftView(r.drift),
+                        }
+                        : {
+                            id, refused: r.reasons, skipped: r.skipped ?? [],
+                            // Shown even on a refusal: "nothing to sell" and "everything is on target"
+                            // are different answers and an owner needs to see which one this is.
+                            ...(r.drift !== undefined && { drift: driftView(r.drift) }),
+                        },
                 );
             } catch (e) {
                 res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
@@ -1196,6 +1223,7 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 exit: {
                     takeProfitBps: mandates.current().terms.takeProfitBps ?? null,
                     stopLossBps: mandates.current().terms.stopLossBps ?? null,
+                    rebalanceBandBps: mandates.current().terms.rebalanceBandBps ?? null,
                 },
             });
         });

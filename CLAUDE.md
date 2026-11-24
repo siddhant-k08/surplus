@@ -49,7 +49,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 29 files, 366 tests. API 13 files, 247 tests (213 without `DATABASE_URL`, which skips 34). Web 2 files, 53 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 30 files, 389 tests. API 13 files, 254 tests (220 without `DATABASE_URL`, which skips 34). Web 2 files, 53 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -66,6 +66,14 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - A database is not optional on a host that can replace the process between two requests. The ledger, the mandate history, the receipts, the buyer-commissioned briefs and the owner's session are all written at runtime; the owner's catalogue (`BRIEFS_DIR`) is repository content and stays on disk in both modes.
 - Mandates are versioned and hashed; the agent never changes user constraints. Unplaceable money stays uninvested with a stated reason.
 - The mandate persists to `MANDATE_PATH` as a hash-chained JSONL history, verified on load: an altered or truncated file makes the server refuse to start. A stored mandate is authoritative; the terms in code only create version 1 on a first run.
+- **A mandate version is written by copying its terms, never by listing the fields.** `serializeMandate`
+  once named the fields it wrote, the exit terms were not among them, and a `rebalanceBandBps` the owner
+  had set was hashed into version 3 and then dropped on the way to disk. The constraint was live in the
+  running process and absent from the file, and because the stored line no longer matched its own
+  recorded hash the next boot refused the entire history: a term that fails to persist does not degrade
+  to the old behaviour, it bricks the server. `parseMandateLine` refuses a stored term it does not
+  recognise for the same reason, so a term added to the mandate and forgotten in the parser stops the
+  server naming the field instead of loading a mandate quietly missing one of its constraints.
 - One `MandateStore` is shared by the server and the investing engine. Two stores would drift apart the moment the owner changed a term.
 - Approvals bind to proposal hash, mandate version and hash, max spend and expiry. Drift beyond tolerance means REAPPROVAL_REQUIRED.
 - An approval is refused if the mandate moved since the payload was offered: the signature covers a mandate version and hash, and `Treasury.approve` takes an `expect` approval so the domain layer enforces the match too.
@@ -97,9 +105,25 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
   bought under several themes, out of several briefs, and by demos that name neither, and it all lands in
   one balance. `costBuckets` reads where the basis came from and `execute` posts one entry per bucket in
   proportion, so a closed position stops showing money behind every brief that funded it.
-- Exit rules live in the mandate (`takeProfitBps`, `stopLossBps`), optional like `investOnlyWhenAhead` so
-  stored mandates still hash and verify. With neither set and nothing requested, the agent proposes no
-  sale at all: silence is not permission. The owner can also name an exit, which needs no rule.
+- Exit rules live in the mandate (`takeProfitBps`, `stopLossBps`, `rebalanceBandBps`), optional like
+  `investOnlyWhenAhead` so stored mandates still hash and verify, and `null` removes one. With none set
+  and nothing requested, the agent proposes no sale at all: silence is not permission. The owner can
+  also name an exit, which needs no rule.
+- **Every sell leg is scoped to one theme.** A token is held under several themes at once, so a sale has
+  to say which one it is leaving: trimming a theme that has drifted must sell that theme's own basis,
+  not a theme that was exactly where the mandate wanted it. A whole-position exit is therefore one leg
+  per theme. `themeHoldings` is the split; `holdingOf` and `themeKey` are how a leg's theme string meets
+  a holding whose theme is null.
+- Rebalancing measures a theme's weight **against the portfolio, not the portfolio plus idle cash**, and
+  **renormalises targets over the themes that actually hold something**. Both change the answer
+  completely. Counting idle surplus would make every theme look under-weight whenever cash was waiting,
+  so the rule would never trim. Counting the target of a theme the research found nothing for would make
+  every funded theme look permanently over-weight: with targets of 50/30/20 and nothing held in the
+  third, the first two are on target at 62.5/37.5, not 1251 bps over. The live books sit 1 bp off target
+  under this rule and would be trimmed for nothing under the naive one.
+- A trim is spread across a theme's holdings in proportion, never taken out of the first one. The mix
+  inside a theme is not something the mandate asked the agent to have a view on, and emptying one
+  company to fix a theme's weight would quietly be exactly that.
 - The buy-side caps do not apply to a sale. The company cap, the theme targets and the investable total
   limit what is put at risk, and a sale reduces all three. The eligible list is the sharpest case: it
   says what may be **bought**, and gating sales on it would lock the agent into exactly the position an

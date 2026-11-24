@@ -41,6 +41,18 @@ export interface MandateTerms {
     readonly takeProfitBps?: number;
     /** Sell a position once it is down this many basis points on what was paid for it. */
     readonly stopLossBps?: number;
+    /**
+     * How far a theme may drift above its target share of the portfolio before it is trimmed back.
+     *
+     * In basis points of the portfolio, absolute: 500 means a theme may sit up to five percentage
+     * points above its target weight. The targets themselves are shares of money being invested; this
+     * is about the weights that result, after prices have moved them.
+     *
+     * Only ever sells. Buying a theme back up to its target is what the allocator already does with new
+     * surplus, and selling one theme to buy another in one proposal would be two trades the owner reads
+     * as one.
+     */
+    readonly rebalanceBandBps?: number;
 }
 
 export interface MandateVersion {
@@ -100,6 +112,8 @@ export function validateTerms(t: MandateTerms): void {
         checkBps("stopLossBps", t.stopLossBps, 1);
         if (t.stopLossBps >= 10_000) throw new Error("stopLossBps must be below 10000: a position cannot lose more than all of it");
     }
+    // A band of 0 would trim on any drift at all, which is a fee-paying machine rather than a policy.
+    if (t.rebalanceBandBps !== undefined) checkBps("rebalanceBandBps", t.rebalanceBandBps, 1);
 }
 
 /** Deterministic JSON: sorted keys, bigint as a tagged string. */

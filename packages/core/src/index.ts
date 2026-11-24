@@ -20,6 +20,7 @@ export * from "./treasury";
 export * from "./backing";
 export * from "./positions";
 export * from "./exit";
+export * from "./rebalance";
 export * from "./quote";
 export * from "./swapbuild";
 export * from "./gates";

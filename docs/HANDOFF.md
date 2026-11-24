@@ -1557,7 +1557,8 @@ sales at `$0.01`, or three at `$0.25`.
 2. **Build the sell path.** `quoteBuy` hardwires USDC as `tokenIn`, so the agent can accumulate and
    cannot exit. A mandate with no exit rule cannot express take-profit, rebalance or a drawdown
    limit. Largest genuine capability gap in the system.
-   **Done on 25 Nov 2026**: see "The sell path" below. Rebalancing is the one part left.
+   **Done on 25 Nov 2026**: see "The sell path" below. Rebalancing followed the same day; see
+   "Rebalancing". The sell path is complete.
 3. **Skin in the game.** Join a position back to the brief and theme that justified it and show it on
    the brief, so the research half and the treasury half are one product rather than two sharing a
    wallet. Needs step 1 to have happened before there is anything to show.
@@ -1866,6 +1867,83 @@ and was not done here.
 does not have, and it is a bigger change than take-profit and stop-loss, which are whole-position
 exits. The partial-sale machinery is in place, so it is an addition rather than a rewrite.
 
+**Superseded the same day**: rebalancing was built, and the per-theme accounting it needed turned out
+to fix a real bug in the sell path rather than just enable a feature. See "Rebalancing" below.
+
+## Rebalancing, 25 Nov 2026
+
+The last piece of the sell path. The allocator decides where *new* surplus goes and nothing ever
+corrected the weights after prices moved them, so a theme could run far above what the owner asked for
+and the agent had no way to notice, let alone act.
+
+### Sells had to become theme-scoped first
+
+This was the prerequisite flagged when the sell path landed, and it is a correctness fix in its own
+right. A sale booked its basis across **every** bucket holding that token, ignoring the leg's theme. So
+trimming `ai-compute` would have sold basis out of `platform-giants` as well, taking money from a theme
+that was exactly where the mandate wanted it.
+
+Now `themeHoldings` splits a position by theme, `execute` books a sale against the leg's own theme, and
+a whole-position exit is **one leg per theme** rather than one leg for the token. `themeKey` and
+`NO_THEME` are where a leg's theme string meets a holding whose theme is null, so a fill booked before
+themes existed can still be sold.
+
+### Two decisions that change the answer completely
+
+**The denominator is the portfolio, not the portfolio plus idle cash.** Including uninvested surplus
+would make every theme look under-weight whenever cash was waiting, so a rebalance would never trim
+anything and the rule would be inert in exactly the situation it exists for.
+
+**Targets are renormalised over the themes that actually hold something.** A theme the research found
+nothing for holds nothing, and the allocator leaves its target uninvested rather than sharing it out.
+Counting that target in the denominator would make every funded theme look permanently over-weight.
+
+The live books settle the second point better than any argument. Targets are 50/30/20 with
+`longevity-biotech` a gap in the current brief:
+
+    portfolio 1.403631 USDC
+      ai-compute       0.877491   actual 6251 bps   target 6250 bps   drift   1 bps
+      platform-giants  0.526140   actual 3748 bps   target 3750 bps   drift  -2 bps
+
+**One basis point off.** Against the raw 10000 bps denominator, `ai-compute` would read as 1251 bps
+over and any sane band would trim it for nothing at all. The 1 bp is the spread between the buy price
+and the sell quote, not a market move.
+
+### How a trim works
+
+`rebalanceBandBps` is an optional mandate term: how far a theme may sit above its target before it is
+trimmed, in basis points of the portfolio, absolute. It **only ever sells**. Buying a theme back up is
+what the allocator already does with new surplus, and selling one theme to buy another in one proposal
+would be two trades the owner reads as one.
+
+A theme's excess is spread across its holdings **in proportion**, never taken out of the first one. The
+mix inside a theme is not something the mandate asked the agent to have a view on, and emptying one
+company to fix a theme's weight would quietly be exactly that.
+
+Order of precedence: the owner's named request, then a price rule, then the band. A take-profit takes
+the whole holding and the band does not then half-sell what is already leaving.
+
+### What it refuses, and says
+
+- A drift inside the band: nothing, which is the point.
+- A theme below its target: never trimmed. Selling the under-weight side makes the drift worse.
+- An excess too small to be worth a trade: refused against `minTradeUsdc`.
+- **A theme over its band whose excess, split proportionally, leaves every share below the minimum.**
+  Nothing is sold and both refusals are reported, because taking it all out of one holding to get over
+  the line would be the view-having the proportional split exists to avoid.
+- A holding that cannot be priced is left out of both the theme and the total, so a missing quote never
+  makes a theme look smaller than it is and trigger a trim somewhere else.
+
+`/invest/exit` now returns `drift` on success **and on refusal**: "nothing to sell" and "everything is
+on target" are different answers and an owner needs to see which one they have.
+
+### Not demonstrated live, and why
+
+Nothing was trimmed on the live books, because nothing has drifted: the basket was bought to target and
+prices have barely moved since. Manufacturing a drift would mean faking a price, so the trim behaviour
+is covered by tests and the live run shows the other half of the rule, which is that it correctly does
+nothing. The mandate also carries no band yet; setting one is the owner's call and creates version 3.
+
 ## Next milestones, in order
 
 1. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.
@@ -1909,6 +1987,16 @@ money, ledger, mandate, surplus, policy, allocator (water-filling; leaves unplac
 
 ## Lessons from earlier milestones
 
+- A new optional field on a persisted, hash-covered record has to be added to the writer **and** the
+  reader in the same change, and a test has to assert the round trip over the record's **keys** rather
+  than over a list of names. `serializeMandate` listed the fields it wrote; the exit terms were missing
+  from the list; the `rebalanceBandBps` set on 24 Nov 2026 was hashed into version 3 and then written
+  away. The failure mode is worse than losing the term: the stored line no longer matched its own
+  recorded hash, so the chain check refused the whole history and the server could not start. It also
+  hid for a while, because the running process still held the correct terms in memory and served them
+  over `GET /mandate`, so the API and its own file disagreed. Fixed by copying the terms instead of
+  listing them, refusing an unrecognised stored term by name, and testing the round trip over
+  `Object.keys`. `data/mandate.jsonl` line 3 needed a one-off repair, verified by recomputing the hash.
 - Never source `.env` into a shell (`set -a; . ./.env`). `DATABASE_URL` holds an unquoted `&`, so bash
   reads the line as a background job and **prints the whole connection string, password included**, to
   the terminal. This happened on 24 Nov 2026 and the Neon password had to be rotated. Read one value

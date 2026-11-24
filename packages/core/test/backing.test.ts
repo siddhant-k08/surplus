@@ -5,7 +5,7 @@ import { Treasury } from "../src/treasury";
 import { MandateStore } from "../src/mandate";
 import { allocate } from "../src/allocator";
 import { parseUsdc as u } from "../src/money";
-import { positionsFromLedger } from "../src/positions";
+import { positionsFromLedger, themeHoldings } from "../src/positions";
 import { reconcileInternal } from "../src/reconcile";
 import { baseTerms, NVDA, MSFT, META, AMZN } from "./fixtures";
 
@@ -320,15 +320,16 @@ describe("an exit of a position built from several commitments", () => {
         expect(before.briefs[0]!.usdcIn).toBe(u("0.30"));
         expect(before.unattributed.usdcIn).toBe(u("0.10"));
 
-        // sell the whole position at the price it was bought
-        const position = positionsFromLedger(tr.ledger.all()).get(META)!;
-        const worth = (position.units * 100_000_000n) / ONE;
+        // Sell the whole position at the price it was bought: one leg per theme, because a sale leaves
+        // one theme at a time and the token is held under two.
+        const held = themeHoldings(tr.ledger.all()).filter((h) => h.asset === META);
+        expect(held.map((h) => h.theme).sort()).toEqual(["ai-compute", "platform-giants"]);
         tr.createProposal({
             id: "exit",
-            legs: [{
-                asset: META, symbol: "METAc", theme: "ai-compute", usdcIn: worth,
-                maxSlippageBps: 100, side: "sell", unitsIn: position.units,
-            }],
+            legs: held.map((h) => ({
+                asset: META, symbol: "METAc", theme: h.theme!, usdcIn: (h.units * 100_000_000n) / ONE,
+                maxSlippageBps: 100, side: "sell" as const, unitsIn: h.units,
+            })),
             quotedPrices: price,
         });
         clock.t += 20_000;
@@ -347,7 +348,9 @@ describe("an exit of a position built from several commitments", () => {
     it("unwinds a partial exit in proportion to what each bucket put in", () => {
         const clock = { t: Date.parse("2026-11-25T09:00:00Z"), now: () => new Date(clock.t) };
         const mandates = new MandateStore();
-        mandates.create(baseTerms(), clock.now());
+        // A smaller minimum trade than the default, so the arithmetic of the split is what this test
+        // measures rather than the mandate's floor refusing the smaller half.
+        mandates.create(baseTerms({ minTradeUsdc: u("0.02") }), clock.now());
         const tr = new Treasury({ mode: "sim", mandates, now: clock.now });
         tr.ledger.post({
             type: "OPENING_BALANCE", mode: "sim", at: clock.now(),
@@ -373,17 +376,18 @@ describe("an exit of a position built from several commitments", () => {
         buy("a", "ai-compute", "0.30", "b1");
         buy("b", "platform-giants", "0.10", "b1");
 
-        const position = positionsFromLedger(tr.ledger.all()).get(META)!;
-        const half = position.units / 2n;
-        const worth = (half * 100_000_000n) / ONE;
-        tr.createProposal({
+        // half of each theme's holding, which is half the position
+        const held = themeHoldings(tr.ledger.all()).filter((h) => h.asset === META);
+        const made = tr.createProposal({
             id: "exit",
-            legs: [{
-                asset: META, symbol: "METAc", theme: "ai-compute", usdcIn: worth,
-                maxSlippageBps: 100, side: "sell", unitsIn: half,
-            }],
+            legs: held.map((h) => ({
+                asset: META, symbol: "METAc", theme: h.theme!,
+                usdcIn: ((h.units / 2n) * 100_000_000n) / ONE,
+                maxSlippageBps: 100, side: "sell" as const, unitsIn: h.units / 2n,
+            })),
             quotedPrices: price,
         });
+        expect(made).toEqual({ ok: true });
         clock.t += 20_000;
         tr.approve("exit", "owner");
         expect(tr.execute("exit", { freshPrices: price, decimals }).ok).toBe(true);

@@ -188,3 +188,63 @@ export function costBuckets(txs: readonly LedgerTx[], asset: string): CostBucket
         .filter((b) => b.costUsdcIn > 0n)
         .sort((a, b) => (a.costUsdcIn < b.costUsdcIn ? 1 : a.costUsdcIn > b.costUsdcIn ? -1 : 0));
 }
+
+
+/**
+ * One token held under one theme.
+ *
+ * The asset-level `Position` is what the agent owns; this is what each piece of research is standing
+ * behind. They differ whenever a token was bought under more than one theme, which is the normal case:
+ * the mandate funds several themes, the same company fits several of them, and the fills land in one
+ * balance. Rebalancing needs the split, because trimming a theme that has drifted must sell that
+ * theme's own holding and not another theme's.
+ *
+ * `theme` is null for fills booked before the theme was recorded, or by a demo that named none. Those
+ * belong to no target and are never rebalanced; they are reported so the total still adds up.
+ */
+export interface ThemeHolding {
+    theme: string | null;
+    asset: string;
+    units: bigint;
+    costUsdcIn: bigint;
+}
+
+export function themeHoldings(txs: readonly LedgerTx[]): ThemeHolding[] {
+    const out = new Map<string, ThemeHolding>();
+    for (const tx of txs) {
+        if (tx.type !== "PURCHASE_SETTLED" && tx.type !== "SALE_SETTLED") continue;
+        const line = positionLine(tx);
+        if (line === null) {
+            throw new Error(`entry ${tx.id} is a ${tx.type} with no positions line; the book is malformed`);
+        }
+        const theme = tx.theme ?? null;
+        const key = `${theme ?? ""}\u0000${line.asset}`;
+        const held = out.get(key) ?? { theme, asset: line.asset, units: 0n, costUsdcIn: 0n };
+        held.units += tx.units ?? 0n;     // negative on a sale
+        held.costUsdcIn += line.amount;   // negative on a sale
+        out.set(key, held);
+    }
+    return [...out.values()].filter((h) => h.units > 0n || h.costUsdcIn > 0n);
+}
+
+/**
+ * The name a holding with no theme trades under.
+ *
+ * A `Leg` always carries a theme string, and a fill booked before the theme was recorded carries none,
+ * so the two have to meet somewhere. They meet here rather than at every call site, because a mismatch
+ * would silently find no holding and refuse a sale that is perfectly valid.
+ */
+export const NO_THEME = "unattributed";
+
+/** A holding's theme as a leg would name it. */
+export const themeKey = (theme: string | null): string => theme ?? NO_THEME;
+
+/** What one theme holds of one token, or null when it holds none of it. */
+export function holdingOf(
+    holdings: readonly ThemeHolding[],
+    theme: string,
+    asset: string,
+): ThemeHolding | null {
+    const want = asset.toLowerCase();
+    return holdings.find((h) => themeKey(h.theme) === theme && h.asset === want) ?? null;
+}

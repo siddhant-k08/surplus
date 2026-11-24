@@ -17,12 +17,25 @@ const held = (asset: string, tokens: bigint, cost = u("0.10")): Position => ({
     buysWithoutUnits: 0,
 });
 
+const THEME_OF: Record<string, string> = { [NVDA]: "ai-compute", [MSFT]: "ai-compute", [META]: "platform-giants" };
+
+/**
+ * A world where each token is held under exactly one theme.
+ *
+ * `holdings` is what a sale actually leaves, and `positions` is what the price rules act on, so the
+ * fixture derives one from the other rather than letting them drift apart.
+ */
 const world = (positions: Position[], prices: Record<string, bigint>) => ({
     positions: new Map(positions.map((p) => [p.asset, p])),
+    holdings: positions.map((p) => ({
+        theme: THEME_OF[p.asset] ?? null,
+        asset: p.asset,
+        units: p.units,
+        costUsdcIn: p.costUsdcIn,
+    })),
     prices: new Map(Object.entries(prices)),
     decimals: new Map([[NVDA, 18], [MSFT, 18], [META, 18]]),
     symbols: new Map([[NVDA, "NVDAc"], [MSFT, "MSFTc"], [META, "METAc"]]),
-    themes: new Map([[NVDA, "ai-compute"], [MSFT, "ai-compute"], [META, "platform-giants"]]),
 });
 
 describe("when the agent sells", () => {
@@ -169,7 +182,7 @@ describe("an exit the owner asks for by name", () => {
             requested: [{ asset: NVDA, units: 9n * ONE }],
         });
         expect(r.legs).toEqual([]);
-        expect(r.skipped[0]!.why).toMatch(/only 2000000000000000000 are held/);
+        expect(r.skipped[0]!.why).toMatch(/ai-compute holds 2000000000000000000/);
     });
 
     it("says so when the owner names a token the agent does not hold", () => {
@@ -192,5 +205,151 @@ describe("an exit the owner asks for by name", () => {
         });
         expect(r.legs).toHaveLength(1);
         expect(r.candidates[0]!.reason).toBe("owner_request");
+    });
+});
+
+
+describe("trimming a theme that has drifted", () => {
+    const ONE18 = 10n ** 18n;
+    /** Two themes, one token each, so a theme's weight is just what its token is worth. */
+    const twoThemes = (nvdaTokens: bigint, metaTokens: bigint, prices: Record<string, bigint>) => {
+        const holdings = [
+            { theme: "ai-compute", asset: NVDA, units: nvdaTokens * ONE18, costUsdcIn: u("0.10") * nvdaTokens },
+            { theme: "platform-giants", asset: META, units: metaTokens * ONE18, costUsdcIn: u("0.10") * metaTokens },
+        ];
+        return {
+            holdings,
+            positions: new Map(holdings.map((h) => [h.asset, {
+                asset: h.asset, units: h.units, costUsdcIn: h.costUsdcIn,
+                realizedUsdc: 0n, buys: 1, sells: 0, buysWithoutUnits: 0,
+            }])),
+            prices: new Map(Object.entries(prices)),
+            decimals: new Map([[NVDA, 18], [META, 18]]),
+            symbols: new Map([[NVDA, "NVDAc"], [META, "METAc"]]),
+        };
+    };
+
+    it("sells the over-weight theme back to its target and leaves the other alone", () => {
+        // 50/30 renormalised is 62.5/37.5. NVDA triples, so ai-compute runs to 83.3%.
+        const r = exitPlan({
+            ...twoThemes(5n, 3n, { [NVDA]: 300_000n, [META]: 100_000n }),
+            terms: baseTerms({ rebalanceBandBps: 500 }),
+        });
+        expect(r.candidates).toHaveLength(1);
+        const trim = r.candidates[0]!;
+        expect(trim.reason).toBe("rebalance");
+        expect(trim.theme).toBe("ai-compute");
+        // 1.50 held against a target of 62.5% of 1.80
+        expect(trim.valueUsdc).toBe(u("0.375"));
+        expect(r.legs[0]).toMatchObject({ side: "sell", theme: "ai-compute", symbol: "NVDAc" });
+        // and it sells only part of the holding, not the whole thing
+        expect(r.legs[0]!.unitsIn!).toBeLessThan(5n * ONE18);
+    });
+
+    it("proposes nothing while every theme is inside the band", () => {
+        const r = exitPlan({
+            ...twoThemes(5n, 3n, { [NVDA]: 105_000n, [META]: 100_000n }),
+            terms: baseTerms({ rebalanceBandBps: 500 }),
+        });
+        expect(r.legs).toEqual([]);
+        expect(r.drift.themes.every((t) => !t.overBand)).toBe(true);
+    });
+
+    it("proposes nothing when the mandate states no band, however far it has drifted", () => {
+        const r = exitPlan({
+            ...twoThemes(9n, 1n, { [NVDA]: 100_000n, [META]: 100_000n }),
+            terms: baseTerms(),
+        });
+        expect(r.legs).toEqual([]);
+        // the drift is still reported, so an owner can see what a band would do
+        expect(r.drift.themes.find((t) => t.theme === "ai-compute")!.driftBps).toBeGreaterThan(0);
+    });
+
+    it("reports the drift even when it is trimming nothing", () => {
+        const r = exitPlan({
+            ...twoThemes(5n, 3n, { [NVDA]: 100_000n, [META]: 100_000n }),
+            terms: baseTerms({ rebalanceBandBps: 500 }),
+        });
+        expect(r.drift.totalUsdc).toBe(u("0.80"));
+        expect(r.drift.themes).toHaveLength(2);
+    });
+
+    it("spreads one theme's trim across its tokens, leaving the mix inside it unchanged", () => {
+        // ai-compute holds two tokens; a trim is about the theme's weight, not about picking a winner.
+        const holdings = [
+            { theme: "ai-compute", asset: NVDA, units: 4n * ONE18, costUsdcIn: u("0.40") },
+            { theme: "ai-compute", asset: MSFT, units: 4n * ONE18, costUsdcIn: u("0.40") },
+            { theme: "platform-giants", asset: META, units: 2n * ONE18, costUsdcIn: u("0.20") },
+        ];
+        const r = exitPlan({
+            holdings,
+            positions: new Map(holdings.map((h) => [h.asset, {
+                asset: h.asset, units: h.units, costUsdcIn: h.costUsdcIn,
+                realizedUsdc: 0n, buys: 1, sells: 0, buysWithoutUnits: 0,
+            }])),
+            prices: new Map([[NVDA, 100_000n], [MSFT, 100_000n], [META, 100_000n]]),
+            decimals: new Map([[NVDA, 18], [MSFT, 18], [META, 18]]),
+            symbols: new Map([[NVDA, "NVDAc"], [MSFT, "MSFTc"], [META, "METAc"]]),
+            // a smaller floor than the default, so each half of the trim clears it and the split itself
+            // is what this measures
+            terms: baseTerms({ rebalanceBandBps: 100, minTradeUsdc: u("0.02") }),
+        });
+        // ai-compute is 80% of 1.00 against a 62.5% target, so 0.175 has to go, split evenly across its
+        // two equal holdings rather than taken out of one of them
+        expect(r.candidates.map((c) => c.symbol).sort()).toEqual(["MSFTc", "NVDAc"]);
+        expect(r.candidates.every((c) => c.reason === "rebalance")).toBe(true);
+        const sold = r.candidates.reduce((a, c) => a + c.valueUsdc, 0n);
+        expect(sold).toBe(u("0.175"));
+        expect(r.candidates[0]!.valueUsdc).toBe(r.candidates[1]!.valueUsdc);
+    });
+
+    it("lets a price rule take a whole position before the band gets a say", () => {
+        // A take profit is about the position; a trim is about the weight. The position wins, and the
+        // holding leaves whole rather than being half sold by one rule and half by the other.
+        const r = exitPlan({
+            ...twoThemes(5n, 3n, { [NVDA]: 300_000n, [META]: 100_000n }),
+            terms: baseTerms({ rebalanceBandBps: 500, takeProfitBps: 10_000 }),
+        });
+        expect(r.candidates[0]!.reason).toBe("take_profit");
+        expect(r.legs[0]!.unitsIn).toBe(5n * ONE18);
+    });
+
+    it("will not trim an amount below the mandate's smallest trade", () => {
+        const r = exitPlan({
+            ...twoThemes(5n, 3n, { [NVDA]: 102_000n, [META]: 100_000n }),
+            terms: baseTerms({ rebalanceBandBps: 1 }),
+        });
+        expect(r.legs).toEqual([]);
+    });
+});
+
+
+describe("a theme that needs trimming but cannot be trimmed", () => {
+    const ONE18 = 10n ** 18n;
+
+    it("says so rather than trimming one holding and calling the theme balanced", () => {
+        // ai-compute is well over its target, but its excess split across two equal holdings leaves
+        // each share under the mandate's minimum trade. Taking it all out of one would silently be a
+        // view on that company, so nothing is sold and both refusals are reported.
+        const holdings = [
+            { theme: "ai-compute", asset: NVDA, units: 4n * ONE18, costUsdcIn: u("0.40") },
+            { theme: "ai-compute", asset: MSFT, units: 4n * ONE18, costUsdcIn: u("0.40") },
+            { theme: "platform-giants", asset: META, units: 2n * ONE18, costUsdcIn: u("0.20") },
+        ];
+        const r = exitPlan({
+            holdings,
+            positions: new Map(holdings.map((h) => [h.asset, {
+                asset: h.asset, units: h.units, costUsdcIn: h.costUsdcIn,
+                realizedUsdc: 0n, buys: 1, sells: 0, buysWithoutUnits: 0,
+            }])),
+            prices: new Map([[NVDA, 100_000n], [MSFT, 100_000n], [META, 100_000n]]),
+            decimals: new Map([[NVDA, 18], [MSFT, 18], [META, 18]]),
+            symbols: new Map([[NVDA, "NVDAc"], [MSFT, "MSFTc"], [META, "METAc"]]),
+            terms: baseTerms({ rebalanceBandBps: 100 }),
+        });
+        expect(r.legs).toEqual([]);
+        expect(r.drift.themes.find((t) => t.theme === "ai-compute")!.overBand).toBe(true);
+        expect(r.skipped.map((x) => x.symbol).sort()).toEqual(["MSFTc", "NVDAc"]);
+        for (const x of r.skipped) expect(x.why).toMatch(/below the mandate's minimum trade/);
     });
 });

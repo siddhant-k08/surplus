@@ -18,6 +18,7 @@ import {
     type SavedBrief,
     type TokenRecord,
     openLedger,
+    themeHoldings,
 } from "@surplus/core";
 import { privateKeyToAccount } from "viem/accounts";
 import { approvalTypedData } from "@surplus/core";
@@ -722,6 +723,80 @@ describe("the owner routes", () => {
         const ledger = await auth(request(app).get("/invest/ledger"));
         expect(ledger.body.reconcile.ok).toBe(true);
         expect(ledger.body.balances[`positions.${NVDA.address.toLowerCase()}`] ?? "0").toBe("0");
+    });
+
+    it("trims a theme that has drifted past the mandate's band", async () => {
+        // One theme in this harness, so the way to make it drift is to hold something under a theme the
+        // mandate does not fund. ai-compute then sits at 100% against a renormalised target of 100%,
+        // which is on target: the trim has to come from a second funded theme instead.
+        const twoThemes: MandateTerms = {
+            ...terms,
+            themes: [{ id: "ai-compute", targetBps: 5000 }, { id: "platform-giants", targetBps: 5000 }],
+            rebalanceBandBps: 500,
+            minTradeUsdc: u("0.02"),
+        };
+        const store = new JsonlLedgerStore(join(dir, "drift.jsonl"));
+        const engine = new InvestingEngine({
+            mode: "sim",
+            openingFloat: u("1.00"),
+            mandates: mandateFor(twoThemes),
+            readBrief: savedBrief,
+            allBriefs: () => [savedBrief()],
+            salesLedger: () => salesLedger("3.00"),
+            market,
+            chainId: CHAIN_ID,
+            verifyApproval: ({ approval, signature }) =>
+                verifyApprovalSignature({ approval, signature, chainId: CHAIN_ID, ownerAddress: ownerAccount.address }),
+            ledger: await openLedger(store),
+            sink: store,
+        });
+        await engine.syncRevenue();
+
+        // Buy both tokens, one under each theme, deliberately lopsided.
+        const legs: Leg[] = [
+            { asset: NVDA.address.toLowerCase(), symbol: "NVDAc", theme: "ai-compute", usdcIn: u("0.60"), maxSlippageBps: 100 },
+            { asset: MSFT.address.toLowerCase(), symbol: "MSFTc", theme: "platform-giants", usdcIn: u("0.20"), maxSlippageBps: 100 },
+        ];
+        const quotes = await market();
+        const priced = await quotes.quote(legs);
+        expect(engine.treasury.createProposal({ id: "p", legs, quotedPrices: priced.prices })).toEqual({ ok: true });
+        engine.treasury.approve("p", "owner");
+        expect(engine.treasury.execute("p", {
+            freshPrices: priced.prices,
+            decimals: new Map(quotes.trusted.map((t) => [t.address, t.decimals])),
+        }).ok).toBe(true);
+
+        // 75/25 against a 50/50 target: ai-compute is 2500 bps over a 500 bps band.
+        const r = await engine.exit("x");
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        expect(r.candidates).toHaveLength(1);
+        expect(r.candidates[0]!.reason).toBe("rebalance");
+        expect(r.candidates[0]!.theme).toBe("ai-compute");
+        expect(r.candidates[0]!.valueUsdc).toBe(u("0.20"));
+        const ai = r.drift.themes.find((t) => t.theme === "ai-compute")!;
+        expect(ai.actualBps).toBe(7500);
+        expect(ai.targetBps).toBe(5000);
+        expect(ai.overBand).toBe(true);
+        // it trims rather than exits: a third of the holding's value goes, the rest stays
+        expect(r.candidates[0]!.valueUsdc).toBeLessThan(u("0.60"));
+        const holding = themeHoldings(engine.treasury.ledger.all())
+            .find((h) => h.theme === "ai-compute" && h.asset === NVDA.address.toLowerCase())!;
+        expect(r.candidates[0]!.units).toBeLessThan(holding.units);
+    });
+
+    it("reports the drift even when it refuses to sell", async () => {
+        const { app } = await build();
+        await auth(request(app).post("/invest/sync"));
+        const bought = await auth(request(app).post("/invest/propose")).send({ id: "p1" });
+        await auth(request(app).post("/invest/approve"))
+            .send({ id: "p1", signature: await signOffer(ownerAccount, bought.body.toSign) });
+        await auth(request(app).post("/invest/execute")).send({ id: "p1" });
+
+        // no exit rule, so nothing is sold, but the owner can still see where the weights sit
+        const exit = await auth(request(app).post("/invest/exit")).send({ id: "x1" });
+        expect(exit.status).toBe(409);
+        expect(exit.body.drift).toBeUndefined(); // refused before any quoting happened
     });
 
     it("refuses to sell when the mandate states no exit and nothing was named", async () => {

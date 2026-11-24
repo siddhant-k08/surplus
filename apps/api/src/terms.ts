@@ -21,7 +21,7 @@ export function parseTermsUpdate(
     const known = new Set([
         "eligible", "themes", "maxCompanyBps", "investShareBps", "maxSlippageBps",
         "driftToleranceBps", "approvalExpirySeconds", "maxTradeUsdc", "minTradeUsdc", "reserveTargetUsdc",
-        "investOnlyWhenAhead", "takeProfitBps", "stopLossBps",
+        "investOnlyWhenAhead", "takeProfitBps", "stopLossBps", "rebalanceBandBps",
     ]);
     for (const key of Object.keys(b)) {
         // a typo in a limit name would otherwise be accepted and silently change nothing
@@ -91,7 +91,7 @@ export function parseTermsUpdate(
      * namely that the agent may not sell on its own at all, and an owner who sets a stop loss by mistake
      * needs a way back to that state. `validateTerms` decides whether the number itself is allowed.
      */
-    const exitField = (name: "takeProfitBps" | "stopLossBps"): number | undefined => {
+    const exitField = (name: "takeProfitBps" | "stopLossBps" | "rebalanceBandBps"): number | undefined => {
         const v = b[name];
         if (v === undefined) return current[name];
         if (v === null) return undefined;
@@ -103,6 +103,7 @@ export function parseTermsUpdate(
     };
     const takeProfitBps = exitField("takeProfitBps");
     const stopLossBps = exitField("stopLossBps");
+    const rebalanceBandBps = exitField("rebalanceBandBps");
 
     const terms: MandateTerms = {
         eligible,
@@ -118,6 +119,7 @@ export function parseTermsUpdate(
         ...(investOnlyWhenAhead === undefined ? {} : { investOnlyWhenAhead }),
         ...(takeProfitBps === undefined ? {} : { takeProfitBps }),
         ...(stopLossBps === undefined ? {} : { stopLossBps }),
+        ...(rebalanceBandBps === undefined ? {} : { rebalanceBandBps }),
     };
 
     if (errors.length > 0) return { ok: false, errors };

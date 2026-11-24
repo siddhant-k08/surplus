@@ -1,12 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import {
-    MandateStore,
-    restoreMandateStore,
-    type MandateTerms,
-    type MandateVersion,
-    type ThemeTarget,
-} from "./mandate";
+import { MandateStore, restoreMandateStore, type MandateTerms, type MandateVersion } from "./mandate";
 
 /**
  * Append-only JSONL persistence for mandate versions.
@@ -17,42 +11,45 @@ import {
  * would be edited to loosen a constraint.
  */
 
-interface StoredTerms {
-    eligible: string[];
-    themes: ThemeTarget[];
-    maxCompanyBps: number;
-    investShareBps: number;
-    maxTradeUsdc: string;
-    minTradeUsdc: string;
-    reserveTargetUsdc: string;
-    maxSlippageBps: number;
-    driftToleranceBps: number;
-    approvalExpirySeconds: number;
-    investOnlyWhenAhead?: boolean;
-}
+/**
+ * Every term the file may carry, which is every term `MandateTerms` has.
+ *
+ * The parser refuses a stored term that is not in here, rather than ignoring it. A term added to the
+ * mandate and forgotten here then stops the server on the next boot with a name to fix, instead of
+ * loading a mandate that quietly lacks one of its constraints.
+ */
+const STORED_TERMS = new Set([
+    "eligible", "themes", "maxCompanyBps", "investShareBps", "maxTradeUsdc", "minTradeUsdc",
+    "reserveTargetUsdc", "maxSlippageBps", "driftToleranceBps", "approvalExpirySeconds",
+    "investOnlyWhenAhead", "takeProfitBps", "stopLossBps", "rebalanceBandBps",
+]);
 
+/**
+ * One version as a line: amounts as decimal strings of minor units, everything else as it stands.
+ *
+ * Built by copying the terms, never by listing the fields. A list is what wrote a term away once: a
+ * `rebalanceBandBps` an owner had set was hashed into version 3 and then dropped on the way to disk, so
+ * the stored line no longer matched its own hash and the next boot refused to load the mandate at all.
+ * The constraint was live in memory and absent from the file, which is the worst of both. A serializer
+ * that cannot omit a field cannot do that again.
+ *
+ * An unset optional term is left out rather than written as null, so a mandate from before a term
+ * existed keeps the hash it was written with and its stored chain still verifies.
+ */
 export function serializeMandate(v: MandateVersion): string {
-    const t = v.terms;
-    const stored: StoredTerms = {
-        eligible: [...t.eligible],
-        themes: t.themes.map((x) => ({ id: x.id, targetBps: x.targetBps })),
-        maxCompanyBps: t.maxCompanyBps,
-        investShareBps: t.investShareBps,
-        maxTradeUsdc: t.maxTradeUsdc.toString(),
-        minTradeUsdc: t.minTradeUsdc.toString(),
-        reserveTargetUsdc: t.reserveTargetUsdc.toString(),
-        maxSlippageBps: t.maxSlippageBps,
-        driftToleranceBps: t.driftToleranceBps,
-        approvalExpirySeconds: t.approvalExpirySeconds,
-        // written only when set, so a mandate from before this term keeps its original hash
-        ...(t.investOnlyWhenAhead !== undefined && { investOnlyWhenAhead: t.investOnlyWhenAhead }),
-    };
+    const terms: Record<string, unknown> = {};
+    const all = v.terms as unknown as Record<string, unknown>;
+    for (const key of Object.keys(all).sort()) {
+        const value = all[key];
+        if (value === undefined) continue;
+        terms[key] = typeof value === "bigint" ? value.toString() : value;
+    }
     return JSON.stringify({
         version: v.version,
         hash: v.hash,
         prevHash: v.prevHash,
         createdAt: v.createdAt,
-        terms: stored,
+        terms,
     });
 }
 
@@ -96,6 +93,15 @@ export function parseMandateLine(line: string, where: string): MandateVersion {
     if (typeof r.terms !== "object" || r.terms === null) throw new Error(`${where}: missing terms`);
     const t = r.terms as Record<string, unknown>;
 
+    for (const key of Object.keys(t)) {
+        if (!STORED_TERMS.has(key)) {
+            throw new Error(
+                `${where}: unknown stored term ${key}. Either the file was edited, or the term is new ` +
+                "and this parser was not taught to read it, which would load a mandate missing a constraint.",
+            );
+        }
+    }
+
     if (!Array.isArray(t.eligible)) throw new Error(`${where}: terms.eligible must be an array`);
     if (!Array.isArray(t.themes)) throw new Error(`${where}: terms.themes must be an array`);
 
@@ -121,6 +127,11 @@ export function parseMandateLine(line: string, where: string): MandateVersion {
         ...(t.investOnlyWhenAhead === undefined
             ? {}
             : { investOnlyWhenAhead: bool(t.investOnlyWhenAhead, "investOnlyWhenAhead", where) }),
+        ...(t.takeProfitBps === undefined ? {} : { takeProfitBps: int(t.takeProfitBps, "takeProfitBps", where) }),
+        ...(t.stopLossBps === undefined ? {} : { stopLossBps: int(t.stopLossBps, "stopLossBps", where) }),
+        ...(t.rebalanceBandBps === undefined
+            ? {}
+            : { rebalanceBandBps: int(t.rebalanceBandBps, "rebalanceBandBps", where) }),
     };
 
     return { version: r.version, hash: r.hash, prevHash: r.prevHash, createdAt: r.createdAt, terms };

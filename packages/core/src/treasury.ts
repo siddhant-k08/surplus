@@ -4,7 +4,7 @@ import { formatUsdc } from "./money";
 import { bookSurplus, sweepAvailable, type SurplusResult } from "./surplus";
 import { checkProposal, failures, isSell, type Leg, type Proposal } from "./policy";
 import { splitFill } from "./swapplan";
-import { costBuckets, costOfUnits, positionsFromLedger } from "./positions";
+import { costBuckets, costOfUnits, holdingOf, positionsFromLedger, themeHoldings, themeKey } from "./positions";
 import {
     ProposalMachine,
     precheck,
@@ -523,25 +523,43 @@ export class Treasury {
                             `cannot sell ${units} units of ${leg.symbol}: the books hold ${position?.units ?? 0n}`,
                         );
                     }
+
+                    /*
+                     * A sale is scoped to the theme of its leg.
+                     *
+                     * The same token is held under several themes at once, and which one is being sold is
+                     * not a detail: trimming a theme that has drifted above its target must sell that
+                     * theme's own holding, or the trim would quietly take basis from a theme that was
+                     * exactly where the mandate wanted it. A whole-position exit is therefore one leg per
+                     * theme rather than one leg for the token, which `exitPlan` is what produces.
+                     */
+                    const held = holdingOf(themeHoldings(this.ledger.all()), leg.theme, key);
+                    if (held === null || held.units < units) {
+                        throw new Error(
+                            `cannot sell ${units} units of ${leg.symbol} under "${leg.theme}": ` +
+                            `that theme holds ${held?.units ?? 0n}`,
+                        );
+                    }
+
                     // What the swap returned, or what the quote says those units are worth.
                     const proceeds = real?.quantity ?? (units * price) / 10n ** BigInt(i.decimals.get(key)!);
-                    const cost = costOfUnits(position, units);
+                    // The basis of this theme's units, not the token's blended basis across every theme.
+                    const cost = costOfUnits(
+                        { ...position, units: held.units, costUsdcIn: held.costUsdcIn },
+                        units,
+                    );
                     const realized = proceeds - cost;
 
                     /*
                      * One entry per source of the basis being sold.
                      *
-                     * A position is rarely built from one commitment: the same token is bought under two
-                     * themes, out of different briefs, and by demos that named neither, and it all lands
-                     * in one `positions.<asset>` balance. Booking the exit as a single entry would credit
-                     * the whole unwind to one of them and leave the others still showing money behind a
-                     * position that has been closed. So the basis leaves the buckets it came from, in
-                     * proportion, and the proceeds and the gain follow it.
-                     *
-                     * The leg's own brief and theme are not used here. What is being unwound is where the
-                     * money went in, which the books know and the proposal does not.
+                     * Within one theme the money can still have come from several briefs, so the basis
+                     * leaves the buckets it came from, in proportion, and the proceeds and the gain
+                     * follow it. Booking the exit as a single entry would credit the whole unwind to one
+                     * brief and leave the others showing money behind a position that has been closed.
                      */
-                    const buckets = costBuckets(this.ledger.all(), key);
+                    const buckets = costBuckets(this.ledger.all(), key)
+                        .filter((b) => themeKey(b.theme ?? null) === leg.theme);
                     const shares = buckets.length === 0
                         ? [cost]
                         : splitFill(cost, buckets.map((b) => b.costUsdcIn));

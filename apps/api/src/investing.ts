@@ -9,6 +9,8 @@ import {
     attributeFills,
     exitPlan,
     positionsFromLedger,
+    themeHoldings,
+    themeKey,
     realizedSales,
     investmentGap,
     preTradeChecks,
@@ -33,6 +35,7 @@ import {
     type Mode,
     type ExitCandidate,
     type Skipped,
+    type Drift,
 } from "@surplus/core";
 
 /** Everything the engine needs from the outside world, injected so tests need no network. */
@@ -482,8 +485,11 @@ export class InvestingEngine {
         id: string,
         requested?: readonly { asset: string; units?: bigint }[],
     ): Promise<
-        | { ok: true; view: ProposalView; toSign: unknown; warnings: string[]; candidates: ExitCandidate[]; skipped: Skipped[] }
-        | { ok: false; reasons: string[]; skipped?: Skipped[] }
+        | {
+            ok: true; view: ProposalView; toSign: unknown; warnings: string[];
+            candidates: ExitCandidate[]; skipped: Skipped[]; drift: Drift;
+        }
+        | { ok: false; reasons: string[]; skipped?: Skipped[]; drift?: Drift }
     > {
         const market = await this.deps.market();
         const positions = positionsFromLedger(this.treasury.ledger.all());
@@ -493,17 +499,22 @@ export class InvestingEngine {
         }
 
         const terms = this.mandates.current().terms;
-        if (terms.takeProfitBps === undefined && terms.stopLossBps === undefined && (requested ?? []).length === 0) {
+        const noRule =
+            terms.takeProfitBps === undefined &&
+            terms.stopLossBps === undefined &&
+            terms.rebalanceBandBps === undefined;
+        if (noRule && (requested ?? []).length === 0) {
             return {
                 ok: false,
                 reasons: [
                     "the mandate states no exit rule and no sale was requested; " +
-                    "set takeProfitBps or stopLossBps, or name what to sell",
+                    "set takeProfitBps, stopLossBps or rebalanceBandBps, or name what to sell",
                 ],
             };
         }
 
         // Quote every open position the other way round: token in, USDC out, sized by the units held.
+        // One quote per token, not per theme: the price of a token does not depend on why it is held.
         const decimals = new Map(market.trusted.map((t) => [t.address, t.decimals]));
         const symbols = new Map(market.trusted.map((t) => [t.address, t.symbol]));
         const quoted = await market.quote(
@@ -518,12 +529,14 @@ export class InvestingEngine {
             })),
         );
 
+        // The same money split by theme, which is what a sale actually leaves and what a trim measures.
+        const holdings = themeHoldings(this.treasury.ledger.all());
         const plan = exitPlan({
             positions: open,
+            holdings,
             prices: quoted.prices,
             decimals,
             symbols,
-            themes: new Map([...open.keys()].map((a) => [a, this.themeOf(a)])),
             terms,
             ...(requested !== undefined && { requested }),
         });
@@ -534,6 +547,7 @@ export class InvestingEngine {
                     ? plan.skipped.map((s) => `${s.symbol}: ${s.why}`)
                     : ["no position meets the mandate's exit rules right now"],
                 skipped: plan.skipped,
+                drift: plan.drift,
             };
         }
 
@@ -561,6 +575,7 @@ export class InvestingEngine {
             toSign: approvalTypedDataJson(approval, this.deps.chainId),
             candidates: plan.candidates,
             skipped: plan.skipped,
+            drift: plan.drift,
             warnings: [
                 ...[...quoted.errors].map(([asset, why]) => `no quote for ${asset}: ${why}`),
                 ...plan.skipped.map((x) => `${x.symbol} not sold: ${x.why}`),
@@ -571,11 +586,12 @@ export class InvestingEngine {
     }
 
     /**
-     * The theme a position was bought under, from the fills themselves.
+     * The theme a position is mostly held under, for the one place that needs a single answer: the
+     * quote request, which is per token and does not care why the token is held.
      *
-     * A token bought under two themes takes the one that put the most money in, because a sale is one
-     * movement and has to be attributed to one of them. Positions that predate the theme field have
-     * none, and are attributed to `unattributed` rather than to a guess.
+     * Sales themselves are no longer attributed this way. Each one is scoped to its own theme, which
+     * `themeHoldings` knows exactly, because a token held under two themes is two holdings and taking
+     * the larger would misattribute the smaller.
      */
     private themeOf(asset: string): string {
         const totals = new Map<string, bigint>();
@@ -589,7 +605,7 @@ export class InvestingEngine {
         for (const [theme, total] of totals) {
             if (best === null || total > totals.get(best)!) best = theme;
         }
-        return best ?? "unattributed";
+        return themeKey(best);
     }
 
     /**
