@@ -1557,6 +1557,7 @@ sales at `$0.01`, or three at `$0.25`.
 2. **Build the sell path.** `quoteBuy` hardwires USDC as `tokenIn`, so the agent can accumulate and
    cannot exit. A mandate with no exit rule cannot express take-profit, rebalance or a drawdown
    limit. Largest genuine capability gap in the system.
+   **Done on 25 Nov 2026**: see "The sell path" below. Rebalancing is the one part left.
 3. **Skin in the game.** Join a position back to the brief and theme that justified it and show it on
    the brief, so the research half and the treasury half are one product rather than two sharing a
    wallet. Needs step 1 to have happened before there is anything to show.
@@ -1751,6 +1752,119 @@ older books and would show no backing at all.** `npm run db:import -w @surplus/a
 up, and because the files only ever append and the import is idempotent on the entry id, it adds the
 new entries rather than conflicting. Not run here: it writes to a live database and that is the
 owner's call.
+
+## The sell path, 25 Nov 2026
+
+The agent can exit. Step 2 of the agreed order of work is done, and it was the largest genuine
+capability gap: `quoteBuy` hardwired USDC as `tokenIn`, so the agent could accumulate and never leave.
+
+### A position had to become countable first
+
+`positions.<asset>` held what was paid and nothing held what was bought. Units lived only in the
+execution journal, which is empty while fills are simulated, so the books literally could not say how
+much of anything the agent owned. Nothing can be valued, and therefore nothing can be sold, from that.
+
+So `LedgerTx` gained a signed `units` field (positive on a buy, negative on a sale), serialized as a
+decimal string and refused on parse if malformed, for the same reason amounts are: a dropped quantity
+would make a position look free and the sale of it look like pure profit.
+
+### How a sale is booked
+
+`SALE_SETTLED`: cost basis out of the position, proceeds into `surplus.investable`, the difference to a
+new `pnl.realized` account. Three decisions worth keeping:
+
+- **Proceeds return to `surplus.investable`, not `cash.operating`.** That money has already been
+  through the settlement waterfall once; putting it back at the top would sweep it into the reserve a
+  second time and count it as revenue it is not.
+- **Average cost, not FIFO.** Stated rather than assumed, because the realized gain on a partial sale
+  depends on it. The agent accumulates one position per token over many small buys and has no lot
+  identity worth preserving.
+- **A full exit takes the whole remaining basis**, so a closed position leaves `positions.<asset>` at
+  exactly zero rather than a rounding dust that sits there for ever claiming the agent still owns
+  something.
+
+### The buy-side caps deliberately do not apply
+
+The company cap, the theme targets and the investable total limit what is put at risk, and a sale
+reduces all three; applying them to a sale would be a rule that stops the agent reducing risk. The
+eligible list is the sharpest case and has its own test: it says what may be **bought**, and gating
+sales on it would turn it into a trap that locks the agent into exactly the position an owner just
+decided against. What does bind a sale is `sellOnlyWhatIsHeld`, read from the books rather than taken
+from the caller, because a caller that passed its own figure could authorise selling units that are
+not there.
+
+### Exit rules are the owner's, like everything else
+
+`takeProfitBps` and `stopLossBps` are optional mandate terms, so stored mandates still hash and their
+chains still verify. **With neither set and nothing requested, the agent proposes no sale at all**:
+an owner who has not said when to sell has not authorised selling. The owner can also name an exit,
+whole or partial, which needs no rule. Either way the proposal goes through the same policy check, the
+same EIP-712 signature and the same drift gate a buy goes through.
+
+### A sale unwinds the commitments that built the position
+
+This was found live and is the subtlest part. The first exit executed here was booked as one entry
+carrying no brief, so it netted out of the unattributed pile while the brief kept showing money behind
+a position that no longer existed.
+
+A token is bought under several themes, out of several briefs, and by demos that name neither, and it
+all lands in one balance. So `costBuckets` reads where the basis actually came from and `execute` posts
+**one entry per bucket**, in proportion. The SNDKc exit on the live books is two entries: `0.120205`
+out of the brief's `ai-compute` bucket and `0.057241` out of the unattributed one, matching exactly
+where the money went in.
+
+### Three bugs this turned up
+
+1. **The NAV gate read sale quotes backwards.** It used `priceOf` on every quote, so a sale (token in,
+   USDC out) came out as tokens per dollar: `9738 bps from NAV` on a market that had not moved, blocking
+   every exit. The gate now reads the leg's side. Two tests pin it, including that a sale whose price
+   really has left NAV is still blocked.
+2. **The execution journal assumed every fill receives tokens.** A sale's `amountOutMinor` is USDC, so
+   `positions()` would have added the proceeds as units and lost the disposal, then reported the books
+   short of tokens they had correctly sold. It now records `side` and `unitsInMinor`; a sale also no
+   longer counts against the onchain spend cap, since it returns USDC rather than spending it.
+3. **The ledger refuses a zero-amount line**, which a sale landing exactly on its cost basis produces.
+   That is an ordinary outcome, not an error, so the profit line is omitted and the entry balances
+   without it.
+
+`alter table executions add column if not exists` was added to `migrate`: `create table if not exists`
+does nothing to a table that already exists, so a database through an earlier version would never gain
+the two new columns and would read every sale as a purchase.
+
+### What it did on the live books
+
+A full round trip, buy and sell, with simulated fills and real testnet revenue behind them. `GOOGLc`
+and `SNDKc` both closed to zero units and zero basis, `pnl.realized` at `0.249306`, books reconciled,
+health ok throughout.
+
+Both realized "losses" are write-offs, not market moves, and the agent said so before either sale:
+
+    caveat: 2 of 3 buys recorded no units, so this cost basis covers more than the units shown.
+            Selling realizes a loss that is a write-off of the unrecorded part, not a market move.
+
+The GOOGLc number was predicted exactly: `-0.132058` is the `0.131966` of old unitless basis plus
+`0.000092` of real spread. `partlyUnrecorded` exists so that a `-6596 bps` figure never appears without
+the sentence explaining it.
+
+### Two artifacts left in the local books
+
+1. **One sale predates the bucketing fix.** The `GOOGLc` exit was booked before `costBuckets` existed,
+   so its whole basis left the unattributed bucket. `/catalogue/backing` therefore still shows
+   `0.135615` of GOOGLc behind the brief while `/invest/holdings` correctly says the position is zero.
+   The ledger is append-only, so this cannot be corrected in place.
+2. **Six positions were bought before units were recorded**, which is why both exits were write-offs.
+
+Both are artifacts of this particular JSONL invest book, not of the code, and every future sale is
+correct. The invest book is **entirely `sim`** and separate from the `testnet` sales book that holds the
+real money, so deleting `data/ledger-invest-sim.jsonl` and re-running `POST /invest/sync` would rebuild
+it from the real sales ledger with no artifacts and no loss of any real record. That is Siddhant's call
+and was not done here.
+
+### Not built
+
+**Rebalancing to the theme targets.** It needs per-theme unit accounting and a band term the mandate
+does not have, and it is a bigger change than take-profit and stop-loss, which are whole-position
+exits. The partial-sale machinery is in place, so it is an addition rather than a rewrite.
 
 ## Next milestones, in order
 
