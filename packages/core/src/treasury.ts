@@ -2,7 +2,9 @@ import { Ledger, type AccountId, type EntryType, type Mode } from "./ledger";
 import type { MandateStore } from "./mandate";
 import { formatUsdc } from "./money";
 import { bookSurplus, sweepAvailable, type SurplusResult } from "./surplus";
-import { checkProposal, failures, type Leg, type Proposal } from "./policy";
+import { checkProposal, failures, isSell, type Leg, type Proposal } from "./policy";
+import { splitFill } from "./swapplan";
+import { costBuckets, costOfUnits, positionsFromLedger } from "./positions";
 import {
     ProposalMachine,
     precheck,
@@ -26,6 +28,11 @@ export interface Fill {
     usdcIn: bigint;
     price: bigint; // USDC minor units per one whole token
     quantity: bigint; // token minor units
+    /** Absent on a buy. */
+    side?: "sell";
+    /** Sale only: USDC minor units received, and the gain or loss that taking it realized. */
+    proceedsUsdc?: bigint;
+    realizedUsdc?: bigint;
 }
 
 export interface ProposalRecord {
@@ -53,6 +60,12 @@ export type ExecuteResult =
  * does not reach SETTLED.
  */
 export interface RealizedFill {
+    /**
+     * What the swap actually returned: token minor units on a buy, USDC minor units on a sale.
+     *
+     * One field because it is one thing, the `amountOut` of the swap that happened. What it counts
+     * depends on which way the trade went, and the leg says which.
+     */
     quantity: bigint;
     transaction: string;
 }
@@ -137,9 +150,11 @@ export class Treasury {
                     break;
                 }
                 case "PURCHASE_SETTLED":
+                case "SALE_SETTLED":
                     // A fill carries a briefId too, but it is neither revenue nor cost for that brief: it
-                    // is surplus leaving to buy something. Folding it in here would make every settled
-                    // proposal look like money the brief had earned. `backing` reads these instead.
+                    // is surplus leaving to buy something, or coming back. Folding it in here would make
+                    // every settled proposal look like money the brief had earned. `backing` and
+                    // `positionsFromLedger` read these instead.
                     break;
                 default:
                     break;
@@ -293,10 +308,17 @@ export class Treasury {
         if (this.records.has(i.id)) throw new Error(`Proposal ${i.id} already exists`);
 
         const mandate = this.opts.mandates.current();
+        // Units held are read from the books rather than taken from the caller. The books are the only
+        // authority on what the agent owns, and a caller that passed its own figure could authorise a
+        // sale of units that are not there.
+        const heldUnits = new Map<string, bigint>();
+        for (const [asset, p] of positionsFromLedger(this.ledger.all())) heldUnits.set(asset, p.units);
         const proposal: Proposal = {
             investable: this.ledger.balance("surplus.investable"),
             legs: i.legs,
             ...(i.held !== undefined && { held: i.held }),
+            // only carried when it matters, so a buy-only proposal hashes as it always did
+            ...(i.legs.some(isSell) && { heldUnits }),
         };
         const rec: ProposalRecord = {
             id: i.id,
@@ -451,7 +473,10 @@ export class Treasury {
 
         const total = sumLegs(rec.proposal.legs);
         const reasons = [...pre.reasons, ...(i.blocks ?? [])];
-        if (reasons.length === 0 && this.ledger.balance("surplus.investable") < total) {
+        // Only what is spent needs covering. A sale brings money in, and requiring the investable balance
+        // to cover it would refuse exactly the trade that replenishes the balance.
+        const spend = rec.proposal.legs.filter((l) => !isSell(l)).reduce((a, l) => a + l.usdcIn, 0n);
+        if (reasons.length === 0 && this.ledger.balance("surplus.investable") < spend) {
             reasons.push("insufficient investable surplus");
         }
         if (reasons.length > 0) {
@@ -463,6 +488,9 @@ export class Treasury {
         rec.machine.transition("EXECUTING", this.now());
         const fills: Fill[] = [];
         const unfilled: { symbol: string; usdcIn: bigint; reason: string }[] = [];
+        // Positions as they stand, carried through the loop so two sales of the same token take their
+        // cost basis in sequence rather than both costing it from the opening balance.
+        const positions = positionsFromLedger(this.ledger.all());
         try {
             // The same asset can appear in more than one theme, so the key is per leg, not per asset.
             // Legs are fixed when the proposal is created, so the index is stable across retries.
@@ -475,10 +503,8 @@ export class Treasury {
                     unfilled.push({ symbol: leg.symbol, usdcIn: leg.usdcIn, reason: "the swap did not execute" });
                     continue;
                 }
-                const quantity = real?.quantity ?? (leg.usdcIn * 10n ** BigInt(i.decimals.get(key)!)) / price;
                 const tag = real === undefined ? "SIMULATED " : "";
-                this.ledger.post({
-                    type: "PURCHASE_SETTLED",
+                const common = {
                     mode: this.opts.mode,
                     at: this.now(),
                     idempotencyKey: `fill:${id}:${n}:${key}`,
@@ -487,12 +513,103 @@ export class Treasury {
                     // proposal under two themes, and these two fields are what keep those apart.
                     ...(rec.briefId !== undefined && { briefId: rec.briefId }),
                     theme: leg.theme,
+                };
+
+                if (isSell(leg)) {
+                    const units = leg.unitsIn!;
+                    const position = positions.get(key);
+                    if (position === undefined || position.units < units) {
+                        throw new Error(
+                            `cannot sell ${units} units of ${leg.symbol}: the books hold ${position?.units ?? 0n}`,
+                        );
+                    }
+                    // What the swap returned, or what the quote says those units are worth.
+                    const proceeds = real?.quantity ?? (units * price) / 10n ** BigInt(i.decimals.get(key)!);
+                    const cost = costOfUnits(position, units);
+                    const realized = proceeds - cost;
+
+                    /*
+                     * One entry per source of the basis being sold.
+                     *
+                     * A position is rarely built from one commitment: the same token is bought under two
+                     * themes, out of different briefs, and by demos that named neither, and it all lands
+                     * in one `positions.<asset>` balance. Booking the exit as a single entry would credit
+                     * the whole unwind to one of them and leave the others still showing money behind a
+                     * position that has been closed. So the basis leaves the buckets it came from, in
+                     * proportion, and the proceeds and the gain follow it.
+                     *
+                     * The leg's own brief and theme are not used here. What is being unwound is where the
+                     * money went in, which the books know and the proposal does not.
+                     */
+                    const buckets = costBuckets(this.ledger.all(), key);
+                    const shares = buckets.length === 0
+                        ? [cost]
+                        : splitFill(cost, buckets.map((b) => b.costUsdcIn));
+                    const proceedShares = buckets.length === 0
+                        ? [proceeds]
+                        : splitFill(proceeds, buckets.map((b) => b.costUsdcIn));
+                    const unitShares = buckets.length === 0
+                        ? [units]
+                        : splitFill(units, buckets.map((b) => b.costUsdcIn));
+
+                    for (const [b, bucket] of (buckets.length === 0 ? [undefined] : buckets).entries()) {
+                        const costShare = shares[b]!;
+                        const proceedShare = proceedShares[b]!;
+                        const unitShare = unitShares[b]!;
+                        if (costShare === 0n && proceedShare === 0n) continue;
+                        const realizedShare = proceedShare - costShare;
+                        this.ledger.post({
+                            mode: common.mode,
+                            at: common.at,
+                            ...(common.txHash !== undefined && { txHash: common.txHash }),
+                            // Where this slice of basis came from, not where the proposal came from.
+                            ...(bucket?.briefId !== undefined && { briefId: bucket.briefId }),
+                            ...(bucket?.theme !== undefined && { theme: bucket.theme }),
+                            type: "SALE_SETTLED",
+                            idempotencyKey: `${common.idempotencyKey}:${b}`,
+                            units: -unitShare,
+                            memo:
+                                `${tag}sale ${leg.symbol}: ${unitShare} units at ${price} => ` +
+                                `${formatUsdc(proceedShare)} USDC against ${formatUsdc(costShare)} cost` +
+                                (bucket === undefined ? "" : ` (${bucket.briefId ?? "unattributed"}/${bucket.theme ?? "no theme"})`),
+                            lines: [
+                                // the basis leaves the position, the money comes back as investable, and
+                                // the difference is the only part that is profit or loss
+                                { account: `positions.${key}`, amount: -costShare },
+                                { account: "surplus.investable", amount: proceedShare },
+                                // Omitted when a slice lands exactly on its basis: the ledger refuses a
+                                // zero line, and the entry balances without it.
+                                ...(realizedShare === 0n ? [] : [{ account: "pnl.realized" as const, amount: -realizedShare }]),
+                            ],
+                        });
+                    }
+
+                    position.units -= units;
+                    position.costUsdcIn -= cost;
+                    position.realizedUsdc += realized;
+                    fills.push({
+                        asset: key, symbol: leg.symbol, usdcIn: leg.usdcIn, price,
+                        quantity: units, side: "sell", proceedsUsdc: proceeds, realizedUsdc: realized,
+                    });
+                    continue;
+                }
+
+                const quantity = real?.quantity ?? (leg.usdcIn * 10n ** BigInt(i.decimals.get(key)!)) / price;
+                this.ledger.post({
+                    ...common,
+                    type: "PURCHASE_SETTLED",
+                    units: quantity,
                     memo: `${tag}fill ${leg.symbol}: ${formatUsdc(leg.usdcIn)} USDC at ${price} => ${quantity} units`,
                     lines: [
                         { account: `positions.${key}`, amount: leg.usdcIn },
                         { account: "surplus.investable", amount: -leg.usdcIn },
                     ],
                 });
+                const open = positions.get(key)
+                    ?? { asset: key, units: 0n, costUsdcIn: 0n, realizedUsdc: 0n, buys: 0, sells: 0, buysWithoutUnits: 0 };
+                open.units += quantity;
+                open.costUsdcIn += leg.usdcIn;
+                positions.set(key, open);
                 fills.push({ asset: key, symbol: leg.symbol, usdcIn: leg.usdcIn, price, quantity });
             }
         } catch (e) {

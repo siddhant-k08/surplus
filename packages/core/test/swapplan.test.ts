@@ -151,3 +151,50 @@ describe("attributing real fills back to legs", () => {
         expect(total).toBe(BigInt(plan.length) * 1000n);
     });
 });
+
+
+describe("planning a sale", () => {
+    const ONE = 10n ** 18n;
+    const leg = (over: Partial<Leg> = {}): Leg => ({
+        asset: NVDA, symbol: "NVDAc", theme: "ai-compute", usdcIn: u("0.30"), maxSlippageBps: 100, ...over,
+    });
+
+    it("merges two sales of one token into a single swap, units and all", () => {
+        const orders = swapPlan(
+            [
+                leg({ side: "sell", unitsIn: ONE }),
+                leg({ side: "sell", unitsIn: 2n * ONE, theme: "platform-giants" }),
+            ],
+            u("1.00"),
+        );
+        expect(orders).toHaveLength(1);
+        expect(orders[0]!.side).toBe("sell");
+        expect(orders[0]!.unitsIn).toBe(3n * ONE);
+        expect(orders[0]!.usdcIn).toBe(u("0.60"));
+        expect(orders[0]!.parts.map((p) => p.theme)).toEqual(["ai-compute", "platform-giants"]);
+    });
+
+    it("never merges a buy and a sale of the same token into one swap", () => {
+        // netting them would produce one swap that does neither, and would lose the units to dispose of
+        const orders = swapPlan([leg(), leg({ side: "sell", unitsIn: ONE })], u("1.00"));
+        expect(orders).toHaveLength(2);
+        expect(orders.filter((o) => o.side === "sell")).toHaveLength(1);
+        expect(orders.find((o) => o.side === undefined)!.unitsIn).toBeUndefined();
+    });
+
+    it("splits a sale at the trade cap and disposes of exactly the units asked for", () => {
+        const orders = swapPlan([leg({ side: "sell", usdcIn: u("1.00"), unitsIn: 3n * ONE })], u("0.40"));
+        expect(orders).toHaveLength(3);
+        expect(orders.reduce((a, o) => a + o.usdcIn, 0n)).toBe(u("1.00"));
+        // not a unit more or less than the leg asked to sell
+        expect(orders.reduce((a, o) => a + (o.unitsIn ?? 0n), 0n)).toBe(3n * ONE);
+        for (const o of orders) expect(o.usdcIn).toBeLessThanOrEqual(u("0.40"));
+    });
+
+    it("leaves a buy-only plan exactly as it was", () => {
+        const orders = swapPlan([leg(), leg({ theme: "platform-giants" })], u("1.00"));
+        expect(orders).toHaveLength(1);
+        expect(orders[0]!.side).toBeUndefined();
+        expect(orders[0]!.unitsIn).toBeUndefined();
+    });
+});

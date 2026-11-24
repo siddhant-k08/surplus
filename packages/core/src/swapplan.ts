@@ -11,6 +11,10 @@ export interface SwapOrder {
     readonly usdcIn: bigint;
     readonly maxSlippageBps: number;
     readonly parts: readonly { readonly theme: string; readonly usdcIn: bigint }[];
+    /** Absent for a buy, so an order that predates the sell path is unchanged. */
+    readonly side?: "sell";
+    /** Sell only: the token units this one swap disposes of. */
+    readonly unitsIn?: bigint;
 }
 
 /**
@@ -25,30 +29,43 @@ export interface SwapOrder {
 export function swapPlan(legs: readonly Leg[], maxTradeUsdc: bigint): SwapOrder[] {
     if (maxTradeUsdc <= 0n) throw new Error("maxTradeUsdc must be positive");
 
+    // Grouped by token *and* direction. Merging is what makes the gas worth paying, but merging a buy
+    // and a sale of the same token would net them into one swap that does neither, and would lose the
+    // units the sale is supposed to dispose of.
     const byAsset = new Map<string, Leg[]>();
     for (const leg of legs) {
-        const key = leg.asset.toLowerCase();
+        const key = `${leg.asset.toLowerCase()}:${leg.side ?? "buy"}`;
         const list = byAsset.get(key);
         if (list) list.push(leg);
         else byAsset.set(key, [leg]);
     }
 
     const orders: SwapOrder[] = [];
-    for (const [asset, group] of byAsset) {
-        const symbol = group[0]!.symbol;
+    for (const group of byAsset.values()) {
+        const first = group[0]!;
+        const asset = first.asset.toLowerCase();
+        const symbol = first.symbol;
+        const sell = first.side === "sell";
         const maxSlippageBps = Math.min(...group.map((l) => l.maxSlippageBps));
 
         // fill orders up to the cap, in leg order, splitting a leg across orders only when it has to be
         let parts: { theme: string; usdcIn: bigint }[] = [];
         let running = 0n;
+        let units = 0n;
         const flush = (): void => {
             if (running === 0n) return;
-            orders.push({ asset, symbol, usdcIn: running, maxSlippageBps, parts });
+            orders.push({
+                asset, symbol, usdcIn: running, maxSlippageBps, parts,
+                ...(sell && { side: "sell" as const, unitsIn: units }),
+            });
             parts = [];
             running = 0n;
+            units = 0n;
         };
         for (const leg of group) {
             let left = leg.usdcIn;
+            const legUnits = leg.unitsIn ?? 0n;
+            let unitsLeft = legUnits;
             while (left > 0n) {
                 const room = maxTradeUsdc - running;
                 if (room === 0n) {
@@ -58,6 +75,11 @@ export function swapPlan(legs: readonly Leg[], maxTradeUsdc: bigint): SwapOrder[
                 const take = left < room ? left : room;
                 parts.push({ theme: leg.theme, usdcIn: take });
                 running += take;
+                // Units follow the notional they were cut with, and the last slice takes what is left so
+                // a split leg disposes of exactly the units it was asked to and never a rounding less.
+                const takeUnits = take === left ? unitsLeft : (legUnits * take) / leg.usdcIn;
+                units += takeUnits;
+                unitsLeft -= takeUnits;
                 left -= take;
             }
         }

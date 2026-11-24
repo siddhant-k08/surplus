@@ -10,6 +10,14 @@ export type AccountId =
     | "expense.llm"
     | "expense.search"
     | "expense.gas"
+    /**
+     * Profit and loss actually realized by selling, never a mark to market.
+     *
+     * A gain credits it (negative, like revenue); a loss debits it (positive, like an expense). A
+     * position still held has no entry here however it has moved: the books state what happened, and an
+     * unrealized gain has not happened.
+     */
+    | "pnl.realized"
     | `positions.${string}`;
 
 export type EntryType =
@@ -23,6 +31,7 @@ export type EntryType =
     | "REFUSAL"
     | "APPROVAL_RECORDED"
     | "PURCHASE_SETTLED"
+    | "SALE_SETTLED"
     | "RECONCILIATION";
 
 export interface Line {
@@ -48,6 +57,15 @@ export interface PostInput {
      * memo already says it in prose, and prose is not something money may be attributed by.
      */
     theme?: string;
+    /**
+     * Token units this entry moved, signed: positive when the agent received them, negative when it
+     * disposed of them. Describes the token in the entry's `positions.` line.
+     *
+     * Money alone cannot answer what a position is worth, because `positions.<asset>` holds what was
+     * paid, not how much was bought. Without units the agent can accumulate and never work out whether
+     * selling would be a gain, which is exactly the state the books were in before the sell path.
+     */
+    units?: bigint;
 }
 
 export interface LedgerTx {
@@ -61,6 +79,7 @@ export interface LedgerTx {
     readonly idempotencyKey?: string;
     readonly briefId?: string;
     readonly theme?: string;
+    readonly units?: bigint;
 }
 
 function sameLines(a: readonly Line[], b: readonly Line[]): boolean {
@@ -117,6 +136,7 @@ export class Ledger {
             ...(input.idempotencyKey !== undefined && { idempotencyKey: input.idempotencyKey }),
             ...(input.briefId !== undefined && { briefId: input.briefId }),
             ...(input.theme !== undefined && { theme: input.theme }),
+            ...(input.units !== undefined && { units: input.units }),
         });
 
         this.txs.push(tx);
@@ -159,6 +179,7 @@ export class Ledger {
                 ...(t.idempotencyKey !== undefined && { idempotencyKey: t.idempotencyKey }),
                 ...(t.briefId !== undefined && { briefId: t.briefId }),
                 ...(t.theme !== undefined && { theme: t.theme }),
+                ...(t.units !== undefined && { units: t.units }),
             });
         }
         return ledger;

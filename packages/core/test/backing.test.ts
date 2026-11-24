@@ -5,6 +5,8 @@ import { Treasury } from "../src/treasury";
 import { MandateStore } from "../src/mandate";
 import { allocate } from "../src/allocator";
 import { parseUsdc as u } from "../src/money";
+import { positionsFromLedger } from "../src/positions";
+import { reconcileInternal } from "../src/reconcile";
 import { baseTerms, NVDA, MSFT, META, AMZN } from "./fixtures";
 
 const T0 = Date.parse("2026-11-24T12:00:00Z");
@@ -213,5 +215,185 @@ describe("a real proposal, from legs to attribution", () => {
         const r = backing(tr.ledger.all());
         expect(r.briefs).toEqual([]);
         expect(r.unattributed).toEqual({ usdcIn: u("0.20"), fills: 1 });
+    });
+});
+
+
+describe("what an exit does to the backing", () => {
+    /** A sale as the ledger holds it: cost basis out of the position, proceeds back to investable. */
+    function sale(
+        ledger: Ledger,
+        i: { at: number; asset: string; cost: bigint; proceeds: bigint; briefId?: string; theme?: string },
+    ): void {
+        ledger.post({
+            type: "SALE_SETTLED", mode: "sim", at: new Date(i.at),
+            idempotencyKey: `sale:${i.asset}:${i.at}`,
+            ...(i.briefId !== undefined && { briefId: i.briefId }),
+            ...(i.theme !== undefined && { theme: i.theme }),
+            lines: [
+                { account: `positions.${i.asset}`, amount: -i.cost },
+                { account: "surplus.investable", amount: i.proceeds },
+                { account: "pnl.realized", amount: -(i.proceeds - i.cost) },
+            ],
+        });
+    }
+
+    it("drops a holding the agent has fully sold rather than showing it at zero", () => {
+        const ledger = new Ledger();
+        fill(ledger, { at: T0, asset: NVDA, usdcIn: u("0.10"), briefId: "b1", theme: "ai-compute" });
+        fill(ledger, { at: T0 + 1000, asset: MSFT, usdcIn: u("0.07"), briefId: "b1", theme: "ai-compute" });
+        sale(ledger, { at: T0 + 2000, asset: NVDA, cost: u("0.10"), proceeds: u("0.13"), briefId: "b1", theme: "ai-compute" });
+
+        const b = backing(ledger.all()).briefs[0]!;
+        expect(b.themes[0]!.assets.map((a) => a.asset)).toEqual([MSFT]);
+        expect(b.usdcIn).toBe(u("0.07"));
+        expect(b.sales).toBe(1);
+    });
+
+    it("counts only the part sold when an exit is partial", () => {
+        const ledger = new Ledger();
+        fill(ledger, { at: T0, asset: NVDA, usdcIn: u("0.10"), briefId: "b1", theme: "ai-compute" });
+        sale(ledger, { at: T0 + 1000, asset: NVDA, cost: u("0.04"), proceeds: u("0.05"), briefId: "b1", theme: "ai-compute" });
+        const b = backing(ledger.all()).briefs[0]!;
+        expect(b.themes[0]!.assets[0]!.usdcIn).toBe(u("0.06"));
+        expect(b.usdcIn).toBe(u("0.06"));
+    });
+
+    it("drops a theme whose every position has been closed", () => {
+        const ledger = new Ledger();
+        fill(ledger, { at: T0, asset: NVDA, usdcIn: u("0.10"), briefId: "b1", theme: "ai-compute" });
+        fill(ledger, { at: T0 + 1, asset: META, usdcIn: u("0.08"), briefId: "b1", theme: "platform-giants" });
+        sale(ledger, { at: T0 + 2000, asset: NVDA, cost: u("0.10"), proceeds: u("0.09"), briefId: "b1", theme: "ai-compute" });
+
+        const b = backing(ledger.all()).briefs[0]!;
+        expect(b.themes.map((t) => t.theme)).toEqual(["platform-giants"]);
+        // a brief standing for ever on a commitment it has unwound would be the dishonest answer
+        expect(b.usdcIn).toBe(u("0.08"));
+    });
+
+    it("nets an exit out of the unattributed pile too, so the parts still add up", () => {
+        const ledger = new Ledger();
+        fill(ledger, { at: T0, asset: NVDA, usdcIn: u("0.10") });
+        sale(ledger, { at: T0 + 1000, asset: NVDA, cost: u("0.10"), proceeds: u("0.11") });
+        const r = backing(ledger.all());
+        expect(r.unattributed.usdcIn).toBe(0n);
+        expect(r.totalUsdcIn).toBe(0n);
+    });
+});
+
+
+describe("an exit of a position built from several commitments", () => {
+    it("takes the basis back out of every bucket that put money in", () => {
+        // METAc bought under two themes of one brief, plus a demo buy that named neither. One sale of
+        // the whole position has to unwind all three, or a brief keeps showing money behind a holding
+        // that no longer exists.
+        const clock = { t: Date.parse("2026-11-25T09:00:00Z"), now: () => new Date(clock.t) };
+        const mandates = new MandateStore();
+        mandates.create(baseTerms(), clock.now());
+        const tr = new Treasury({ mode: "sim", mandates, now: clock.now });
+        tr.ledger.post({
+            type: "OPENING_BALANCE", mode: "sim", at: clock.now(),
+            lines: [{ account: "reserve", amount: u("2.00") }, { account: "equity.opening", amount: u("-2.00") }],
+        });
+        tr.receivePayment({ id: "p1", briefId: "b1", amount: u("3") });
+        tr.settleBrief("b1");
+
+        const ONE = 10n ** 18n;
+        const price = new Map([[META, 100_000_000n]]);
+        const decimals = new Map([[META, 18]]);
+        const buy = (id: string, theme: string, amount: string, briefId?: string) => {
+            tr.createProposal({
+                id,
+                legs: [{ asset: META, symbol: "METAc", theme, usdcIn: u(amount), maxSlippageBps: 100 }],
+                quotedPrices: price,
+                ...(briefId !== undefined && { briefId }),
+            });
+            clock.t += 20_000;
+            tr.approve(id, "owner");
+            expect(tr.execute(id, { freshPrices: price, decimals }).ok).toBe(true);
+        };
+        buy("a", "ai-compute", "0.20", "b1");
+        buy("b", "platform-giants", "0.10", "b1");
+        buy("c", "ai-compute", "0.10"); // a demo buy with no brief
+
+        const before = backing(tr.ledger.all());
+        expect(before.briefs[0]!.usdcIn).toBe(u("0.30"));
+        expect(before.unattributed.usdcIn).toBe(u("0.10"));
+
+        // sell the whole position at the price it was bought
+        const position = positionsFromLedger(tr.ledger.all()).get(META)!;
+        const worth = (position.units * 100_000_000n) / ONE;
+        tr.createProposal({
+            id: "exit",
+            legs: [{
+                asset: META, symbol: "METAc", theme: "ai-compute", usdcIn: worth,
+                maxSlippageBps: 100, side: "sell", unitsIn: position.units,
+            }],
+            quotedPrices: price,
+        });
+        clock.t += 20_000;
+        tr.approve("exit", "owner");
+        expect(tr.execute("exit", { freshPrices: price, decimals }).ok).toBe(true);
+
+        // every bucket is back to nothing, and so is the position
+        const after = backing(tr.ledger.all());
+        expect(after.briefs).toEqual([]);
+        expect(after.unattributed.usdcIn).toBe(0n);
+        expect(after.totalUsdcIn).toBe(0n);
+        expect(tr.ledger.balance(`positions.${META}`)).toBe(0n);
+        expect(reconcileInternal(tr.ledger).ok).toBe(true);
+    });
+
+    it("unwinds a partial exit in proportion to what each bucket put in", () => {
+        const clock = { t: Date.parse("2026-11-25T09:00:00Z"), now: () => new Date(clock.t) };
+        const mandates = new MandateStore();
+        mandates.create(baseTerms(), clock.now());
+        const tr = new Treasury({ mode: "sim", mandates, now: clock.now });
+        tr.ledger.post({
+            type: "OPENING_BALANCE", mode: "sim", at: clock.now(),
+            lines: [{ account: "reserve", amount: u("2.00") }, { account: "equity.opening", amount: u("-2.00") }],
+        });
+        tr.receivePayment({ id: "p1", briefId: "b1", amount: u("3") });
+        tr.settleBrief("b1");
+
+        const ONE = 10n ** 18n;
+        const price = new Map([[META, 100_000_000n]]);
+        const decimals = new Map([[META, 18]]);
+        const buy = (id: string, theme: string, amount: string, briefId?: string) => {
+            tr.createProposal({
+                id,
+                legs: [{ asset: META, symbol: "METAc", theme, usdcIn: u(amount), maxSlippageBps: 100 }],
+                quotedPrices: price,
+                ...(briefId !== undefined && { briefId }),
+            });
+            clock.t += 20_000;
+            tr.approve(id, "owner");
+            tr.execute(id, { freshPrices: price, decimals });
+        };
+        buy("a", "ai-compute", "0.30", "b1");
+        buy("b", "platform-giants", "0.10", "b1");
+
+        const position = positionsFromLedger(tr.ledger.all()).get(META)!;
+        const half = position.units / 2n;
+        const worth = (half * 100_000_000n) / ONE;
+        tr.createProposal({
+            id: "exit",
+            legs: [{
+                asset: META, symbol: "METAc", theme: "ai-compute", usdcIn: worth,
+                maxSlippageBps: 100, side: "sell", unitsIn: half,
+            }],
+            quotedPrices: price,
+        });
+        clock.t += 20_000;
+        tr.approve("exit", "owner");
+        expect(tr.execute("exit", { freshPrices: price, decimals }).ok).toBe(true);
+
+        // half of each bucket went, not all of the larger one
+        const after = backing(tr.ledger.all()).briefs[0]!;
+        const ai = after.themes.find((t) => t.theme === "ai-compute")!;
+        const pg = after.themes.find((t) => t.theme === "platform-giants")!;
+        expect(ai.usdcIn).toBe(u("0.15"));
+        expect(pg.usdcIn).toBe(u("0.05"));
+        expect(reconcileInternal(tr.ledger).ok).toBe(true);
     });
 });

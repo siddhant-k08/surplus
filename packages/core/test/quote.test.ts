@@ -7,6 +7,7 @@ import {
     routesUrl,
     fetchRoute,
     quoteLegs,
+    priceOfSale,
     KYBER_ROUTER_BASE,
     type Quote,
 } from "../src/quote";
@@ -196,5 +197,92 @@ describe("M6 regression: outbound requests carry a deadline", () => {
             { tokenOut: "0x" + "b".repeat(40), amountIn: 1_000_000n, slippageBps: 100, timeoutMs: 20 },
             fetchImpl,
         )).rejects.toThrow();
+    });
+});
+
+
+describe("quoting a sale, which goes the other way", () => {
+    /** A route that sells 0.005 whole tokens for 1 USDC: token in, USDC out. */
+    const saleResponse = {
+        code: 0,
+        message: "successfully",
+        requestId: "req-sale",
+        data: {
+            routerAddress: ROUTER_MIXED,
+            routeSummary: {
+                tokenIn: NVDA,
+                amountIn: "5000000000000000",
+                amountInUsd: "0.99",
+                tokenOut: BASE_USDC,
+                amountOut: "1000000",
+                amountOutUsd: "0.9999",
+                gas: "250000",
+                gasPrice: "1000000",
+                gasUsd: "0.0123",
+                l1FeeUsd: "0.0004",
+                routeID: "route-sale",
+                checksum: "abc",
+                timestamp: 1_700_000_000,
+                route: [],
+            },
+        },
+    };
+
+    it("inverts the price arithmetic, instead of reporting tokens per dollar as a price", () => {
+        // 0.005 tokens for 1 USDC is 200 USDC a token. Using priceOf here would say 0.000000005, which
+        // is wrong by eleven orders of magnitude and wrong in the direction that looks like a windfall.
+        const q = parseKyberRoute(saleResponse, { tokenIn: NVDA, tokenOut: BASE_USDC, amountIn: 5_000_000_000_000_000n });
+        expect(priceOfSale(q, 18)).toBe(200_000_000n);
+        expect(priceOf(q, 18)).not.toBe(200_000_000n);
+    });
+
+    it("asks the aggregator for the token-to-USDC route", async () => {
+        let url = "";
+        const fetchImpl = (async (u: string) => {
+            url = u;
+            return new Response(JSON.stringify(saleResponse), { status: 200 });
+        }) as unknown as typeof fetch;
+        await fetchRoute({ tokenIn: NVDA, tokenOut: BASE_USDC, amountIn: 5_000_000_000_000_000n, slippageBps: 100 }, fetchImpl);
+        const params = new URL(url).searchParams;
+        expect(params.get("tokenIn")).toBe(NVDA);
+        expect(params.get("tokenOut")).toBe(BASE_USDC);
+        expect(params.get("amountIn")).toBe("5000000000000000");
+    });
+
+    it("sizes a sale by its units and prices it per token", async () => {
+        const fetchImpl = (async () => new Response(JSON.stringify(saleResponse), { status: 200 })) as unknown as typeof fetch;
+        const r = await quoteLegs(
+            [{ asset: NVDA, usdcIn: 1_000_000n, side: "sell", unitsIn: 5_000_000_000_000_000n }],
+            new Map([[NVDA, 18]]),
+            { slippageBps: 100, fetchImpl, sleep: async () => {} },
+        );
+        expect(r.prices.get(NVDA)).toBe(200_000_000n);
+        expect(r.errors.size).toBe(0);
+    });
+
+    it("refuses to quote a buy and a sale of one token at once", () => {
+        // the maps are keyed by token, so the second would overwrite the first and price a sale at what
+        // a buy would have cost
+        const fetchImpl = (async () => new Response(JSON.stringify(saleResponse), { status: 200 })) as unknown as typeof fetch;
+        return expect(
+            quoteLegs(
+                [
+                    { asset: NVDA, usdcIn: 1_000_000n },
+                    { asset: NVDA, usdcIn: 1_000_000n, side: "sell", unitsIn: 5_000_000_000_000_000n },
+                ],
+                new Map([[NVDA, 18]]),
+                { slippageBps: 100, fetchImpl, sleep: async () => {} },
+            ),
+        ).rejects.toThrow(/one direction per token/);
+    });
+
+    it("records a sale with no units as an error rather than asking for a route of nothing", async () => {
+        const fetchImpl = (async () => new Response(JSON.stringify(saleResponse), { status: 200 })) as unknown as typeof fetch;
+        const r = await quoteLegs(
+            [{ asset: NVDA, usdcIn: 1_000_000n, side: "sell" }],
+            new Map([[NVDA, 18]]),
+            { slippageBps: 100, fetchImpl, sleep: async () => {} },
+        );
+        expect(r.errors.get(NVDA)).toBe("no units to sell");
     });
 });

@@ -1,4 +1,4 @@
-import { isQuoteFresh, priceOf, type Quote } from "./quote";
+import { isQuoteFresh, priceOf, priceOfSale, type Quote } from "./quote";
 import { navStatus, tradability, type TokenRecord } from "./tokens";
 import type { Leg } from "./policy";
 
@@ -87,7 +87,12 @@ export function preTradeChecks(i: PreTradeInput): Gate[] {
             const mins = Math.round((i.now.getTime() - Date.parse(token.navUpdatedAt!)) / 60_000);
             add("nav", "warn", `NAV is ${mins} min old, deviation check skipped`);
         } else {
-            const px = Number(priceOf(quote, token.decimals)) / 1e6;
+            // A sale's quote runs token in, USDC out, so the price inverts with it. Reading a sale quote
+            // with the buy formula gives tokens per dollar, which against NAV looks like a deviation of
+            // thousands of basis points and blocks every exit in a market that has not moved at all.
+            const px = Number(
+                leg.side === "sell" ? priceOfSale(quote, token.decimals) : priceOf(quote, token.decimals),
+            ) / 1e6;
             const dev = Math.round(Math.abs(px / token.navPrice! - 1) * 10_000);
             if (dev > limits.maxNavDeviationBps) {
                 add("nav", "block", `quote is ${dev} bps from NAV (limit ${limits.maxNavDeviationBps} bps)`);

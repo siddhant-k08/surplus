@@ -104,3 +104,45 @@ describe("pre-trade gates", () => {
         expect(g.filter((x) => x.name === "quote").map((x) => x.symbol)).toEqual(["NVDAc", "MSFTc"]);
     });
 });
+
+describe("the NAV gate on a sale", () => {
+    // The same 200 USDC a token, quoted the other way round: 0.005 tokens in, 1 USDC out.
+    const saleQuote = (address: string): Quote => ({
+        tokenIn: address, tokenOut: BASE_USDC, amountIn: 5_000_000_000_000_000n, amountOut: 1_000_000n,
+        amountInUsd: 0.999, amountOutUsd: 1, gasUsd: 0.0035, l1FeeUsd: null,
+        routerAddress: "0x6131b5fae19ea4f9d964eac0408e4408b66337b5", routeId: "r", timestamp: nowSec - 3,
+        routeSummary: {},
+    });
+    const sellLeg = (asset: string, symbol: string): Leg => ({
+        asset, symbol, theme: "t", usdcIn: u("0.2"), maxSlippageBps: 100,
+        side: "sell", unitsIn: 5_000_000_000_000_000n,
+    });
+
+    it("reads a sale quote the right way round against NAV", () => {
+        // Read with the buy formula this price comes out as 0.000005 against a NAV of 200, which is a
+        // deviation of nearly 10000 bps and would block every exit in a market that has not moved.
+        const gates = preTradeChecks({
+            legs: [sellLeg(NVDA, "NVDAc")],
+            quotes: new Map([[NVDA, saleQuote(NVDA)]]),
+            tokens: new Map([[NVDA, token(NVDA, "NVDAc")]]),
+            liquidity: new Map([[NVDA, 5]]),
+            now: NOW,
+        });
+        const nav = gates.find((g) => g.name === "nav")!;
+        expect(nav.level).toBe("ok");
+        expect(nav.detail).toBe("0 bps from NAV");
+        expect(blockReasons(gates)).toEqual([]);
+    });
+
+    it("still blocks a sale whose price really has left NAV", () => {
+        const far = { ...saleQuote(NVDA), amountOut: 500_000n }; // 100 USDC a token against a NAV of 200
+        const gates = preTradeChecks({
+            legs: [sellLeg(NVDA, "NVDAc")],
+            quotes: new Map([[NVDA, far]]),
+            tokens: new Map([[NVDA, token(NVDA, "NVDAc")]]),
+            liquidity: new Map([[NVDA, 5]]),
+            now: NOW,
+        });
+        expect(blockReasons(gates).join(" ")).toMatch(/5000 bps from NAV/);
+    });
+});

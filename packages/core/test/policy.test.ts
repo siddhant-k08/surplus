@@ -81,3 +81,61 @@ describe("policy", () => {
         expect(failedRules(p)).toContain("positiveAmounts");
     });
 });
+
+describe("a proposal that sells", () => {
+    const ONE = 10n ** 18n;
+    const sell = (over: Partial<Leg> = {}): Leg => ({
+        asset: NVDA, symbol: "NVDAc", theme: "ai-compute", usdcIn: u("0.30"),
+        maxSlippageBps: 100, side: "sell", unitsIn: ONE, ...over,
+    });
+    const check = (legs: Leg[], heldUnits: Map<string, bigint>, terms = baseTerms()) =>
+        checkProposal({ investable: 0n, legs, heldUnits }, terms);
+    const named = (rs: ReturnType<typeof checkProposal>, rule: string) => rs.find((r) => r.rule === rule)!;
+
+    it("lets the agent sell a token the owner has since made ineligible", () => {
+        // The eligible list says what may be bought. If it also gated sales it would be a trap, locking
+        // the agent into exactly the position the owner just decided against.
+        const terms = baseTerms({ eligible: [MSFT, META, AMZN] });
+        const rs = check([sell()], new Map([[NVDA, ONE]]), terms);
+        expect(named(rs, "eligibleOnly").ok).toBe(true);
+        expect(allPass(rs)).toBe(true);
+    });
+
+    it("still refuses to buy a token that is not eligible", () => {
+        const terms = baseTerms({ eligible: [MSFT, META, AMZN] });
+        const buy: Leg = { asset: NVDA, symbol: "NVDAc", theme: "ai-compute", usdcIn: u("0.30"), maxSlippageBps: 100 };
+        expect(named(checkProposal({ investable: u("1.00"), legs: [buy] }, terms), "eligibleOnly").ok).toBe(false);
+    });
+
+    it("refuses to sell more units than are held", () => {
+        const rs = check([sell({ unitsIn: 3n * ONE })], new Map([[NVDA, ONE]]));
+        expect(named(rs, "sellOnlyWhatIsHeld").ok).toBe(false);
+        expect(named(rs, "sellOnlyWhatIsHeld").detail).toMatch(/only 1000000000000000000 are held/);
+    });
+
+    it("counts two sales of the same token together against what is held", () => {
+        // each leg on its own fits; together they are short, which is the case a per-leg check would miss
+        const legs = [sell({ unitsIn: ONE }), sell({ theme: "platform-giants", unitsIn: ONE })];
+        expect(named(check(legs, new Map([[NVDA, ONE]])), "sellOnlyWhatIsHeld").ok).toBe(false);
+        expect(named(check(legs, new Map([[NVDA, 2n * ONE]])), "sellOnlyWhatIsHeld").ok).toBe(true);
+    });
+
+    it("refuses a sale with no unit amount at all", () => {
+        const rs = check([sell({ unitsIn: undefined })], new Map([[NVDA, ONE]]));
+        expect(named(rs, "sellOnlyWhatIsHeld").ok).toBe(false);
+    });
+
+    it("does not need investable surplus, because a sale brings money in", () => {
+        const rs = check([sell()], new Map([[NVDA, ONE]]));
+        expect(named(rs, "totalWithinInvestable").ok).toBe(true);
+        expect(named(rs, "maxCompany").ok).toBe(true);
+        expect(named(rs, "themeTargets").ok).toBe(true);
+    });
+
+    it("still holds a sale to the mandate's trade size and slippage", () => {
+        const small = check([sell({ usdcIn: u("0.01") })], new Map([[NVDA, ONE]]));
+        expect(named(small, "minTrade").ok).toBe(false);
+        const loose = check([sell({ maxSlippageBps: 900 })], new Map([[NVDA, ONE]]));
+        expect(named(loose, "slippage").ok).toBe(false);
+    });
+});

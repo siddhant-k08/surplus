@@ -15,7 +15,7 @@ const MODES: readonly Mode[] = ["sim", "testnet", "mainnet"];
 const TYPES: readonly EntryType[] = [
     "OPENING_BALANCE", "PAYMENT_RECEIVED", "PAYMENT_FAILED", "COST_ACCRUED", "RESERVE_TOPUP",
     "SURPLUS_ALLOCATED", "PROPOSAL_CREATED", "REFUSAL", "APPROVAL_RECORDED", "PURCHASE_SETTLED",
-    "RECONCILIATION",
+    "SALE_SETTLED", "RECONCILIATION",
 ];
 
 /** One ledger entry as it appears on disk. */
@@ -31,6 +31,8 @@ export function serializeTx(tx: LedgerTx): string {
         ...(tx.idempotencyKey !== undefined && { idempotencyKey: tx.idempotencyKey }),
         ...(tx.briefId !== undefined && { briefId: tx.briefId }),
         ...(tx.theme !== undefined && { theme: tx.theme }),
+        // a decimal string, for the same reason amounts are: a token quantity overflows a JSON number
+        ...(tx.units !== undefined && { units: tx.units.toString() }),
     });
 }
 
@@ -66,6 +68,16 @@ export function parseTxLine(line: string, where: string): LedgerTx {
         return { account: o.account as AccountId, amount: BigInt(o.amount) };
     });
 
+    // Units are read back the same way money is: a shape that cannot be trusted stops the process. A
+    // silently dropped quantity would make a position look free and a sale look like pure profit.
+    let units: bigint | undefined;
+    if (r.units !== undefined) {
+        if (typeof r.units !== "string" || !/^-?\d+$/.test(r.units)) {
+            throw new Error(`${where}: units must be a decimal string of token minor units, got ${JSON.stringify(r.units)}`);
+        }
+        units = BigInt(r.units);
+    }
+
     return {
         id: r.id,
         at: r.at,
@@ -77,6 +89,7 @@ export function parseTxLine(line: string, where: string): LedgerTx {
         ...(typeof r.idempotencyKey === "string" && { idempotencyKey: r.idempotencyKey }),
         ...(typeof r.briefId === "string" && { briefId: r.briefId }),
         ...(typeof r.theme === "string" && { theme: r.theme }),
+        ...(units !== undefined && { units }),
     };
 }
 

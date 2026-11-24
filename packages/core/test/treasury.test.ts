@@ -5,6 +5,8 @@ import { MandateStore } from "../src/mandate";
 import { allocate } from "../src/allocator";
 import { reconcileInternal } from "../src/reconcile";
 import { parseUsdc as u } from "../src/money";
+import { positionsFromLedger } from "../src/positions";
+import { proposalHash } from "../src/approval";
 import type { Leg } from "../src/policy";
 import { baseTerms, NVDA, MSFT, META, AMZN } from "./fixtures";
 
@@ -471,5 +473,146 @@ describe("booking what the chain actually returned", () => {
         if (!result.ok) return;
         expect(result.fills.length).toBe(2);
         expect(tr.state("p1")).toBe("SETTLED");
+    });
+});
+
+
+describe("selling", () => {
+    const ONE = 10n ** 18n;
+
+    /** A treasury holding one position: 0.30 USDC of NVDAc, bought at a price of 190 USDC a token. */
+    const BOUGHT = u("0.30");
+    function withPosition() {
+        const { tr, clock, mandates } = setup();
+        const legs: Leg[] = [{ asset: NVDA, symbol: "NVDAc", theme: "ai-compute", usdcIn: BOUGHT, maxSlippageBps: 100 }];
+        expect(tr.createProposal({ id: "buy", legs, quotedPrices: quoted, briefId: "b1" })).toEqual({ ok: true });
+        clock.advance(20);
+        expect(tr.approve("buy", "owner").ok).toBe(true);
+        expect(tr.execute("buy", { freshPrices: quoted, decimals }).ok).toBe(true);
+        return { tr, clock, mandates };
+    }
+
+    const sellLeg = (units: bigint, usdcIn: bigint): Leg[] => [{
+        asset: NVDA, symbol: "NVDAc", theme: "ai-compute", usdcIn,
+        maxSlippageBps: 100, side: "sell", unitsIn: units,
+    }];
+
+    it("records the units a buy received, not only what it cost", () => {
+        const { tr } = withPosition();
+        const p = positionsFromLedger(tr.ledger.all()).get(NVDA)!;
+        expect(p.costUsdcIn).toBe(BOUGHT);
+        // 0.30 USDC at 190 USDC a token
+        expect(p.units).toBe((BOUGHT * ONE) / 190_000_000n);
+        expect(tr.ledger.all().at(-1)!.units).toBe(p.units);
+    });
+
+    it("closes a position exactly, and books the gain where it can be seen", () => {
+        const { tr, clock } = withPosition();
+        const p = positionsFromLedger(tr.ledger.all()).get(NVDA)!;
+        // the same units, now worth 220 USDC each instead of 190
+        const higher = new Map([[NVDA, 220_000_000n]]);
+        const worth = (p.units * 220_000_000n) / ONE;
+
+        tr.createProposal({ id: "exit", legs: sellLeg(p.units, worth), quotedPrices: higher, briefId: "b1" });
+        clock.advance(20);
+        expect(tr.approve("exit", "owner").ok).toBe(true);
+        const done = tr.execute("exit", { freshPrices: higher, decimals });
+        expect(done.ok).toBe(true);
+
+        expect(tr.ledger.balance(`positions.${NVDA}`)).toBe(0n);
+        expect(tr.ledger.balance("pnl.realized")).toBe(-(worth - BOUGHT));
+        expect(tr.ledger.balance("surplus.investable")).toBe(u("0.95") - BOUGHT + worth);
+        expect(reconcileInternal(tr.ledger).ok).toBe(true);
+        expect(positionsFromLedger(tr.ledger.all()).get(NVDA)!.realizedUsdc).toBe(worth - BOUGHT);
+    });
+
+    it("books a loss as a loss and still balances", () => {
+        const { tr, clock } = withPosition();
+        const p = positionsFromLedger(tr.ledger.all()).get(NVDA)!;
+        const lower = new Map([[NVDA, 150_000_000n]]);
+        const worth = (p.units * 150_000_000n) / ONE;
+
+        tr.createProposal({ id: "exit", legs: sellLeg(p.units, worth), quotedPrices: lower, briefId: "b1" });
+        clock.advance(20);
+        tr.approve("exit", "owner");
+        expect(tr.execute("exit", { freshPrices: lower, decimals }).ok).toBe(true);
+
+        expect(tr.ledger.balance("pnl.realized")).toBeGreaterThan(0n);
+        expect(tr.ledger.balance(`positions.${NVDA}`)).toBe(0n);
+        expect(reconcileInternal(tr.ledger).ok).toBe(true);
+    });
+
+    it("takes a partial exit's cost out in proportion and leaves the rest held", () => {
+        const { tr, clock } = withPosition();
+        const before = positionsFromLedger(tr.ledger.all()).get(NVDA)!;
+        const half = before.units / 2n;
+        const worth = (half * 190_000_000n) / ONE;
+
+        tr.createProposal({ id: "half", legs: sellLeg(half, worth), quotedPrices: quoted, briefId: "b1" });
+        clock.advance(20);
+        tr.approve("half", "owner");
+        expect(tr.execute("half", { freshPrices: quoted, decimals }).ok).toBe(true);
+
+        const after = positionsFromLedger(tr.ledger.all()).get(NVDA)!;
+        expect(after.units).toBe(before.units - half);
+        // sold at what it was bought for, so roughly half the basis left and almost nothing realized
+        expect(after.costUsdcIn).toBe(before.costUsdcIn - before.costUsdcIn / 2n);
+        expect(after.realizedUsdc).toBeLessThanOrEqual(1n);
+        expect(reconcileInternal(tr.ledger).ok).toBe(true);
+    });
+
+    it("refuses to sell units the books do not hold", () => {
+        const { tr, clock } = withPosition();
+        const p = positionsFromLedger(tr.ledger.all()).get(NVDA)!;
+        const tooMany = p.units * 2n;
+        const legs = sellLeg(tooMany, u("1.90"));
+        // the policy check catches it before a proposal is ever created
+        const made = tr.createProposal({ id: "short", legs, quotedPrices: quoted, briefId: "b1" });
+        expect(made.ok).toBe(false);
+        if (!made.ok) expect(made.reasons.join(" ")).toMatch(/only .* are held/);
+    });
+
+    it("does not require investable surplus to cover a sale", () => {
+        // every cent is in the position after the buy, so a sale is the only way back to investable
+        const { tr, clock } = withPosition();
+        expect(tr.ledger.balance("surplus.investable")).toBe(u("0.95") - BOUGHT);
+        const p = positionsFromLedger(tr.ledger.all()).get(NVDA)!;
+        const worth = (p.units * 190_000_000n) / ONE;
+
+        tr.createProposal({ id: "exit", legs: sellLeg(p.units, worth), quotedPrices: quoted, briefId: "b1" });
+        clock.advance(20);
+        tr.approve("exit", "owner");
+        const done = tr.execute("exit", { freshPrices: quoted, decimals });
+        expect(done.ok).toBe(true);
+    });
+
+    it("books a real sale from what the swap returned, not from the quote", () => {
+        const { tr, clock } = withPosition();
+        const p = positionsFromLedger(tr.ledger.all()).get(NVDA)!;
+        const quotedWorth = (p.units * 190_000_000n) / ONE;
+
+        tr.createProposal({ id: "exit", legs: sellLeg(p.units, quotedWorth), quotedPrices: quoted, briefId: "b1" });
+        clock.advance(20);
+        tr.approve("exit", "owner");
+        // the swap actually returned less than the quote said it would
+        const actually = quotedWorth - 1000n;
+        const done = tr.execute("exit", {
+            freshPrices: quoted, decimals,
+            realized: new Map([[0, { quantity: actually, transaction: "0xsale" }]]),
+        });
+        expect(done.ok).toBe(true);
+        expect(tr.ledger.balance("surplus.investable")).toBe(u("0.95") - BOUGHT + actually);
+        expect(tr.ledger.all().at(-1)!.txHash).toBe("0xsale");
+        expect(reconcileInternal(tr.ledger).ok).toBe(true);
+    });
+
+    it("leaves a buy proposal hashing exactly as it did before sales existed", () => {
+        // `side` and `unitsIn` are absent on a buy and canonicalJson drops undefined keys, so an approval
+        // signed against a proposal built by the old code still verifies against the new.
+        const legs: Leg[] = [{ asset: NVDA, symbol: "NVDAc", theme: "ai-compute", usdcIn: u("0.50"), maxSlippageBps: 100 }];
+        const proposal = { investable: u("1.00"), legs };
+        expect(proposalHash(proposal, "0xmandate")).toBe(
+            proposalHash({ investable: u("1.00"), legs: [{ ...legs[0]!, side: undefined, unitsIn: undefined }] }, "0xmandate"),
+        );
     });
 });

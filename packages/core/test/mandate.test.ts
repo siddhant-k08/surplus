@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MandateStore, canonicalJson, diffTerms } from "../src/mandate";
+import { MandateStore, canonicalJson, diffTerms, validateTerms } from "../src/mandate";
 import { parseUsdc as u } from "../src/money";
 import { baseTerms, NVDA, MSFT } from "./fixtures";
 
@@ -49,5 +49,33 @@ describe("mandate", () => {
         expect(canonicalJson({ b: 1, a: [2n, { d: 1, c: 2 }] })).toBe(
             canonicalJson({ a: [2n, { c: 2, d: 1 }], b: 1 }),
         );
+    });
+});
+
+describe("exit terms", () => {
+    it("leaves a mandate written before them hashing exactly as it did", () => {
+        // canonicalJson drops undefined keys, so a stored hash chain still verifies after the sell path
+        const before = baseTerms();
+        const after = { ...baseTerms(), takeProfitBps: undefined, stopLossBps: undefined };
+        expect(canonicalJson(before)).toBe(canonicalJson(after));
+    });
+
+    it("changes the hash once an owner actually sets one", () => {
+        expect(canonicalJson(baseTerms({ takeProfitBps: 2000 }))).not.toBe(canonicalJson(baseTerms()));
+    });
+
+    it("refuses an exit that would fire on any movement at all", () => {
+        // 0 bps would sell the moment a price ticked, which is a fee-paying machine, not a strategy
+        expect(() => validateTerms(baseTerms({ takeProfitBps: 0 }))).toThrow(/takeProfitBps/);
+        expect(() => validateTerms(baseTerms({ stopLossBps: 0 }))).toThrow(/stopLossBps/);
+    });
+
+    it("refuses a stop loss of more than everything", () => {
+        expect(() => validateTerms(baseTerms({ stopLossBps: 10_000 }))).toThrow(/cannot lose more than all of it/);
+        expect(() => validateTerms(baseTerms({ stopLossBps: 9_999 }))).not.toThrow();
+    });
+
+    it("accepts a mandate with both exits set", () => {
+        expect(() => validateTerms(baseTerms({ takeProfitBps: 2500, stopLossBps: 1500 }))).not.toThrow();
     });
 });

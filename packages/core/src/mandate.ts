@@ -27,6 +27,20 @@ export interface MandateTerms {
      * the constraint when an owner sets it.
      */
     readonly investOnlyWhenAhead?: boolean;
+    /**
+     * Sell a position once it is up this many basis points on what was paid for it.
+     *
+     * The agent could buy and never sell, which is not a strategy, it is the absence of one. This is the
+     * owner stating the exit in the same document that states the entry, so the agent never decides for
+     * itself when to take money off the table.
+     *
+     * Optional, like `investOnlyWhenAhead` and for the same reason: `canonicalJson` drops undefined
+     * keys, so a mandate written before the sell path existed hashes exactly as it did and its stored
+     * chain still verifies. With neither exit term set the agent proposes no sales at all.
+     */
+    readonly takeProfitBps?: number;
+    /** Sell a position once it is down this many basis points on what was paid for it. */
+    readonly stopLossBps?: number;
 }
 
 export interface MandateVersion {
@@ -77,6 +91,14 @@ export function validateTerms(t: MandateTerms): void {
     if (t.reserveTargetUsdc < 0n) throw new Error("reserveTargetUsdc must not be negative");
     if (!Number.isInteger(t.approvalExpirySeconds) || t.approvalExpirySeconds <= 0) {
         throw new Error("approvalExpirySeconds must be a positive integer");
+    }
+    // An exit at 0 bps would sell the moment a position moved at all, which is a fee-paying machine
+    // rather than a strategy, so both floors are 1. A stop loss of 10000 bps is a position worth
+    // nothing, which no quote can reach, so it is capped below that.
+    if (t.takeProfitBps !== undefined) checkBps("takeProfitBps", t.takeProfitBps, 1);
+    if (t.stopLossBps !== undefined) {
+        checkBps("stopLossBps", t.stopLossBps, 1);
+        if (t.stopLossBps >= 10_000) throw new Error("stopLossBps must be below 10000: a position cannot lose more than all of it");
     }
 }
 

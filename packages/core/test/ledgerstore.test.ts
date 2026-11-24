@@ -208,3 +208,51 @@ describe("what the ledger proves was earned", () => {
         expect(realizedSales(await store.load())[0]!.briefId).toBe("brief-1");
     });
 });
+
+
+describe("units on an entry", () => {
+    it("carries a quantity out and back as an exact integer", () => {
+        const l = new Ledger();
+        const big = 123_456_789_012_345_678_901n; // larger than a JSON number can hold exactly
+        l.post({
+            type: "PURCHASE_SETTLED", mode: "sim", at: new Date("2026-11-25T00:00:00Z"), units: big,
+            lines: [{ account: "positions.0xabc", amount: 100n }, { account: "surplus.investable", amount: -100n }],
+        });
+        const back = parseTxLine(serializeTx(l.all()[0]!), "line 1");
+        expect(back.units).toBe(big);
+        expect(JSON.parse(serializeTx(l.all()[0]!)).units).toBe("123456789012345678901");
+    });
+
+    it("carries the negative units of a sale", () => {
+        const l = new Ledger();
+        l.post({
+            type: "SALE_SETTLED", mode: "sim", at: new Date("2026-11-25T00:00:00Z"), units: -500n,
+            lines: [
+                { account: "positions.0xabc", amount: -100n },
+                { account: "surplus.investable", amount: 130n },
+                { account: "pnl.realized", amount: -30n },
+            ],
+        });
+        expect(parseTxLine(serializeTx(l.all()[0]!), "line 1").units).toBe(-500n);
+    });
+
+    it("refuses a quantity that is not a decimal string rather than dropping it", () => {
+        // a dropped quantity would make a position look free and the sale of it look like pure profit
+        const line = JSON.stringify({
+            id: 1, at: "2026-11-25T00:00:00.000Z", type: "PURCHASE_SETTLED", mode: "sim",
+            lines: [{ account: "positions.0xabc", amount: "100" }], units: 12.5,
+        });
+        expect(() => parseTxLine(line, "line 1")).toThrow(/units must be a decimal string/);
+    });
+
+    it("leaves an entry with no units alone", () => {
+        const l = new Ledger();
+        l.post({
+            type: "PAYMENT_RECEIVED", mode: "sim", at: new Date("2026-11-25T00:00:00Z"),
+            lines: [{ account: "cash.operating", amount: 100n }, { account: "revenue.research", amount: -100n }],
+        });
+        const text = serializeTx(l.all()[0]!);
+        expect(text).not.toContain("units");
+        expect(parseTxLine(text, "line 1").units).toBeUndefined();
+    });
+});
