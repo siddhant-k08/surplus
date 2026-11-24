@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Chip, Figures, Footer, Led, Note, OpenApp, SiteHeader, Spine } from "./Chrome";
 import { MaskedLine, Reveal, motion, riseItem, stagger } from "./motion";
 import { get } from "./api";
+import { BackingBand } from "./Backing";
 
 interface ThemeRow {
     id: string;
@@ -82,6 +83,8 @@ export function Themes() {
                         { k: "Briefs behind them", v: load.k === "ready" ? String(load.briefs) : "—" },
                     ]}
                 />
+
+                <BackingBand />
 
                 <section className="border-b border-line py-[clamp(2.5rem,5vw,3.5rem)]">
                     <div className="shell band">

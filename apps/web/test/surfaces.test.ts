@@ -8,7 +8,8 @@ import {
 import { termsFromDraft } from "../src/MandatePanel";
 import { evidenceCount, count } from "../src/Evidence";
 import { route, movedTo } from "../src/App";
-import type { MandateTerms, Proposal, SyncResult, BriefClaim } from "../src/api";
+import { assetStake, forBrief, sharePct, themeStake, verb } from "../src/Backing";
+import type { MandateTerms, Proposal, SyncResult, BriefClaim, Backing } from "../src/api";
 
 const TX = "0x" + "cd".repeat(32);
 
@@ -286,5 +287,84 @@ describe("routing", () => {
     it("answers anything else with the page that offers a way out", () => {
         expect(route("/invest").k).toBe("missing");
         expect(route("/app/portfolio/extra").k).toBe("missing");
+    });
+});
+
+
+/** What the public route returns, with one token bought under two themes, as the real one does. */
+const backed: Backing = {
+    attributedUsdcMinor: "490296",
+    totalUsdcMinor: "966682",
+    unattributed: { usdcMinor: "476386", fills: 8 },
+    briefs: [
+        {
+            briefId: "brief-2026-11-21T19-57-41-888Z",
+            usdcMinor: "490296",
+            mode: "sim",
+            simulated: true,
+            fills: 8,
+            onchainFills: 0,
+            firstAt: "2026-11-24T17:57:50.068Z",
+            lastAt: "2026-11-24T17:57:50.068Z",
+            themes: [
+                {
+                    theme: "ai-compute",
+                    usdcMinor: "303242",
+                    assets: [
+                        { asset: "0xaaa", symbol: "GOOGLc", usdcMinor: "67387", fills: 1, onchainFills: 0, transactions: [] },
+                        { asset: "0xbbb", symbol: "METAc", usdcMinor: "55135", fills: 1, onchainFills: 0, transactions: [] },
+                    ],
+                },
+                {
+                    theme: "platform-giants",
+                    usdcMinor: "187054",
+                    assets: [
+                        { asset: "0xbbb", symbol: "METAc", usdcMinor: "67869", fills: 1, onchainFills: 0, transactions: [] },
+                    ],
+                },
+            ],
+        },
+    ],
+};
+
+describe("what the agent put behind a brief", () => {
+    it("finds the brief being read, and nothing for one it has not acted on", () => {
+        expect(forBrief(backed, "brief-2026-11-21T19-57-41-888Z")?.usdcMinor).toBe("490296");
+        expect(forBrief(backed, "brief-nobody-bought")).toBeNull();
+        expect(forBrief(null, "brief-2026-11-21T19-57-41-888Z")).toBeNull();
+    });
+
+    it("reads one theme's share, and null for a theme that got nothing", () => {
+        const brief = forBrief(backed, "brief-2026-11-21T19-57-41-888Z");
+        expect(themeStake(brief, "ai-compute")).toBe("303242");
+        expect(themeStake(brief, "longevity-biotech")).toBeNull();
+        expect(themeStake(null, "ai-compute")).toBeNull();
+    });
+
+    it("keeps one company's two themes apart", () => {
+        // METAc was bought under both. Showing the same figure in both places, or the sum in one, would
+        // misreport which research argument the money was actually behind.
+        const brief = forBrief(backed, "brief-2026-11-21T19-57-41-888Z");
+        expect(assetStake(brief, "ai-compute", "METAc")).toBe("55135");
+        expect(assetStake(brief, "platform-giants", "METAc")).toBe("67869");
+        expect(assetStake(brief, "ai-compute", "GOOGLc")).toBe("67387");
+        // a company the brief names but the mandate's caps left out gets no column, not a zero
+        expect(assetStake(brief, "ai-compute", "TSLAc")).toBeNull();
+        expect(assetStake(brief, "platform-giants", "GOOGLc")).toBeNull();
+    });
+
+    it("sizes a bar by share, and never divides by zero", () => {
+        expect(sharePct("303242", "490296")).toBeCloseTo(61.84, 1);
+        expect(sharePct("187054", "490296")).toBeCloseTo(38.15, 1);
+        expect(sharePct("1", "0")).toBe(0);
+        expect(sharePct("0", "0")).toBe(0);
+        // the two themes account for the whole, give or take the rounding a bar cannot show anyway
+        expect(sharePct("303242", "490296") + sharePct("187054", "490296")).toBeCloseTo(100, 0);
+    });
+
+    it("says committed while fills are simulated, and holds only once they are not", () => {
+        // The one sentence on the site that could be false. A simulated fill bought nothing.
+        expect(verb(true)).toBe("committed");
+        expect(verb(false)).toBe("holds");
     });
 });

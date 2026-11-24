@@ -326,11 +326,18 @@ const RAIL = [
     ["Execute", "simulated"],
 ] as const;
 
+/*
+ * Illustrative rows, in the shape and the amounts the real book now writes.
+ *
+ * They were written when a brief sold for $0.01 and were left behind by the price change, which made
+ * the landing page quietly advertise a tenth of what the endpoint charges. An illustration may be an
+ * illustration; it may not contradict the thing it illustrates.
+ */
 const ARRIVALS = [
-    ["PAYMENT", "brief-2026-11-21 · 0x7a3f…11ce", "+0.010000"],
-    ["PAYMENT", "brief-2026-11-21 · 0x9b20…4dd1", "+0.010000"],
-    ["RESERVE", "topup · target 0.500000", "+0.010000"],
-    ["REFUSAL", "below_minimum · 0.012 < 0.050", "0.000000"],
+    ["PAYMENT", "brief-2026-11-21 · 0x7a3f…11ce", "+0.250000"],
+    ["FILL", "METAc · platform-giants (simulated)", "-0.067869"],
+    ["RESERVE", "topup · target 0.500000", "+0.250000"],
+    ["REFUSAL", "below_minimum · 0.046 < 0.050", "0.000000"],
 ] as const;
 
 type Row = { id: number; a: string; b: string; c: string };
@@ -340,9 +347,9 @@ export function TreasuryStrip() {
     const ref = useRef<HTMLDivElement>(null);
     const live = useInView(ref, { amount: 0.3 });
     const [rows, setRows] = useState<Row[]>([
-        { id: 0, a: "PAYMENT", b: "brief-2026-11-21 · 0xcd71…bd93", c: "+0.010000" },
+        { id: 0, a: "PAYMENT", b: "brief-2026-11-21 · 0xcd71…bd93", c: "+0.250000" },
         { id: 1, a: "COST", b: "llm · gemini-3.1-flash-lite", c: "-0.021201" },
-        { id: 2, a: "RESERVE", b: "topup · target 0.500000", c: "+0.030000" },
+        { id: 2, a: "RESERVE", b: "topup · target 0.500000", c: "+0.228799" },
     ]);
 
     // The book really does keep growing, so the panel does too. Only while it is on screen: a timer

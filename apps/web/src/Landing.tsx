@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import { Button, Chip, Figures, Footer, Led, OpenApp, SiteHeader } from "./Chrome";
 import { Band, BriefPreview, HowItWorks, TreasuryStrip } from "./Sections";
+import { BackingBand } from "./Backing";
 import { MaskedLine, Reveal, motion, riseItem, stagger, useSpotlight } from "./motion";
 import { formatUsdc, get } from "./api";
 import { networkName } from "./explorer";
@@ -110,6 +111,9 @@ export function Landing() {
                 <BriefPreview />
 
                 <TreasuryStrip />
+
+                {/* The treasury band is the control; this is the result. Real numbers, from a public route. */}
+                <BackingBand />
 
                 <Band
                     id="what-you-can-buy"

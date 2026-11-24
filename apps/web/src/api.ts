@@ -284,6 +284,51 @@ export interface PaidReceipt {
     model: string;
 }
 
+/**
+ * What the agent has put behind its own research. Public, and the one claim a brief cannot prove alone.
+ *
+ * `simulated` is not decoration. While it is true this describes money the agent decided to spend
+ * rather than money that moved, and every surface showing these numbers has to say so.
+ */
+export interface BackedAsset {
+    asset: string;
+    /** null for a token outside Base's registry, which should never have been bought. */
+    symbol: string | null;
+    usdcMinor: string;
+    fills: number;
+    onchainFills: number;
+    transactions: string[];
+}
+
+export interface BackedTheme {
+    theme: string;
+    usdcMinor: string;
+    assets: BackedAsset[];
+}
+
+export interface BriefBacking {
+    briefId: string;
+    usdcMinor: string;
+    mode: string;
+    simulated: boolean;
+    fills: number;
+    onchainFills: number;
+    firstAt: string;
+    lastAt: string;
+    themes: BackedTheme[];
+}
+
+export interface Backing {
+    /** Committed on the strength of a brief. The headline, and smaller than `totalUsdcMinor`. */
+    attributedUsdcMinor: string;
+    totalUsdcMinor: string;
+    /** Positions no brief can be shown to have justified. Shown, never folded into the headline. */
+    unattributed: { usdcMinor: string; fills: number };
+    briefs: BriefBacking[];
+}
+
+export const backing = (): Promise<Backing> => get<Backing>("/catalogue/backing");
+
 export interface OwnerBrief {
     id: string;
     createdAt: string;

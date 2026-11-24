@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError, formatUsdc, get, type PaidReceipt } from "./api";
 import { EvidenceRow, SourceLink, WhatAQuoteProves, count } from "./Evidence";
 import { Button, Chip, Footer, Led, SiteHeader } from "./Chrome";
+import { SimulatedNote, ThemeStake, assetStake, forBrief, useBacking, verb } from "./Backing";
 import { MaskedLine, Reveal, motion, riseItem, stagger } from "./motion";
 import { explorerTx, networkName, shortHash } from "./explorer";
 
@@ -15,6 +16,9 @@ import { explorerTx, networkName, shortHash } from "./explorer";
 export function Receipt({ id }: { id: string }) {
     const [paid, setPaid] = useState<PaidReceipt | null>(null);
     const [error, setError] = useState<string | null>(null);
+    // A second, public read: what the agent bought on the strength of this brief. It is deliberately
+    // not part of the paid payload, so one route stays the single source of that claim everywhere.
+    const backing = useBacking();
 
     useEffect(() => {
         // `get` retries a cold start; a 404 is an answer and is not retried
@@ -69,6 +73,7 @@ export function Receipt({ id }: { id: string }) {
     const link = explorerTx(paid.receipt.network, paid.receipt.transaction);
     const chain = networkName(paid.receipt.network);
     const facts = paid.brief.themes.reduce((a, t) => a + t.claims.length, 0);
+    const backed = forBrief(backing.k === "ready" ? backing.backing : null, paid.brief.id);
 
     return (
         <Shell>
@@ -150,6 +155,7 @@ export function Receipt({ id }: { id: string }) {
                                             </span>
                                         </div>
                                     </Reveal>
+                                    <ThemeStake brief={backed} themeId={theme.themeId} />
                                     {theme.gap ? (
                                         <p className="measure">
                                             {theme.gapReason ?? "No company cleared the evidence bar for this theme."}{" "}
@@ -157,16 +163,23 @@ export function Receipt({ id }: { id: string }) {
                                         </p>
                                     ) : (
                                         <div className="border-t border-line">
-                                            {theme.fits.map((fit, i) => (
-                                                <EvidenceRow
-                                                    key={fit.asset + fit.symbol}
-                                                    fit={fit}
-                                                    claims={claims}
-                                                    sources={sources}
-                                                    label={`fit ${fit.fit}/5`}
-                                                    defaultOpen={i === 0}
-                                                />
-                                            ))}
+                                            {theme.fits.map((fit, i) => {
+                                                // The agent's own money on this company, in this theme. Absent for a
+                                                // company it did not buy, which is most of them: a fit is research,
+                                                // not an instruction, and the mandate caps every leg.
+                                                const stake = assetStake(backed, theme.themeId, fit.symbol);
+                                                return (
+                                                    <EvidenceRow
+                                                        key={fit.asset + fit.symbol}
+                                                        fit={fit}
+                                                        claims={claims}
+                                                        sources={sources}
+                                                        label={`fit ${fit.fit}/5`}
+                                                        {...(stake !== null && { lead: formatUsdc(stake) })}
+                                                        defaultOpen={i === 0}
+                                                    />
+                                                );
+                                            })}
                                         </div>
                                     )}
                                 </section>
@@ -195,6 +208,20 @@ export function Receipt({ id }: { id: string }) {
                             </h3>
                             <WhatAQuoteProves />
                         </div>
+                        {backed !== null && (
+                            <div className="rounded-card border border-line bg-surface p-4">
+                                <h3 className="mb-3 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-dim">
+                                    Skin in the game
+                                </h3>
+                                <p className="m-0 mb-3 text-xs leading-relaxed text-dim">
+                                    The agent {verb(backed.simulated)}{" "}
+                                    <b className="num font-medium text-ink">{formatUsdc(backed.usdcMinor)} USDC</b> of
+                                    the revenue this brief earned, in the companies it names. The amount against each
+                                    company is in the right-hand column above.
+                                </p>
+                                <SimulatedNote brief={backed} />
+                            </div>
+                        )}
                     </aside>
                 </div>
             </main>
