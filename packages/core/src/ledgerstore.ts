@@ -30,6 +30,7 @@ export function serializeTx(tx: LedgerTx): string {
         ...(tx.txHash !== undefined && { txHash: tx.txHash }),
         ...(tx.idempotencyKey !== undefined && { idempotencyKey: tx.idempotencyKey }),
         ...(tx.briefId !== undefined && { briefId: tx.briefId }),
+        ...(tx.theme !== undefined && { theme: tx.theme }),
     });
 }
 
@@ -75,6 +76,7 @@ export function parseTxLine(line: string, where: string): LedgerTx {
         ...(typeof r.txHash === "string" && { txHash: r.txHash }),
         ...(typeof r.idempotencyKey === "string" && { idempotencyKey: r.idempotencyKey }),
         ...(typeof r.briefId === "string" && { briefId: r.briefId }),
+        ...(typeof r.theme === "string" && { theme: r.theme }),
     };
 }
 

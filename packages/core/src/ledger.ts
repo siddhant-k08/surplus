@@ -40,6 +40,14 @@ export interface PostInput {
     idempotencyKey?: string;
     /** What this movement was for. Structured so state can be rebuilt from the ledger, unlike a memo. */
     briefId?: string;
+    /**
+     * The mandate theme this movement belongs to, for the entries where that is a real distinction.
+     *
+     * A fill is the case that needs it: the same token can be bought under two themes in one proposal,
+     * and "which theme justified this position" is the question the research half has to answer. The
+     * memo already says it in prose, and prose is not something money may be attributed by.
+     */
+    theme?: string;
 }
 
 export interface LedgerTx {
@@ -52,6 +60,7 @@ export interface LedgerTx {
     readonly txHash?: string;
     readonly idempotencyKey?: string;
     readonly briefId?: string;
+    readonly theme?: string;
 }
 
 function sameLines(a: readonly Line[], b: readonly Line[]): boolean {
@@ -107,6 +116,7 @@ export class Ledger {
             ...(input.txHash !== undefined && { txHash: input.txHash }),
             ...(input.idempotencyKey !== undefined && { idempotencyKey: input.idempotencyKey }),
             ...(input.briefId !== undefined && { briefId: input.briefId }),
+            ...(input.theme !== undefined && { theme: input.theme }),
         });
 
         this.txs.push(tx);
@@ -148,6 +158,7 @@ export class Ledger {
                 ...(t.txHash !== undefined && { txHash: t.txHash }),
                 ...(t.idempotencyKey !== undefined && { idempotencyKey: t.idempotencyKey }),
                 ...(t.briefId !== undefined && { briefId: t.briefId }),
+                ...(t.theme !== undefined && { theme: t.theme }),
             });
         }
         return ledger;

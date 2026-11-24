@@ -17,6 +17,7 @@ export * from "./registry";
 export * from "./liquidity";
 export * from "./reconcile";
 export * from "./treasury";
+export * from "./backing";
 export * from "./quote";
 export * from "./swapbuild";
 export * from "./gates";

@@ -31,6 +31,8 @@ export interface Fill {
 export interface ProposalRecord {
     readonly id: string;
     readonly proposal: Proposal;
+    /** The brief whose research justified this basket, carried onto every fill it books. */
+    readonly briefId?: string;
     quotedPrices: PriceMap;
     readonly machine: ProposalMachine;
     approval?: Approval;
@@ -134,6 +136,11 @@ export class Treasury {
                     booked.set(tx.briefId, b);
                     break;
                 }
+                case "PURCHASE_SETTLED":
+                    // A fill carries a briefId too, but it is neither revenue nor cost for that brief: it
+                    // is surplus leaving to buy something. Folding it in here would make every settled
+                    // proposal look like money the brief had earned. `backing` reads these instead.
+                    break;
                 default:
                     break;
             }
@@ -273,6 +280,14 @@ export class Treasury {
         quotedPrices: PriceMap;
         /** Already-held exposure per asset, so the company cap covers the whole portfolio. */
         held?: ReadonlyMap<string, bigint>;
+        /**
+         * The brief this basket came out of.
+         *
+         * Optional because the sim demos build legs by hand with no brief behind them. When it is given,
+         * every fill is booked against it, which is what lets a position be traced back to the research
+         * that argued for it after a restart, when the in-memory proposal is long gone.
+         */
+        briefId?: string;
     }): ProposeResult {
         if (i.legs.length === 0) throw new Error("a proposal needs at least one leg");
         if (this.records.has(i.id)) throw new Error(`Proposal ${i.id} already exists`);
@@ -286,6 +301,7 @@ export class Treasury {
         const rec: ProposalRecord = {
             id: i.id,
             proposal,
+            ...(i.briefId !== undefined && { briefId: i.briefId }),
             quotedPrices: i.quotedPrices,
             machine: new ProposalMachine(),
         };
@@ -467,6 +483,10 @@ export class Treasury {
                     at: this.now(),
                     idempotencyKey: `fill:${id}:${n}:${key}`,
                     ...(real !== undefined && { txHash: real.transaction }),
+                    // What justified this position, structured. The same token can be filled twice in one
+                    // proposal under two themes, and these two fields are what keep those apart.
+                    ...(rec.briefId !== undefined && { briefId: rec.briefId }),
+                    theme: leg.theme,
                     memo: `${tag}fill ${leg.symbol}: ${formatUsdc(leg.usdcIn)} USDC at ${price} => ${quantity} units`,
                     lines: [
                         { account: `positions.${key}`, amount: leg.usdcIn },
