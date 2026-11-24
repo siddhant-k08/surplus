@@ -49,7 +49,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 26 files, 281 tests. API 13 files, 239 tests (205 without `DATABASE_URL`, which skips 34). Web 2 files, 48 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 27 files, 292 tests. API 13 files, 242 tests (208 without `DATABASE_URL`, which skips 34). Web 2 files, 53 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -71,6 +71,17 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - An approval is refused if the mandate moved since the payload was offered: the signature covers a mandate version and hash, and `Treasury.approve` takes an `expect` approval so the domain layer enforces the match too.
 - An approval over HTTP needs the owner's EIP-712 signature (`src/eip712.ts` builds the payload, `apps/api/src/signature.ts` verifies it). The bearer token only decides who reaches the route. `OWNER_ADDRESS` is required and comes from config, never from the request. Core's `Treasury.approve` still allows an unsigned approval for the sim demos, so the requirement is enforced in the API layer.
 - A real fill is booked from what the swap returned, never from the quoted price: `Treasury.execute` takes a `realized` map and `attributeFills` puts the quantities back across the legs the way the money came out, remainder to the largest contributor so no unit is dropped. A leg whose swap did not execute is not booked and the proposal ends FAILED, because a proposal that half happened is not settled.
+- A position must say what argued for it. A fill is booked with the `briefId` of the brief the proposal
+  came from and the `theme` of its leg, both structured fields on the entry, because the same token can
+  be bought twice in one proposal under two themes and a memo is not something money may be attributed
+  by. `backing` (`packages/core/src/backing.ts`) reads those fields back and is what `GET
+  /catalogue/backing` serves. A fill with neither field is reported as unattributed, never credited to
+  a brief it cannot be shown to belong to.
+- `GET /catalogue/backing` is public and takes no token: a proof only the owner can read is not a
+  proof. It carries what went into which token under which theme of which brief, and nothing about
+  costs, the reserve, uninvested money or the owner's float. Every surface rendering it says whether
+  the fills were simulated, and the verb changes with it: `committed` while simulated, `holds` only
+  once a fill has reached a chain.
 - The LLM never computes money, never sets source tiers, and never sets evidence scores.
 - `realizedSales`/`realizedRevenue` are the only answer to what was earned; a payment with no settlement transaction is not revenue.
 - Costs and revenue are attributed per brief: every saved brief's model cost is booked once (`llm-<briefId>`), and each sale is mirrored individually keyed on its settlement transaction and attributed to the brief it bought. Booking only the newest brief's cost understated real spending. Simulated activity never writes into the testnet or mainnet book: the investing loop keeps its own `sim` ledger and reads the real one read-only.

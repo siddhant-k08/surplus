@@ -1553,12 +1553,14 @@ sales at `$0.01`, or three at `$0.25`.
 1. **Close the loop once, end to end**, with real revenue and simulated fills: sale, settle, sweep,
    propose, owner signs, execute, reconcile. The proof is the cycle completing, not the fill being
    real. This has never happened and it is the single biggest missing demonstration.
+   **Done on 24 Nov 2026**: see "The loop closed" below. Step 3 is now unblocked.
 2. **Build the sell path.** `quoteBuy` hardwires USDC as `tokenIn`, so the agent can accumulate and
    cannot exit. A mandate with no exit rule cannot express take-profit, rebalance or a drawdown
    limit. Largest genuine capability gap in the system.
 3. **Skin in the game.** Join a position back to the brief and theme that justified it and show it on
    the brief, so the research half and the treasury half are one product rather than two sharing a
    wallet. Needs step 1 to have happened before there is anything to show.
+   **Done on 25 Nov 2026**: see "Skin in the game" below.
 4. **Run the facilitator in-process.** `@x402/core/facilitator` exports `x402Facilitator`, and
    `@x402/evm/exact/facilitator` exports the facilitator-side `ExactEvmScheme` (distinct from the
    `@x402/evm/exact/server` one already wired in `server.ts`). `x402ResourceServer` takes a
@@ -1584,6 +1586,171 @@ of permanent boundaries (no custody, no trading on a buyer's behalf, no model to
 covers why anyone buys verified public data and who already sells research for a living. It carries
 no build-status page and no roadmap, so **it will describe behaviour that does not exist yet**; keep
 that in mind before sending it anywhere that reads it as a statement of fact.
+
+## The loop closed, 24 Nov 2026
+
+The agent earned real money, settled it, proposed a basket, took the owner's signature and booked
+fills. Step 1 of the agreed order of work is done. Every number below is read back from the books,
+not from this conversation.
+
+### What happened
+
+Eight real purchases of `GET /brief` at `$0.25` on Base Sepolia, each a separate x402 payment settled
+by the free facilitator, each attributed to `brief-2026-11-21T19-57-41-888Z`. Buyer went 19.93 to
+17.93 USDC, seller 5.07 to 7.07: exactly `$2.00` moved, exactly eight entries booked, so nothing was
+charged that the books did not record.
+
+Then `POST /invest/sync`, which mirrored the sales into the `sim` investing book, booked every brief's
+model cost once, and settled: revenue `$2.030000`, costs `$0.147614`, reserve filled to its `$0.500000`
+target, `surplus.investable` `$0.754399`. `canInvest` turned true for the first time in the project's
+life.
+
+`POST /invest/propose` allocated `$0.476386` across eight legs in two themes, `swapPlan` merged the
+duplicated tokens into six swaps, the owner signed the EIP-712 approval (`0x3224...0D48`, chain 84532,
+ceiling 476386), and `POST /invest/execute` booked eight simulated fills. `reconcile` says ok, the
+position accounts total `$0.476386` to the unit, and `surplus.investable` still holds the `$0.278013`
+the allocator could not place.
+
+The basket: GOOGLc `$0.064579`, SNDKc `$0.057241`, MSFTc `$0.055773`, AAPLc `$0.052968`, METAc
+`$0.118647` (two themes merged), AMZNc `$0.127178` (two themes merged).
+
+### The first attempt was refused, and that is the headline
+
+Proposal `first-fill` was signed and then stopped at execution: `METAc moved 207 bps (limit 100 bps)`,
+outcome `REAPPROVAL_REQUIRED`. `first-fill-2`, proposed seconds later, went through unchanged.
+
+Nothing moved in the market in those seconds. At a leg size of six to thirteen cents, KyberSwap's
+quote for the same token varies by more than the mandate's `driftToleranceBps` of 100 simply from
+route selection and gas-adjusted output. So the drift gate, which exists to catch a real price move
+between approval and execution, also catches quote noise at these sizes.
+
+This is worth knowing before a demo: **expect to need more than one attempt**, and do not read a
+`REAPPROVAL_REQUIRED` as a bug. It is also an argument for larger trades rather than a looser
+tolerance: raising `driftToleranceBps` would blind the gate to the thing it is for.
+
+### Why eight sales and not three
+
+The earlier estimate of three sales was wrong, and the reason is the allocator, not the pricing. A
+theme's budget is water-filled across **every** candidate with fit 3 or better, so the first leg
+clears `minTradeUsdc` only when
+
+    investable >= minTrade * (sum of weights) / (largest weight) / (theme targetBps / 10000)
+
+For `ai-compute` with seven candidates that is about `$0.63` of investable, which needs about `$1.67`
+of revenue on top of the brief's own unpaid cost and the reserve gap. Seven sales produce the first
+leg; eight produce a basket worth showing. Modelled against the real brief, the real mandate and live
+DexScreener liquidity before any money was spent.
+
+The consequence: **the allocator cannot concentrate.** A small treasury spreads itself below the
+minimum and invests nothing, and the only symptom is a list of `below_minimum` reasons. Taking the
+top N candidates that can each clear the minimum would be a real improvement and is not yet designed.
+
+### A known limit this exposed
+
+`investmentGap` reports `canInvest: true` whenever `investable >= minTrade`. After the fill, investable
+is `$0.278013` and minTrade is `$0.050000`, so the gap says a trade could be proposed now, yet
+`propose` refuses because every slot lands below the minimum once the budget is divided. The gap
+answers "is there enough money" when the owner's question is "can a leg actually be placed". Running
+the allocation would answer it properly.
+
+### Still true after the fill
+
+`GET /invest/positions` reports `checked: false`, because fills are simulated and there is nothing
+onchain to compare them against. `GET /health` is ok, books reconciled, 11 sales booked. The real
+money is testnet money, in the `testnet` sales book; the investing book is still `sim`, and no
+simulated activity reached the real book.
+
+## Skin in the game, 25 Nov 2026
+
+The two halves of Surplus now join up. A buyer reading a brief can see how much of the agent's own
+revenue went into the companies that brief named, theme by theme and company by company, from a route
+that needs no token. Step 3 of the agreed order of work is done.
+
+### The link had to be made durable first
+
+Proposals live in memory. The ledger is what survives a restart, and a `PURCHASE_SETTLED` entry
+carried only the amount and the token: nothing said which brief argued for the trade or under which
+theme. So the attribution was added where money attribution already lives, as structured fields:
+
+- `LedgerTx` gained `theme`, alongside the `briefId` it already had. Both are serialized by the JSONL
+  store and restored by `Ledger.replay`, which a test pins: if `theme` were dropped on replay, every
+  position would become unattributed the moment the process restarted.
+- `createProposal` takes a `briefId`, and `Treasury.execute` books it onto every fill along with the
+  leg's `theme`. The engine passes the brief it built the proposal from.
+- Postgres needed no migration: it stores the whole serialized entry in `line` and denormalizes only a
+  few columns for querying.
+
+The same token under two themes is the case that forced a field rather than a memo. METAc was bought
+in both `ai-compute` and `platform-giants` in one proposal, as two legs, two fills, two amounts. One
+figure, or the sum shown twice, would misreport which argument the money was actually behind.
+
+### What is public, and what is not
+
+`GET /catalogue/backing` takes no token, deliberately: the claim it carries is the one thing a brief
+cannot prove about itself, and a proof only the owner can read is not a proof. It carries how much
+went into which token under which theme of which brief, with the transaction when there was one. It
+carries nothing about costs, the reserve, uninvested money or the owner's float, and a test asserts
+those words never appear in the response.
+
+`backing` in `packages/core/src/backing.ts` is the whole of it, reading `PURCHASE_SETTLED` entries and
+nothing else. It measures money committed, not money now worth. **When the sell path exists it will
+need to net out disposals**, which is the one thing this function will have to grow.
+
+### The verb is the honesty mechanism
+
+While fills are simulated nothing has been bought, so the UI says the agent **committed** that money,
+never that it **holds** it. `verb(simulated)` is one exported function with one test, so no surface
+has to remember which case it is in, and the amber caveat appears wherever a simulated number does.
+
+### What it shows right now
+
+The first basket, eight fills from 24 Nov, is reported as **unattributed**: those entries predate the
+fields and the ledger is append-only, so they cannot be retrofitted and were not. Four more sales
+funded a second basket of eight fills, which carries the attribution in full:
+
+    attributed   0.490296 USDC   ai-compute 0.303242, platform-giants 0.187054
+    unattributed 0.476386 USDC   8 fills from before the fields existed
+    total        0.966682 USDC
+
+The unattributed remainder is shown on the page rather than hidden, because the parts have to add up
+for the headline to mean anything.
+
+### On the pages
+
+A band on the landing and themes pages makes the argument before anyone pays, with a bar per theme
+showing how the money split. On the receipt, each theme carries what the agent put behind it and each
+company row carries its own amount in the right-hand column. A company the brief names but the
+mandate's caps left out shows **no amount at all**, not a zero: TSLAc is research, not a purchase, and
+the blank column says so.
+
+### Two things found on the way
+
+**The share bars were silently wrong.** Animating `width` from a numeric `0` (pixels) to a percentage
+left `motion` resolving the target against the wrong box, and both bars settled at a third of their
+true width while looking entirely plausible. They are now drawn, not animated. A measurement that is
+wrong is worse than one that does not move.
+
+**The landing page was still advertising the old price.** `ARRIVALS` in `Sections.tsx` showed sample
+ledger rows of `+0.010000` long after a brief cost `$0.25`. An illustration may be an illustration; it
+may not contradict the thing it illustrates. Updated, with a simulated fill row added.
+
+### Known flake, worth knowing before a demo
+
+Running the full API suite can fail two or three of the paid-route tests (`server.test.ts`,
+`receipts.test.ts`, `session.test.ts`) on `expect(res.status).toBe(402)`. Each test file builds a
+server that probes the live x402.org facilitator, and thirteen of them in parallel contend for it. The
+same files pass in isolation and the full suite passes on a rerun. It is not a code fault, but a red
+suite minutes before a submission is its own kind of problem.
+
+### The Postgres copy is behind the files
+
+The running agent reads the JSONL books (`DATABASE_URL=` empties the variable, which is what
+`npm run api:files` does). The Neon database still holds a snapshot from before the pricing change:
+its invest book stops at a `0.020000` reserve. **A deploy that reads `DATABASE_URL` would serve those
+older books and would show no backing at all.** `npm run db:import -w @surplus/api -- --apply` tops it
+up, and because the files only ever append and the import is idempotent on the entry id, it adds the
+new entries rather than conflicting. Not run here: it writes to a live database and that is the
+owner's call.
 
 ## Next milestones, in order
 
@@ -1628,6 +1795,10 @@ money, ledger, mandate, surplus, policy, allocator (water-filling; leaves unplac
 
 ## Lessons from earlier milestones
 
+- Never source `.env` into a shell (`set -a; . ./.env`). `DATABASE_URL` holds an unquoted `&`, so bash
+  reads the line as a background job and **prints the whole connection string, password included**, to
+  the terminal. This happened on 24 Nov 2026 and the Neon password had to be rotated. Read one value
+  at a time instead: `grep -m1 '^OWNER_TOKEN=' .env | cut -d= -f2-`.
 - Never run `npm audit fix --force` (it would jump vitest majors). Use `npm audit --omit=dev`.
 - Scripts use top-level `async function main()`; tsx runs them as CommonJS-compatible.
 - `scripts/tsconfig.json` sets `"types": ["node"]`; without it editors report `Cannot find name 'process'`.
