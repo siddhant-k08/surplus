@@ -56,7 +56,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 30 files, 391 tests. API 13 files, 257 tests (223 without `DATABASE_URL`, which skips 34). Web 2 files, 71 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 30 files, 391 tests. API 13 files, 259 tests (224 without `DATABASE_URL`, which skips 35). Web 2 files, 71 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -70,6 +70,16 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - Ledger is double-entry, append-only, idempotent by key, chronological, and every entry carries a mode tag: `sim`, `testnet` or `mainnet`.
 - Money entries carry a structured `briefId` saying what the movement was for; `Treasury` rebuilds its per-brief tallies, seen-id sets and settled results from it on construction. Never attribute money by parsing a memo.
 - Persistence is a port (`packages/core/src/storage.ts`), with two implementations: append-only JSONL (`src/ledgerstore.ts`, `src/mandatestore.ts`) and Postgres (`apps/api/src/pg.ts`), chosen by `DATABASE_URL` alone in `apps/api/src/backends.ts`. Both store amounts as decimal strings of minor units, parse them with the same parser, append idempotently on the key that identifies the entry, and refuse a book whose entry ids are not contiguous from 1. Replaying must restore `idempotencyKey` and `txHash`, not just balances: the restored dedup index is what stops a settlement booking twice after a restart. Reading money back fails loudly rather than skipping a bad line.
+- **A cached assembly needs a staleness check, not just shared storage.** `apps/api/src/serverless.ts`
+  builds the books once per instance and keeps them in memory; a host runs several instances, so each
+  one served a snapshot of the books taken whenever it happened to start. Writes reached Postgres and
+  the neighbours never saw them: `GET /health` reported 7 sales against 12 in the database, and a
+  proposal created and approved on one instance answered "Unknown proposal" when the execute landed on
+  another. `Backends.marker()` is one query for the highest entry id in each book and the highest
+  mandate version; the assembly is rebuilt only when it moves, reusing the storage handle (a connection
+  per rebuild would exhaust the database's ceiling) and skipping execution recovery (that belongs to
+  taking over from a predecessor, not to noticing a neighbour's write). Absent for files, where one
+  process owns the disk.
 - A database is not optional on a host that can replace the process between two requests. The ledger, the mandate history, the receipts, the buyer-commissioned briefs and the owner's session are all written at runtime; the owner's catalogue (`BRIEFS_DIR`) is repository content and stays on disk in both modes.
 - Mandates are versioned and hashed; the agent never changes user constraints. Unplaceable money stays uninvested with a stated reason.
 - The mandate persists to `MANDATE_PATH` as a hash-chained JSONL history, verified on load: an altered or truncated file makes the server refuse to start. A stored mandate is authoritative; the terms in code only create version 1 on a first run.

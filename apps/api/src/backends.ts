@@ -61,6 +61,16 @@ export interface Backends {
      * to write money down, and it cannot do that if the database has gone away since it started.
      */
     check: () => Promise<{ ok: boolean; detail?: string }>;
+    /**
+     * A cheap value that changes whenever anything was written, by this instance or another.
+     *
+     * Absent for files, where one process owns the disk and nothing can be appended behind its back.
+     * Present for a database, where several instances read and write the same rows: each caches the
+     * books in memory at start, so without this a warm instance serves a view of the books that is
+     * missing every entry another instance has written since, and a proposal created on one instance
+     * is unknown to the next. One round trip, so it can be asked before every request.
+     */
+    marker?: () => Promise<string>;
     close: () => Promise<void>;
 }
 
@@ -136,6 +146,17 @@ export function pgBackends(config: ApiConfig, sql: Sql): Backends {
             } catch (e) {
                 return { ok: false, detail: e instanceof Error ? e.message : String(e) };
             }
+        },
+        // One query for all three, because this runs before every request and three round trips to a
+        // hosted database would cost more than the staleness it is detecting. Entry ids are contiguous
+        // from 1 within a book, so the highest id is the whole truth about how much has been written.
+        marker: async () => {
+            const [row] = await sql<{ sales: number; invest: number; mandate: number }[]>`
+                select
+                    (select coalesce(max(id), 0) from ledger_entries where book = ${salesBook}) as sales,
+                    (select coalesce(max(id), 0) from ledger_entries where book = ${investBook}) as invest,
+                    (select coalesce(max(version), 0) from mandate_versions) as mandate`;
+            return `${row!.sales}:${row!.invest}:${row!.mandate}`;
         },
         close: async () => {
             await sql.end({ timeout: 5 });

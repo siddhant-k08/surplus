@@ -102,11 +102,30 @@ export interface Assembled {
     catalogueCost: { totalUsdcMinor: bigint; briefs: number };
 }
 
-export async function assemble(config: ApiConfig): Promise<Assembled> {
+/** What a re-assembly must do differently from a cold start. */
+export interface AssembleOptions {
+    /**
+     * Storage that is already open, so a refresh reuses the connection instead of opening another.
+     *
+     * Without this a refresh would leak a database connection per rebuild, which on a provider with a
+     * connection ceiling is a worse problem than the staleness being fixed.
+     */
+    backends?: Backends;
+    /**
+     * Resolve journaled swaps against the chain. True on a cold start, false on a refresh.
+     *
+     * Recovery belongs to taking over from a predecessor that may have signed a swap and died. A
+     * refresh happens because another instance wrote a ledger entry, which is an ordinary event, and
+     * reaching for the chain every time one does would turn a read into an onchain operation.
+     */
+    recover?: boolean;
+}
+
+export async function assemble(config: ApiConfig, opts: AssembleOptions = {}): Promise<Assembled> {
 
     // Files or Postgres, decided by DATABASE_URL alone. Everything below is written against the ports,
     // so nothing here knows or cares which one answered.
-    const backends = await openBackends(config);
+    const backends = opts.backends ?? await openBackends(config);
     const books = bookNames(config, backends);
     const salesStore = backends.sales;
     const salesLedgerLoaded = await openLedger(salesStore);
@@ -228,7 +247,7 @@ export async function assemble(config: ApiConfig): Promise<Assembled> {
     // Before serving anything: a swap this instance's predecessor signed may have landed on the chain
     // while nothing was left to notice. Resolving those against the chain is the first thing that must
     // happen, because every number below is wrong until it has.
-    if (execution.executor !== null) {
+    if (execution.executor !== null && opts.recover !== false) {
         const resolved = await execution.executor.recover();
         for (const r of resolved) {
             log.info("execution_recovered", `recovered execution ${r.key}: ${r.outcome}`, {

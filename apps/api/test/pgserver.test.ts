@@ -133,6 +133,48 @@ describeDb("the server on Postgres, across a restart", () => {
         }
     });
 
+    it("tells a warm instance that another one has written", async () => {
+        /*
+         * The bug this exists for. Each instance caches the books in memory at start, so without a
+         * marker a warm one serves a snapshot taken whenever it happened to boot: in production
+         * `GET /health` reported seven sales while the database held twelve, and a proposal created
+         * and approved on one instance answered "Unknown proposal" when the execute landed on another.
+         *
+         * The marker is what lets the cache notice, and it has to be stable when nothing has changed
+         * or every request would rebuild.
+         */
+        const scratch = await scratchSchema();
+        try {
+            const a = await boot(scratch);
+            const b = await boot(scratch);
+
+            const before = await b.backends.marker!();
+            expect(await a.backends.marker!()).toBe(before);
+            // asked twice with nothing written in between, so a quiet instance never rebuilds
+            expect(await b.backends.marker!()).toBe(before);
+
+            bookSettlement({
+                treasury: a.treasury,
+                sales: a.sales,
+                expectedAsset: ASSET,
+                briefId: brief.id,
+                facts: facts("0xmarker"),
+            });
+            await flushNewEntries(a.treasury.ledger, a.backends.sales, 0);
+
+            // b has not reloaded anything, but it can now tell that it should
+            expect(await b.backends.marker!()).not.toBe(before);
+            expect(b.sales.length).toBe(0);
+        } finally {
+            await scratch.drop();
+        }
+    });
+
+    it("has no marker on files, where one process owns the disk", async () => {
+        const { fileBackends } = await import("../src/backends");
+        expect(fileBackends(config).marker).toBeUndefined();
+    });
+
     it("refuses to book the same settlement twice after a restart", async () => {
         const scratch = await scratchSchema();
         try {
