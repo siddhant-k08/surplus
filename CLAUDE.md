@@ -56,7 +56,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 30 files, 391 tests. API 13 files, 259 tests (224 without `DATABASE_URL`, which skips 35). Web 2 files, 71 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 30 files, 391 tests. API 14 files, 272 tests (237 without `DATABASE_URL`, which skips 35). Web 2 files, 71 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
 
@@ -188,6 +188,23 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - Owner routes (`/invest/*`, `/mandate`) are gated by `OWNER_TOKEN`, with no default and no open mode. That token is a shared secret, not the owner's signature on a trade; EIP-712 replaces it.
 - Two books: the sales book is real money tagged `testnet`; the investing book is tagged `sim` while fills are simulated. Simulated activity never enters the real book.
 - Revenue cannot cross networks. `syncRevenue` refuses to mirror a sale whose mode differs from the investing book's and reports it as a refused sale: a mainnet book fed by testnet revenue would have the agent spend real money while claiming to have earned it. Whatever a mainnet book invests is owner capital (`OPENING_FLOAT_USDC`) until selling moves to mainnet too.
+- **The facilitator can run in this process** (`apps/api/src/facilitator.ts`), chosen by
+  `X402_FACILITATOR=local` and off by default. It is the only route to mainnet revenue without a paid
+  provider: `x402ResourceServer` takes a client of `verify`, `settle` and `getSupported`, which is what
+  `x402Facilitator` is, so the local one drops into the same seam with no network hop. Self-hosting
+  moves the settlement gas bill here, so `FACILITATOR_PRIVATE_KEY` names a wallet holding ETH on the
+  served chain, and **the facilitator takes its own `FACILITATOR_RPC_URL`**: `BASE_RPC_URL` belongs to
+  the executor, which trades tokenized stocks and is therefore always on Base mainnet, while the
+  facilitator must be on whatever `X402_NETWORK` says. Those differ for as long as the agent sells on
+  Sepolia and trades on mainnet, so the fallback to `BASE_RPC_URL` is correct only once both halves are
+  on one chain. `verifyChain()` asks the RPC which chain it is on and refuses to start on a mismatch,
+  because the alternative is finding out mid-settlement holding a buyer's signed authorization. **That key must not be `EXECUTION_PRIVATE_KEY`**: the settlement wallet pays other
+  people's gas and publishes its address in `getSupported`, the trading wallet spends the agent's own
+  USDC, and a shared key is refused rather than warned about. `registerExactEvmScheme` also registers
+  the v1 scheme across every EVM network the package knows, so a `onBeforeVerify`/`onBeforeSettle` guard
+  refuses anything but the configured network: the advertised list is far wider than the one wallet can
+  reach, and this process pays the gas for whatever it accepts. A local facilitator that cannot be built
+  is a startup error, never a silent fall back to the hosted one.
 - The free x402.org facilitator serves Base Sepolia (`eip155:84532`) only; it advertises no other EVM network. Mainnet needs a different facilitator. It submits the buyer's signed EIP-3009 authorization and pays the gas, so a buyer needs USDC but no ETH (verified onchain 21 Nov 2026).
 - Sale revenue is booked only from a confirmed settlement, idempotent on the settlement transaction, and only when the settled asset is the expected USDC.
 - A receipt is keyed on a secret id issued at purchase, never on the settlement transaction: settlements are public on Base, so a transaction-keyed receipt would give briefs away to anyone watching the seller's address.

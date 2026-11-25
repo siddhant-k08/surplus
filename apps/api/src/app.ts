@@ -29,6 +29,7 @@ import { join } from "node:path";
 import express, { type Express } from "express";
 import type { ApiConfig } from "./config";
 import { buildServer, facilitatorReach } from "./server";
+import { openFacilitator } from "./facilitator";
 import { fromRepoRoot } from "./paths";
 import type { Backends } from "./backends";
 import type { Treasury } from "@surplus/core";
@@ -98,6 +99,8 @@ export interface Assembled {
     webDist: string | null;
     /** Why fills are simulated, or the address real ones would come from. */
     execution: ReturnType<typeof openExecutor>;
+    /** Who settles payments: someone else's server, or this process. Named in the banner. */
+    facilitator: ReturnType<typeof openFacilitator>;
     /** What the catalogue cost to produce, so the banner can check the price against it. */
     catalogueCost: { totalUsdcMinor: bigint; briefs: number };
 }
@@ -259,13 +262,20 @@ export async function assemble(config: ApiConfig, opts: AssembleOptions = {}): P
 
     const receipts = backends.receipts;
     const receiptCount = await receipts.count();
+    // Chosen once and shared, so the health check reports the facilitator that is actually settling
+    // rather than a url the process may not be talking to.
+    const facilitator = openFacilitator(config);
+    // Before serving: an RPC on the wrong chain would otherwise be discovered mid-settlement, holding a
+    // buyer's signed authorization with nothing useful to say about it.
+    await facilitator.verifyChain?.();
+
     const { app, treasury, sales } = buildServer({
-        config, mandates, ledger: salesLedgerLoaded, sink: salesStore,
+        config, mandates, ledger: salesLedgerLoaded, sink: salesStore, facilitator,
         engine, research, updateMandate, receipts, sessions: backends.sessions,
         throttle: backends.throttle,
         storage: backends.kind,
         storageCheck: () => backends.check(),
-        facilitatorCheck: () => facilitatorReach(config.facilitatorUrl),
+        facilitatorCheck: () => facilitatorReach(facilitator, config.facilitatorUrl),
         readBrief: newestCatalogueBrief, findBrief: briefById,
         catalogueBriefs: () => catalogue.list(),
         ...(execution.executor !== null && { positions: () => execution.executor!.positions() }),
@@ -320,6 +330,7 @@ export async function assemble(config: ApiConfig, opts: AssembleOptions = {}): P
         books,
         webDist: existsSync(webDist) ? webDist : null,
         execution,
+        facilitator,
         catalogueCost: {
             totalUsdcMinor: await catalogue.totalCostUsdcMinor(),
             briefs: (await catalogue.list()).length,

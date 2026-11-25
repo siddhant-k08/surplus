@@ -2009,10 +2009,27 @@ nothing. The mandate also carries no band yet; setting one is the owner's call a
 
 ## Next milestones, in order
 
-1. Web UI over the simulated loop (brief with quotes shown under each claim, proposal, approval, ledger). Simulation labels must be obvious.
-2. Owner EIP-712 signature on approvals, persistence, deployment, onchain reconciliation.
-3. Demo rehearsal, video, X post tagging @buildonbase, submission form. Re-check the Quest page rules on 24 Nov and 2 Dec, and re-read base.org/stocks before any mainnet use.
-4. Real swaps only after Siddhant's explicit authorization, eligibility advice, a spend cap, the mainnet flag, and a throwaway wallet. Execute one swap per `SwapOrder` from `swapPlan`, not one per leg: gas is 2 to 4 percent of a $0.10 leg.
+Rewritten 25 Nov 2026. The first two items were "web UI over the simulated loop" and "owner EIP-712
+signature, persistence, deployment, onchain reconciliation", both finished days ago; the list had gone
+stale and read as though the project were two weeks behind where it is.
+
+Every capability is built and has been exercised on real books: sell, settle, allocate, propose, sign,
+execute, reconcile, attribute, take profit, stop loss, rebalance. All three plan checkpoints are met.
+
+1. **Hardening** (planned Wed 2 to Thu 3 Dec). Errors, retries, empty states, mobile, accessibility.
+2. **Re-check the Quest page rules.** Scheduled for 24 Nov and 2 Dec; the 24 Nov pass was missed. Re-read
+   base.org/stocks before any mainnet use.
+3. **Submission.** Demo rehearsal, video, X post tagging @buildonbase, the form. Target Fri 4 Dec.
+4. Real swaps only after Siddhant's explicit authorization, eligibility advice, a spend cap, the mainnet
+   flag, and a throwaway wallet. Execute one swap per `SwapOrder` from `swapPlan`, not one per leg: gas is
+   2 to 4 percent of a $0.10 leg.
+
+Two known limits to decide on before the demo, neither a defect:
+
+- `minTradeUsdc` of 0.05 makes rebalancing inert on a portfolio this size: any proportional trim splits
+  below the floor and is refused. A live rebalance currently shows a refusal rather than a trade.
+- `GET /invest/drift` holds a request about 15 seconds for seven tokens, which may exceed the host's
+  function timeout.
 
 ## Core modules (packages/core/src)
 
@@ -2047,6 +2064,97 @@ money, ledger, mandate, surplus, policy, allocator (water-filling; leaves unplac
 ## Environment (.env, never committed)
 
 `MODE`, `MAINNET_ENABLED`, `MAINNET_SPEND_CAP_USDC`, `BASE_RPC_URL`, `BASE_SEPOLIA_RPC_URL`, `SEC_USER_AGENT`, `LLM_PROVIDER`, `RESEARCH_MODEL`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `PRICE_INPUT_PER_MTOK_USD`, `PRICE_OUTPUT_PER_MTOK_USD`, `RESEARCH_MAX_USD`. Prices are paid-tier rates even on a free tier so the ledger books a realistic cost.
+
+## The loop ran on production from a browser, 25 Nov 2026
+
+The Wed 25 Nov checkpoint from the frontend plan: *the whole investing loop runs from a browser, signed
+with the owner's wallet*. Met at about 15:55 IST, by Siddhant on the owner desk against the deployment,
+not from the command line.
+
+Proposal `p-1795602345264`, 0.218305 USDC, four fills, ledger entries 29 to 34 in `invest-sim`. The
+first positions production has ever held:
+
+    ai-compute        0.109470 USDC   GOOGLc, AMZNc
+    platform-giants   0.108835 USDC   METAc, AMZNc
+
+`reconcile: ok`, reserve intact at 0.50, 0.421094 still investable. Fills simulated, as everywhere.
+
+It happened minutes after the stale-assembly fix deployed, and would have failed without it: the
+command-line attempt earlier the same day got as far as a signed approval and then answered "Unknown
+proposal" on execute, because the instance serving the execute had never seen the proposal.
+
+Five real testnet sales were bought from the deployment that day to get there, taking it from 7 sales to
+12 and from nothing investable to 0.639399.
+
+## The facilitator runs in-process, 25 Nov 2026
+
+Item 4 of the agreed order of work, and the thing that makes mainnet revenue possible without paying a
+provider. Built after Siddhant asked what had happened to it; items 1 to 3 had been finished in the two
+days before.
+
+The package surface was verified against the installed 2.32.0 rather than assumed:
+
+    @x402/core/facilitator        x402Facilitator, InMemoryPendingSettlementStore, PENDING_SETTLEMENT_TTL_MS
+    @x402/evm/exact/facilitator   ExactEvmScheme, registerExactEvmScheme
+    @x402/evm                     toFacilitatorEvmSigner(client, { confirmationTimeoutMs })
+
+`x402Facilitator` has exactly `verify`, `settle` and `getSupported`, which is the whole of what
+`x402ResourceServer` asks of a facilitator client, so it drops into the existing seam in `server.ts`
+with no network hop. `X402_FACILITATOR=local` selects it; hosted stays the default, because every sale
+so far settled through it and switching what moves a buyer's money by omission is not a change anyone
+asked for. A local facilitator that cannot be built is a startup error rather than a quiet fall back.
+
+Proved against Base's public RPC with an ephemeral key: it builds for both networks and advertises
+`exact@eip155:8453`. **That is the unlock** - the free facilitator advertises `eip155:84532` and nothing
+else, so mainnet revenue is unreachable through it at any price.
+
+### Two things the probe found
+
+**The settlement key is not the trading key.** Different jobs, different blast radii: this wallet pays
+other people's gas and publishes its address in `getSupported`, the other spends the agent's own USDC.
+A shared key is refused at construction, compared case-insensitively.
+
+**`registerExactEvmScheme` registers the v1 scheme across every EVM network the package knows.**
+`getSupported` came back advertising polygon, celo, monad, sei and twenty more that this wallet has no
+RPC for. The resource server names one network in its own 402 challenge so an honest buyer never sees
+the rest, but the facilitator takes whatever payload it is handed and this process pays the gas for it.
+`onBeforeVerify` and `onBeforeSettle` now abort anything but the configured network.
+
+### Two RPCs, not one, and a startup check that proves it
+
+Found by Siddhant asking which RPC the facilitator wanted. `BASE_RPC_URL` belongs to the **executor**,
+which swaps tokenized stocks and is therefore always on Base **mainnet**. The facilitator has to be on
+whatever `X402_NETWORK` says, which today is Base **Sepolia**. For as long as the agent sells on one
+chain and trades on the other, one variable cannot serve both, and whichever way it is pointed the
+other half is silently wrong until money is in flight.
+
+So the facilitator takes `FACILITATOR_RPC_URL`, falling back to `BASE_RPC_URL` only because that
+fallback becomes correct once both halves are on mainnet, which is the end state.
+
+`verifyChain()` then asks the RPC which chain it is actually on and refuses to start on a mismatch.
+Checked against both live chains:
+
+    sepolia server, mainnet rpc  -> REFUSED: the facilitator RPC is on chain 8453 but this server
+                                    settles eip155:84532 (chain 84532). Point FACILITATOR_RPC_URL at Base Sepolia.
+    mainnet server, sepolia rpc  -> REFUSED: ... Point FACILITATOR_RPC_URL at Base.
+
+The alternative is discovering it during a settlement, holding a buyer's signed authorization with
+nothing useful to tell them.
+
+### What it still needs before it can settle anything
+
+A funded settlement wallet, and the gas is **Base Sepolia ETH** (chain 84532), not Ethereum Sepolia ETH
+(chain 11155111): different chains, different balances. A Base Sepolia faucet, or bridge across.
+
+To go live on Sepolia: generate a key that is not the trading key, fund its address with Base Sepolia
+ETH, set `FACILITATOR_RPC_URL` to a Base Sepolia endpoint, `FACILITATOR_PRIVATE_KEY`, and
+`X402_FACILITATOR=local`, then restart. The banner and `GET /health` both name which facilitator is
+settling, so it is never a guess.
+
+`confirmationTimeoutMs` is set from `FACILITATOR_TIMEOUT_MS`, deliberately under the host's request
+deadline: the scheme then reports `settlement_pending` with the broadcast hash instead of being killed
+mid-wait, which leaves something to reconcile against rather than a payment that happened with nothing
+written down.
 
 ## Lessons from earlier milestones
 

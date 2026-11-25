@@ -7,6 +7,7 @@ import {
 import { buildServer, bookSettlement } from "../src/server";
 import { loadConfig, USDC, BASE_SEPOLIA } from "../src/config";
 import { pgBackends } from "../src/backends";
+import { openFacilitator } from "../src/facilitator";
 import { newReceiptId } from "../src/receipts";
 import { scratchSchema, hasDatabase, type Scratch } from "./pghelp";
 
@@ -75,6 +76,10 @@ async function boot(scratch: Scratch) {
     const built = buildServer({
         config,
         mandates,
+        // Explicit, because pghelp loads the repo's .env for DATABASE_URL and that pulls in every other
+        // variable with it. Without this, whether these tests settle through x402.org or through an
+        // in-process facilitator would depend on whoever last edited their own .env.
+        facilitator: openFacilitator(config, {} as NodeJS.ProcessEnv),
         ledger: await openLedger(backends.sales),
         sink: backends.sales,
         receipts: backends.receipts,

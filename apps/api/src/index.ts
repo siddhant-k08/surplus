@@ -32,7 +32,7 @@ async function main(): Promise<void> {
         );
         console.log(`  mode        ${config.mode}  (ledger entries are tagged ${config.mode})`);
         console.log(`  network     ${config.network}`);
-        console.log(`  facilitator ${config.facilitatorUrl}`);
+        console.log(`  facilitator ${a.facilitator.kind}  ${a.facilitator.detail}`);
         console.log(`  paid route  GET ${BRIEF_ROUTE} at ${config.priceUsd}, paid to ${config.payTo}`);
         console.log(
             `  paid route  POST /research at ${config.researchPriceUsd} ` +

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { paymentMiddleware, x402ResourceServer } from "@x402/express";
-import { HTTPFacilitatorClient } from "@x402/core/server";
+import { openFacilitator, type FacilitatorChoice } from "./facilitator";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import {
     Treasury,
@@ -145,8 +145,16 @@ export interface SettlementFacts {
  * storage, and flapping this endpoint on someone else's outage would make it useless for the two faults
  * it exists to catch. The timeout is short on purpose: this answers a question, it does not wait on one.
  */
-export async function facilitatorReach(url: string): Promise<{ ok: boolean; ms: number; detail?: string }> {
+export async function facilitatorReach(
+    choice: { kind: "hosted" | "local"; detail: string },
+    url: string,
+): Promise<{ ok: boolean; ms: number; detail?: string }> {
     const started = Date.now();
+    // Nothing to reach: this process settles. Asking the network whether it can hear itself would
+    // answer a question nobody asked, and a hosted url it is not using would be the wrong thing to ping.
+    // What can still fail here is the chain and the gas balance, and those surface on a settlement
+    // attempt rather than on a health check that must stay cheap.
+    if (choice.kind === "local") return { ok: true, ms: 0, detail: choice.detail };
     try {
         const res = await fetch(`${url.replace(/\/+$/, "")}/supported`, {
             method: "GET",
@@ -284,6 +292,8 @@ export interface ServerDeps {
      * than answering an empty list that looks like "the agent has read nothing".
      */
     catalogueBriefs?: () => Promise<SavedBrief[]>;
+    /** Who settles payments. Chosen from the environment otherwise; injected by tests. */
+    facilitator?: FacilitatorChoice;
     /** Already loaded, because storage is async and `buildServer` is not. */
     ledger?: Ledger;
     /** Where new entries go. Absent means nothing is persisted. */
@@ -465,11 +475,11 @@ export function buildServer(deps: ServerDeps): BuiltServer {
     const sales: BookedSale[] = ledger ? salesFromLedger(ledger.all()) : [];
     let persistedId = ledger ? (ledger.all().at(-1)?.id ?? 0) : 0;
 
-    const facilitator = new HTTPFacilitatorClient({
-        url: config.facilitatorUrl,
-        timeoutMs: config.facilitatorTimeoutMs,
-    });
-    const resourceServer = new x402ResourceServer(facilitator)
+    // Someone else's server or this process, decided by X402_FACILITATOR. The resource server takes a
+    // client of verify, settle and getSupported either way, so the choice changes who pays the gas and
+    // which networks can be served, and nothing else about this file.
+    const facilitator = deps.facilitator ?? openFacilitator(config);
+    const resourceServer = new x402ResourceServer(facilitator.client as never)
         .register(config.network, new ExactEvmScheme())
         .onAfterSettle(async (ctx) => {
             const { result, requirements } = ctx;
@@ -809,7 +819,10 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 ...(reach.detail !== undefined && { facilitatorDetail: reach.detail }),
             },
             network: config.network,
-            facilitator: config.facilitatorUrl,
+            // What is actually settling, not what is configured: with a local facilitator there is no
+            // url, and reporting one would describe a server this process is not talking to.
+            facilitator: facilitator.detail,
+            facilitatorKind: facilitator.kind,
             payTo: config.payTo,
             price: config.priceUsd,
             asset: config.expectedAsset,
