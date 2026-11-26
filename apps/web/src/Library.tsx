@@ -11,7 +11,11 @@ import { explorerTx, networkName, shortHash } from "./explorer";
  *
  * Recovery existed before this, but only as a rescue: a line on the storefront for someone who had
  * lost a link. That is the wrong shape for the thing a buyer comes back to. A wallet that has bought
- * four briefs has a portfolio, a running total, and a balance it can spend on the next one.
+ * four briefs has a library, a running total, and a balance it can spend on the next one.
+ *
+ * Called a library rather than a portfolio because these are documents, not positions. A portfolio
+ * is a set of holdings whose value moves; a brief is a thing you own and read, and its price was
+ * settled when you bought it.
  *
  * There is still no account and no email. The wallet signs once to prove it is theirs, and the agent
  * answers with what that wallet paid for. The signature authorises reading, nothing else.
@@ -28,7 +32,7 @@ type State =
     | { k: "open"; address: string; receipts: RecoveredReceipt[] }
     | { k: "failed"; why: string };
 
-export function Portfolio({ terms }: { terms: Terms | null }) {
+export function Library({ terms }: { terms: Terms | null }) {
     const [state, setState] = useState<State>({ k: "closed" });
     const [balance, setBalance] = useState<string | null>(null);
     const wallet = useWallet();
@@ -44,7 +48,7 @@ export function Portfolio({ terms }: { terms: Terms | null }) {
         return () => { live = false; };
     }, [wallet.address, terms]);
 
-    // A different wallet is a different portfolio, so what the last one proved is dropped.
+    // A different wallet is a different library, so what the last one proved is dropped.
     useEffect(() => { setState({ k: "closed" }); }, [wallet.address]);
 
     async function open() {
@@ -68,7 +72,7 @@ export function Portfolio({ terms }: { terms: Terms | null }) {
     return (
         <>
             <SiteHeader
-                here="portfolio"
+                here="library"
                 right={
                     <>
                         <WalletChip wallet={wallet} />
@@ -80,7 +84,7 @@ export function Portfolio({ terms }: { terms: Terms | null }) {
             <main id="main">
                 <section className="border-b border-line">
                     <div className="shell band py-[clamp(2.25rem,5vw,3.25rem)]">
-                        <Spine label="Your portfolio" aside="One wallet, everything it owns." />
+                        <Spine label="Your library" aside="One wallet, everything it owns." />
                         <motion.div variants={stagger()} initial="hidden" animate="shown" className="min-w-0">
                             <h1 className="text-[clamp(2rem,4.2vw,3rem)] font-medium leading-[1.04] tracking-[-0.045em]">
                                 <MaskedLine delay={0.1}>Everything this wallet bought.</MaskedLine>

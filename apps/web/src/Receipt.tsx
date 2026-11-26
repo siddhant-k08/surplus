@@ -238,7 +238,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                 right={
                     <>
                         <Chip><Led />Base Sepolia</Chip>
-                        <Button href="/app/portfolio" tone="ghost" size="sm">Your portfolio</Button>
+                        <Button href="/app/library" tone="ghost" size="sm">Your library</Button>
                     </>
                 }
             />

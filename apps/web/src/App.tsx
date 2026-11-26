@@ -41,7 +41,10 @@ if (typeof window !== "undefined") {
 
 /** Where a path that used to work now lives. An old shared link is not allowed to become a 404. */
 const MOVED: Record<string, string> = {
-    "/library": "/app/portfolio",
+    // "Portfolio" was wrong for a shelf of research someone bought: a portfolio is a set of
+    // positions, and these are documents. Both old spellings still resolve.
+    "/library": "/app/library",
+    "/app/portfolio": "/app/library",
     "/store": "/app",
 };
 
@@ -53,7 +56,7 @@ type Route =
     | { k: "themes" }
     | { k: "filings" }
     | { k: "app" }
-    | { k: "portfolio" }
+    | { k: "library" }
     | { k: "receipt"; id: string }
     | { k: "desk"; tab: DeskTab }
     | { k: "missing" };
@@ -68,7 +71,7 @@ export function route(path: string): Route {
         case "/themes": return { k: "themes" };
         case "/filings": return { k: "filings" };
         case "/app": return { k: "app" };
-        case "/app/portfolio": return { k: "portfolio" };
+        case "/app/library": return { k: "library" };
         case "/desk": return { k: "desk", tab: "decision" };
         case "/desk/mandate": return { k: "desk", tab: "mandate" };
         case "/desk/book": return { k: "desk", tab: "book" };
@@ -81,7 +84,7 @@ const TITLES: Record<Route["k"], string> = {
     themes: "Themes: Surplus",
     filings: "Filings read: Surplus",
     app: "Buy a brief: Surplus",
-    portfolio: "Your portfolio: Surplus",
+    library: "Your library: Surplus",
     receipt: "Your brief: Surplus",
     desk: "Owner desk: Surplus",
     missing: "Not found: Surplus",
@@ -113,7 +116,7 @@ export function App() {
                 <Receipt id={here.id} />
             ) : here.k === "desk" ? (
                 <Waiting.Boundary><Owner tab={here.tab} /></Waiting.Boundary>
-            ) : here.k === "portfolio" || here.k === "app" ? (
+            ) : here.k === "library" || here.k === "app" ? (
                 <Waiting.Boundary><WalletPages page={here.k} /></Waiting.Boundary>
             ) : here.k === "themes" ? (
                 <Themes />
@@ -142,12 +145,12 @@ function Missing({ path }: { path: string }) {
                                 There is no page at <span className="font-mono text-dim">{path}</span>
                             </h1>
                             <p className="measure mt-5">
-                                If you are looking for a brief you bought, it is in your portfolio: the wallet that paid
+                                If you are looking for a brief you bought, it is in your library: the wallet that paid
                                 is the way back in.
                             </p>
                             <div className="mt-7 flex flex-wrap gap-3">
                                 <Button href="/app">Open app <span aria-hidden="true">↗</span></Button>
-                                <Button href="/app/portfolio" tone="ghost">Your portfolio</Button>
+                                <Button href="/app/library" tone="ghost">Your library</Button>
                                 <Button href="/" tone="ghost">Home</Button>
                             </div>
                         </div>

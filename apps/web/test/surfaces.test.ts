@@ -465,7 +465,7 @@ describe("routing", () => {
         expect(route("/themes").k).toBe("themes");
         expect(route("/filings").k).toBe("filings");
         expect(route("/app").k).toBe("app");
-        expect(route("/app/portfolio").k).toBe("portfolio");
+        expect(route("/app/library").k).toBe("library");
     });
 
     it("reads the desk's three tabs", () => {
@@ -476,7 +476,7 @@ describe("routing", () => {
 
     it("ignores a trailing slash, which a browser and a shared link both add", () => {
         expect(route("/themes/").k).toBe("themes");
-        expect(route("/app/portfolio/").k).toBe("portfolio");
+        expect(route("/app/library/").k).toBe("library");
         expect(route("/").k).toBe("home");
     });
 
@@ -492,7 +492,10 @@ describe("routing", () => {
     });
 
     it("sends a retired path to the page that replaced it", () => {
-        expect(movedTo("/library")).toBe("/app/portfolio");
+        expect(movedTo("/library")).toBe("/app/library");
+        // "Portfolio" was the wrong word for a shelf of documents, and a link someone already shared
+        // must not become a 404 because the vocabulary improved.
+        expect(movedTo("/app/portfolio")).toBe("/app/library");
         expect(movedTo("/store")).toBe("/app");
         expect(movedTo("/themes")).toBe(null);
         expect(movedTo("/nope")).toBe(null);
@@ -500,7 +503,7 @@ describe("routing", () => {
 
     it("answers anything else with the page that offers a way out", () => {
         expect(route("/invest").k).toBe("missing");
-        expect(route("/app/portfolio/extra").k).toBe("missing");
+        expect(route("/app/library/extra").k).toBe("missing");
     });
 });
 

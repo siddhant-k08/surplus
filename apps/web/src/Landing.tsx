@@ -45,7 +45,7 @@ export function Landing() {
                 here="home"
                 right={
                     <>
-                        <Chip title={cat?.network ?? ""}><Led />{chain}</Chip>
+                        <Chip><Led />{chain}</Chip>
                         <OpenApp />
                     </>
                 }

@@ -8,7 +8,7 @@ import { config } from "./wagmi";
  *
  * wagmi, viem and react-query are about 65 kB gzipped, and three of this site's pages are a person
  * reading about an agent: the landing page, the themes and the filings. They have no wallet, no
- * balance and no signature, so they do not pay for one. The app, the portfolio and the owner desk
+ * balance and no signature, so they do not pay for one. The app, the library and the owner desk
  * mount this, and inside it wagmi behaves exactly as it would at the root, reconnecting the last
  * wallet on mount.
  *
