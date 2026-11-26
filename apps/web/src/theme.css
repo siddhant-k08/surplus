@@ -103,3 +103,97 @@
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/*
+ * Light mode: the dark scheme turned over.
+ *
+ * The neutral ramp is the exact numeric inverse of the dark one, so the structure survives: the page
+ * is the extreme, surfaces step away from it, and the ink is the opposite extreme. Two deliberate
+ * departures from a literal inversion, both because an inverted colour is not an equally readable
+ * one:
+ *
+ * - `dim` and `faint` are nudged darker. The exact inverse of `dim` lands at 4.0:1 on the inverted
+ *   page where the dark theme has 5.5:1, and `dim` is the body text colour, so a faithful inversion
+ *   would be a less readable page.
+ * - Lime stays bright, because it is the brand and it is a fill. `lime` carries it where it has
+ *   to be read as a mark. Amber and coral darken for the same reason: as text on a pale ground their
+ *   dark-theme values sit near 2:1.
+ *
+ * Three states, not two. A bare `:root` is the dark default; `prefers-color-scheme: light` applies
+ * to anyone who has expressed no choice; `[data-theme]` wins over both, in either direction.
+ */
+:root[data-theme="light"] { color-scheme: light; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { color-scheme: light; } }
+
+/*
+ * The light values live once, here, unapplied.
+ *
+ * They have to be mapped onto the real tokens twice, because a media query cannot join a selector
+ * list, and two hand-maintained copies of a palette are two palettes waiting to disagree. Naming the
+ * values once means the duplication below is mechanical: a changed colour can only be changed in one
+ * place.
+ */
+:root {
+  --l-soot: #f0f0f0;
+  --l-surface: #e8e8e8;
+  --l-surface-2: #e3e3e3;
+  --l-pill: #dfdfdf;
+  --l-line: #d8d8d8;
+
+  --l-ink: #000000;
+  /*
+   * Darker than a literal inversion. The exact inverse of `dim` lands at 4.0:1 on the inverted page
+   * where the dark theme has 5.5:1, and `dim` is the body text colour, so a faithful inversion would
+   * be a less readable page. These measure 4.9:1 and 2.9:1, matching the dark theme's roles.
+   */
+  --l-dim: #67676e;
+  --l-faint: #8e8e93;
+
+  /*
+   * The accent inverts too. A #dafa9c panel on a #f0f0f0 page has almost no luminance separation:
+   * the button would read as dark text floating in a shape you cannot quite see. Dark lime carrying
+   * light text is the same relationship the dark theme has, the other way up, and it keeps the hue
+   * that makes the brand recognisable. Amber and coral darken for the same reason: at their
+   * dark-theme values they sit near 2:1 as text on a pale ground.
+   */
+  --l-lime: #4f6b17;
+  --l-lime-ink: #f2f4ec;
+  --l-amber: #a1560f;
+  --l-flag: #c43c2c;
+}
+
+:root[data-theme="light"] {
+  --color-soot: var(--l-soot);
+  --color-surface: var(--l-surface);
+  --color-surface-2: var(--l-surface-2);
+  --color-pill: var(--l-pill);
+  --color-line: var(--l-line);
+
+  --color-ink: var(--l-ink);
+  --color-dim: var(--l-dim);
+  --color-faint: var(--l-faint);
+
+  --color-lime: var(--l-lime);
+  --color-lime-ink: var(--l-lime-ink);
+  --color-amber: var(--l-amber);
+  --color-flag: var(--l-flag);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {  
+    --color-soot: var(--l-soot);
+    --color-surface: var(--l-surface);
+    --color-surface-2: var(--l-surface-2);
+    --color-pill: var(--l-pill);
+    --color-line: var(--l-line);
+  
+    --color-ink: var(--l-ink);
+    --color-dim: var(--l-dim);
+    --color-faint: var(--l-faint);
+  
+    --color-lime: var(--l-lime);
+    --color-lime-ink: var(--l-lime-ink);
+    --color-amber: var(--l-amber);
+    --color-flag: var(--l-flag);
+  }
+}

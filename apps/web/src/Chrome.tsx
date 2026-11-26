@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useReducedMotion } from "motion/react";
 import { CountUp, Reveal, motion } from "./motion";
+import { applyChoice, nextChoice, storedChoice, type Choice } from "./theme";
 
 /**
  * The parts every surface shares.
@@ -62,7 +63,9 @@ export function TopBar({ nav, right }: { nav: ReactNode; right?: ReactNode }) {
             >
                 <Wordmark />
                 <nav aria-label="Main" className="hidden gap-6 md:flex">{nav}</nav>
-                <div className="ml-auto flex items-center gap-2.5">{right}</div>
+                {/* The theme control sits here rather than in each page's `right`, because it belongs
+                    to the reader rather than to the page, and every surface should offer it. */}
+                <div className="ml-auto flex items-center gap-2.5">{right}<ThemeToggle /></div>
             </div>
             {/* On a phone the same four links sit in one scrolling row rather than behind a menu
                 button. Four links do not need a drawer, and a drawer is another state to get wrong. */}
@@ -73,6 +76,33 @@ export function TopBar({ nav, right }: { nav: ReactNode; right?: ReactNode }) {
                 {nav}
             </nav>
         </header>
+    );
+}
+
+/**
+ * Light, dark, or whatever the machine says.
+ *
+ * Three states and the label says which, because a two-state toggle has to guess for the reader who
+ * has never chosen, and guessing wrong at midnight is the whole complaint about dark modes. Starts
+ * at the stored choice rather than at a default, and reads it after mount so the server-rendered
+ * markup and the first client paint agree.
+ */
+export function ThemeToggle() {
+    const [choice, setChoice] = useState<Choice>("system");
+    useEffect(() => { setChoice(storedChoice()); }, []);
+
+    const label = choice === "system" ? "Theme: system" : choice === "light" ? "Theme: light" : "Theme: dark";
+    return (
+        <button
+            type="button"
+            onClick={() => { const next = nextChoice(choice); setChoice(next); applyChoice(next); }}
+            title={label}
+            aria-label={label}
+            className="inline-flex items-center gap-1.5 rounded-full border border-line bg-pill px-2.5 py-1 font-mono text-[0.6875rem] text-dim transition-colors hover:text-ink"
+        >
+            <span aria-hidden="true">{choice === "system" ? "◐" : choice === "light" ? "☀" : "☾"}</span>
+            <span className="hidden sm:inline">{choice === "system" ? "Auto" : choice === "light" ? "Light" : "Dark"}</span>
+        </button>
     );
 }
 
@@ -187,7 +217,7 @@ export function Addr({ children }: { children: string }) {
 }
 
 /** Which of the four places in the site a page is. Drives the nav's current mark. */
-export type Place = "home" | "themes" | "filings" | "portfolio" | "app" | "desk";
+export type Place = "home" | "themes" | "filings" | "library" | "app" | "desk";
 
 /**
  * The site's navigation: four places, each a page of its own.
@@ -203,7 +233,7 @@ export function SiteNav({ here }: { here: Place }) {
             <NavLink href="/" current={here === "home"}>Home</NavLink>
             <NavLink href="/themes" current={here === "themes"}>Themes</NavLink>
             <NavLink href="/filings" current={here === "filings"}>Filings</NavLink>
-            <NavLink href="/app/portfolio" current={here === "portfolio"}>Portfolio</NavLink>
+            <NavLink href="/app/library" current={here === "library"}>Library</NavLink>
         </>
     );
 }
