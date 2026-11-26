@@ -10,6 +10,7 @@ import { evidenceCount, count } from "../src/Evidence";
 import { route, movedTo } from "../src/App";
 import { assetStake, forBrief, sharePct, themeStake, verb } from "../src/Backing";
 import { driftSummary, driftWords, outsideBand } from "../src/Drift";
+import { isOwnerWallet } from "../src/session";
 import type { MandateTerms, Proposal, SyncResult, BriefClaim, Backing, DriftReading, ThemeDrift } from "../src/api";
 
 const TX = "0x" + "cd".repeat(32);
@@ -399,6 +400,31 @@ describe("reading the drift against a band", () => {
         expect(driftWords(0)).toBe("on target");
         expect(driftWords(1)).toBe("0.01% above target");
         expect(driftWords(-250)).toBe("2.5% below target");
+    });
+});
+
+describe("telling the owner from a buyer", () => {
+    const OWNER = "0x322472B62a297249234B258a48Df86ce8D620D48";
+
+    it("recognises the owner's wallet whatever the capitalisation", () => {
+        // One side is checksummed by the wallet, the other is whatever was typed into the
+        // environment. An address that differs only in case is the same address.
+        expect(isOwnerWallet(OWNER, OWNER)).toBe(true);
+        expect(isOwnerWallet(OWNER.toLowerCase(), OWNER)).toBe(true);
+        expect(isOwnerWallet(OWNER, OWNER.toLowerCase())).toBe(true);
+    });
+
+    it("does not recognise anyone else", () => {
+        expect(isOwnerWallet("0x" + "b2".repeat(20), OWNER)).toBe(false);
+    });
+
+    it("never guesses from a missing side", () => {
+        // A page that has read neither the wallet nor the catalogue must show a stranger nothing.
+        expect(isOwnerWallet(null, OWNER)).toBe(false);
+        expect(isOwnerWallet(OWNER, null)).toBe(false);
+        expect(isOwnerWallet(OWNER, undefined)).toBe(false);
+        expect(isOwnerWallet(OWNER, "")).toBe(false);
+        expect(isOwnerWallet(null, null)).toBe(false);
     });
 });
 

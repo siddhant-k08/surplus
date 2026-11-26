@@ -1022,6 +1022,16 @@ export function buildServer(deps: ServerDeps): BuiltServer {
             network: config.network,
             asset: config.expectedAsset,
             payTo: config.payTo,
+            /*
+             * Public so the storefront can tell the owner apart from a buyer without being told a
+             * secret. A page that shows the owner's own door needs to know whose door it is, and the
+             * alternative is a link to the desk shown to everybody.
+             *
+             * Not a credential. This address is already visible on any chain it has signed on, and
+             * holding it grants nothing: the desk needs a signature from the key behind it, which is
+             * exactly what it needed before this line existed.
+             */
+            ownerAddress: config.ownerAddress,
             salesBooked: sales.length,
             revenueUsdcMinor: sales.reduce((a, s) => a + s.amountUsdcMinor, 0n).toString(),
             maxThemes: 3,

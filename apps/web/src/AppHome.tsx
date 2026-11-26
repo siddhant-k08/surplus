@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Chip, Footer, Led, Note, SiteHeader, Spine } from "./Chrome";
 import { ConnectRow, WalletChip, useWallet } from "./Connect";
+import { isOwnerWallet, useOwnerSignedIn } from "./session";
 import { MaskedLine, Reveal, motion, riseItem, stagger } from "./motion";
 import { formatUsdc, get } from "./api";
 import { networkName } from "./explorer";
@@ -12,6 +13,8 @@ interface Catalogue {
     network: string;
     asset: string;
     payTo: string;
+    /** Public, so the page can tell the owner from a buyer. Not a credential: see the catalogue route. */
+    ownerAddress: string;
     salesBooked: number;
     revenueUsdcMinor: string;
     maxThemes: number;
@@ -96,6 +99,16 @@ export function AppHome() {
     const soldOut = cat !== null && cat.latest === null;
     const chain = networkName(cat?.network) ?? "Base Sepolia";
     const connected = wallet.address !== null;
+    /*
+     * Shown to the owner and to nobody else: for a buyer it is a door they cannot open, and a hint
+     * that the page they are on is not really for them.
+     *
+     * Either test is enough. A live session is the certain one, but it is also circular, because the
+     * only way to start a session is the page this button leads to. Recognising the owner's own
+     * connected wallet breaks that loop: connecting, which the owner does anyway, is what makes the
+     * door appear.
+     */
+    const ownerHere = useOwnerSignedIn() || isOwnerWallet(wallet.address, cat?.ownerAddress);
 
     return (
         <>
@@ -103,9 +116,9 @@ export function AppHome() {
                 here="app"
                 right={
                     <>
-                        <Chip title={cat?.network ?? ""}><Led />{chain}</Chip>
+                        <Chip><Led />{chain}</Chip>
                         <WalletChip wallet={wallet} />
-                        <Button href="/desk" tone="ghost" size="sm">Owner desk</Button>
+                        {ownerHere && <Button href="/desk" tone="ghost" size="sm">Owner desk</Button>}
                     </>
                 }
             />
@@ -171,7 +184,7 @@ export function AppHome() {
                                         </a>
                                         . Keep that link: it is the way back in, and the wallet you paid from is the
                                         other. Everything you own is in your{" "}
-                                        <a className="text-ink underline underline-offset-2" href="/app/portfolio">portfolio</a>.
+                                        <a className="text-ink underline underline-offset-2" href="/app/library">library</a>.
                                     </Note>
                                 )}
                             </div>
@@ -252,11 +265,11 @@ export function AppHome() {
                                 <p className="measure mt-4">
                                     A receipt link is shown once, when you pay. If you lost it, nothing is gone: sign
                                     with the wallet you paid from and the agent hands back every brief it bought. That
-                                    is what your portfolio is.
+                                    is what your library is.
                                 </p>
                                 <div className="mt-6">
-                                    <Button href="/app/portfolio" tone="ghost">
-                                        Open your portfolio <span aria-hidden="true">↗</span>
+                                    <Button href="/app/library" tone="ghost">
+                                        Open your library <span aria-hidden="true">↗</span>
                                     </Button>
                                 </div>
                             </Reveal>
