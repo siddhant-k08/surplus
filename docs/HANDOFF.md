@@ -2156,6 +2156,42 @@ deadline: the scheme then reports `settlement_pending` with the broadcast hash i
 mid-wait, which leaves something to reconcile against rather than a payment that happened with nothing
 written down.
 
+## Sized for a $6 budget, and the mainnet market side proved, 25 Nov 2026
+
+Budget fell from $20 to $6, which changes nothing about gas (Base was at 0.006 gwei: a settlement is
+0.00000051 ETH, a swap 0.0000015) and everything about the mandate's own sizing. A reserve of 0.50 was
+a third of the whole budget before a single trade.
+
+Both mandates resized: reserve 0.50 to 0.20, minimum trade 0.05 to 0.02. Local is v7, production v3.
+`MAINNET_SPEND_CAP_USDC` lowered from 20 to 2 in `.env` and in Vercel; at 20 the cap was larger than
+the entire budget.
+
+The point about USDC worth remembering: selling to yourself is net zero. The buyer wallet pays, the
+`X402_PAY_TO` wallet receives, and sending it back costs 65k gas. The same dollar funds unlimited
+sales, so the only consumed cost is gas and model spend.
+
+### Preflight against Base mainnet, the first time the trading path touched a real chain
+
+Market side only: no execution key is set, so the wallet half correctly stopped at "no executor". Five
+tokens, live KyberSwap mainnet quotes, all gates passing.
+
+    NVDAc   quote   150.9311  nav   151.5305   -40 bps   liquidity 5
+    METAc   quote   613.8987  nav   611.7419   +35 bps   liquidity 4
+    GOOGLc  quote   275.7809  nav   274.3494   +52 bps   liquidity 5
+    AAPLc   quote   356.7564  nav   355.0836   +47 bps   liquidity 3
+    TSLAc   quote   383.0390  nav   381.8250   +32 bps   liquidity 3
+
+Liquidity 3 to 5 against a floor of 2, and the premium to NAV is at most 52 bps against a 300 bps gate.
+
+**Every NAV was 12 to 15 hours stale, so the deviation gate was skipped on all five.** That is the
+documented inert-when-the-market-is-closed behaviour working as designed, and it is the operational
+reason the first real swap belongs in US market hours: 20:00 to 02:30 IST. The premiums above were
+computed by hand rather than by the gate, and they are small, so nothing is hiding behind the skip
+right now. That will not be true when the underlying market has moved and the token has not.
+
+Note on size: these tokens are $150 to $614 each, so a 0.30 USDC leg buys roughly half a thousandth of
+a share. Fractions are fine, but it is worth seeing the number before reading a fill.
+
 ## Lessons from earlier milestones
 
 - A new optional field on a persisted, hash-covered record has to be added to the writer **and** the
