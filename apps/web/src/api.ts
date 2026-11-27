@@ -415,6 +415,9 @@ export interface Holding {
     valueUsdcMinor?: string | null;
     priceUsdcMinor?: string | null;
     valueError?: string;
+    /** Whether the books can sell it, and why not when they cannot. */
+    sellable: boolean;
+    why: string | null;
 }
 
 export interface Holdings {
@@ -449,6 +452,9 @@ export function normalizeHoldings(raw: Partial<Holdings> & { positions?: Partial
             sells: p.sells ?? 0,
             decimals: typeof p.decimals === "number" ? p.decimals : null,
             transactions: Array.isArray(p.transactions) ? p.transactions : [],
+            // never offered for sale on a guess
+            sellable: p.sellable === true,
+            why: typeof p.why === "string" ? p.why : null,
             ...(p.valueUsdcMinor !== undefined && { valueUsdcMinor: p.valueUsdcMinor }),
             ...(p.priceUsdcMinor !== undefined && { priceUsdcMinor: p.priceUsdcMinor }),
             ...(p.valueError !== undefined && { valueError: p.valueError }),
@@ -471,7 +477,32 @@ export interface ExecuteResult {
     id: string;
     simulated: boolean;
     warnings: string[];
-    fills: { symbol: string; usdcIn: string; price: string; quantity: string }[];
+    fills: {
+        symbol: string; usdcIn: string; price: string; quantity: string;
+        /** Present only on a sale: the USDC that came back, and the gain or loss it realized. */
+        side?: "sell"; proceedsUsdc?: string; realizedUsdc?: string;
+    }[];
+    /** Legs whose swap did not execute. Not booked. */
+    unfilled?: { symbol: string; usdcIn: string; reason: string }[];
+}
+
+/** One position a sale proposal would dispose of, valued at a live sell quote. */
+export interface ExitCandidate {
+    asset: string;
+    symbol: string;
+    theme: string;
+    units: string;
+    valueUsdcMinor: string;
+    costUsdcMinor: string;
+    moveBps: number;
+    reason: string;
+    caveat: string | null;
+}
+
+/** A sale proposal: the same signing payload as a purchase, plus what is being sold. */
+export interface ExitProposal extends Proposal {
+    selling: ExitCandidate[];
+    skipped: { symbol: string; why: string }[];
 }
 
 /**
@@ -528,4 +559,6 @@ export const api = {
             signature,
         }),
     execute: (id: string) => post<ExecuteResult>("/invest/execute", { id }),
+    /** Proposes a sale of the named positions, whole when no units are given. Moves nothing. */
+    exit: (sell: { asset: string; units?: string }[]) => post<ExitProposal>("/invest/exit", { sell }),
 };

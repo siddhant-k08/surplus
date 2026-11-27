@@ -19,6 +19,7 @@ import {
     type TokenRecord,
     openLedger,
     themeHoldings,
+    positionsFromLedger,
     MemoryProposalStore,
     type ProposalStore,
     type SwapOrder,
@@ -1404,6 +1405,47 @@ describe("executing for real", () => {
         const result = await e.execute("p1");
         expect(result.ok).toBe(false);
         expect(fake.sent).toEqual([]);
+    });
+
+    it("sells a real position for the USDC the swap returned, and books the gain or loss", async () => {
+        // a buy that came back with 5e15 units, then a sale of all of them that returned 0.40 USDC
+        const sent: { key: string; side: string; units?: bigint }[] = [];
+        const executor = {
+            fill: async (order: SwapOrder, _q: unknown, key: string) => {
+                sent.push({ key, side: order.side ?? "buy", ...(order.unitsIn !== undefined && { units: order.unitsIn }) });
+                return order.side === "sell"
+                    ? { amountOut: u("0.40"), transaction: "0x" + "5e".repeat(32) }
+                    : { amountOut: 5_000_000_000_000_000n, transaction: "0x" + "b0".repeat(32) };
+            },
+        };
+        const e = await mainnetEngine(executor);
+        await approved(e);
+        expect((await e.execute("p1")).ok).toBe(true);
+        const held = [...positionsFromLedger(e.treasury.ledger.all()).values()].find((x) => x.units > 0n)!;
+
+        const x = await e.exit("x1", [{ asset: held.asset }]);
+        if (!x.ok) throw new Error(x.reasons.join("; "));
+        const a = await e.approve("x1", await signOffer(ownerAccount, x.toSign));
+        expect(a.ok).toBe(true);
+        const r = await e.execute("x1");
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+
+        expect(r.simulated).toBe(false);
+        // every unit the books hold, sent as one sale
+        const sale = sent.filter((s) => s.side === "sell");
+        expect(sale.reduce((t, s) => t + (s.units ?? 0n), 0n)).toBe(held.units);
+        expect(r.fills.every((f) => f.side === "sell")).toBe(true);
+        expect(r.fills.reduce((t, f) => t + BigInt(f.proceedsUsdc!), 0n)).toBe(u("0.40") * BigInt(sale.length));
+
+        const entries = e.treasury.ledger.all().filter((t) => t.type === "SALE_SETTLED");
+        expect(entries.length).toBeGreaterThan(0);
+        expect(entries.every((t) => t.txHash === "0x" + "5e".repeat(32) && !(t.memo ?? "").includes("SIMULATED"))).toBe(true);
+        const after = positionsFromLedger(e.treasury.ledger.all()).get(held.asset)!;
+        expect(after.units).toBe(0n);
+        expect(after.costUsdcIn).toBe(0n);
+        expect(e.treasury.state("x1")).toBe("SETTLED");
+        expect(reconcileInternal(e.treasury.ledger).ok).toBe(true);
     });
 
     it("sends nothing at all without an executor, and says the fills are simulated", async () => {

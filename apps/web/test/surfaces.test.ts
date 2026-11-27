@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { explorerTx, explorerTokenBalance, networkName, shortHash } from "../src/explorer";
-import { change, changeWords, formatUnits, ordered } from "../src/Holdings";
+import { change, changeWords, formatUnits, gainWords, ordered, saleTotals } from "../src/Holdings";
 import { normalizeHoldings } from "../src/api";
 import { stepStates, activeStep } from "../src/steps";
 import {
@@ -609,7 +609,7 @@ describe("the holdings table", () => {
     it("lists open positions first, largest first, and keeps closed ones", () => {
         const h = (symbol: string, units: string, cost: string) => ({
             asset: symbol, symbol, units, costUsdcMinor: cost, realizedUsdcMinor: "0",
-            buys: 1, sells: 0, decimals: 8, transactions: [],
+            buys: 1, sells: 0, decimals: 8, transactions: [], sellable: true, why: null,
         });
         expect(ordered([h("A", "0", "0"), h("B", "5", "10"), h("C", "5", "30")]).map((x) => x.symbol))
             .toEqual(["C", "B", "A"]);
@@ -637,5 +637,30 @@ describe("holdings from an older server", () => {
         expect(formatUnits(h.positions[0]!.units, h.positions[0]!.decimals)).toBe("5 units");
         // never claims tokens exist when the server did not say
         expect(h.simulated).toBe(true);
+    });
+});
+
+describe("the sale panel", () => {
+    const c = (value: string, cost: string) => ({
+        asset: "0xab", symbol: "MSTRc", theme: "digital-assets", units: "28439",
+        valueUsdcMinor: value, costUsdcMinor: cost, moveBps: 0, reason: "owner_request", caveat: null,
+    });
+
+    it("adds up what a sale returns against what it cost", () => {
+        expect(saleTotals([c("23288", "23367")])).toEqual({ value: 23288n, cost: 23367n, gain: -79n });
+        expect(saleTotals([c("10", "5"), c("20", "5")]).gain).toBe(20n);
+    });
+
+    it("says gain or loss in words", () => {
+        expect(gainWords(-79n)).toBe("a loss of 0.000079 USDC");
+        expect(gainWords(500n)).toBe("a gain of 0.000500 USDC");
+        expect(gainWords(0n)).toBe("no gain or loss");
+    });
+
+    it("never offers a sale the server did not say was possible", () => {
+        const h = normalizeHoldings({ positions: [{ asset: "0xab", units: "5" }] });
+        expect(h.positions[0]!.sellable).toBe(false);
+        const ok = normalizeHoldings({ positions: [{ asset: "0xab", units: "5", sellable: true, why: null }] });
+        expect(ok.positions[0]!.sellable).toBe(true);
     });
 });

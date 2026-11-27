@@ -456,7 +456,12 @@ export function Desk({ tab, address, onSignedOut }: { tab: DeskTab; address: str
                     <div className="shell py-16"><p className="font-mono text-sm text-dim" role="status">Reading the mandate…</p></div>
                 )}
 
-                {tab === "book" && <TheBook ledger={ledger} positions={positions} wallet={execution?.address} />}
+                {tab === "book" && (
+                    <TheBook
+                        ledger={ledger} positions={positions} wallet={execution?.address}
+                        owner={address} real={execution?.willSendRealSwaps === true} onChanged={refresh}
+                    />
+                )}
             </main>
 
             <Footer>
@@ -661,10 +666,13 @@ function LegRow({
     );
 }
 
-function TheBook({ ledger, positions, wallet }: {
+function TheBook({ ledger, positions, wallet, owner, real, onChanged }: {
     ledger: InvestLedger | null;
     positions: PositionsView | null;
     wallet: string | undefined;
+    owner: string;
+    real: boolean;
+    onChanged: () => Promise<void>;
 }) {
     return (
         <section className="py-[clamp(2.5rem,5vw,3.5rem)]">
@@ -682,7 +690,7 @@ function TheBook({ ledger, positions, wallet }: {
                     </p>
                 </Reveal>
 
-                <HoldingsPanel wallet={wallet} />
+                <HoldingsPanel wallet={wallet} owner={owner} real={real} onChanged={onChanged} />
 
                 {positions !== null && <div className="mt-6"><AgainstTheChain positions={positions} /></div>}
 
