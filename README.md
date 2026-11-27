@@ -16,26 +16,32 @@ Being specific about this matters more than the feature list.
 
 | | State |
 |---|---|
-| Selling briefs for USDC | **Real.** Base Sepolia, settled onchain, booked from confirmed settlements |
-| Research from SEC filings | **Real.** EDGAR 10-K and 10-Q, verified quote by quote |
+| Selling briefs for USDC | **Real.** Base mainnet since 27 Nov 2026, settled onchain ([first sale](https://basescan.org/tx/0x5c10865e99d5e6e20a505ef31f021c0f2fadedf0296d836a427ed47382384ca4)), booked from confirmed settlements |
+| Research from SEC filings | **Real.** EDGAR 10-K, 20-F and 10-Q, verified quote by quote |
 | The books, the mandate, receipts | **Real**, in Postgres, append-only, hash chained where it matters |
 | Buying tokenized stocks | **Simulated**, and labelled as simulated everywhere it appears |
 
-The reason for that last row is not effort. Selling runs on Base Sepolia because that is the only
-network the free x402 facilitator serves, and Coinbase's tokenized stocks exist only on Base mainnet.
-Testnet revenue cannot fund a mainnet swap, and the agent refuses to pretend otherwise: it will not
-mirror revenue earned on one network into a book that trades on another. The execution path is built,
-tested and gated behind `MAINNET_ENABLED`; turning it on is a decision about real money, not a deploy
-step.
+Sales settle on Base mainnet; investing is simulated. No token has been bought. The swap path is built
+and tested, and it refuses to exist without `MAINNET_ENABLED`, a spend cap and a trading key, none of
+which a sale needs. Using it is a separate decision about real money, not a deploy step.
+
+The simulated investing book carries revenue from earlier testnet sales as well as mainnet ones, so its
+totals are not a measure of real earnings. The sales book is kept per network and the mainnet one holds
+mainnet sales only.
+
+Research reads every company the Tokenized Stocks API lists. The agent can invest only in the smaller
+set that also appears in Base's own registry, and pages mark which those are.
 
 ## How a brief earns the right to exist
 
 1. Filings are pulled from SEC EDGAR, never from a summary or a news article.
 2. A fact survives only if a 20 to 300 character quote appears verbatim in a document it cites, and
    every number in the fact appears in that quote.
-3. A company reaches a theme only through a surviving fact from its own filing. Evidence is counted in
+3. A second model call rereads each fact against its quotes alone and cuts or drops what they do not
+   say. This reduces overstatement and does not prove there is none.
+4. A company reaches a theme only through a surviving fact from its own filing. Evidence is counted in
    code; the model never scores itself.
-4. When nothing clears the bar, the theme comes back as a declared gap. An empty answer is more useful
+5. When nothing clears the bar, the theme comes back as a declared gap. An empty answer is more useful
    than a confident one with nothing behind it.
 
 Source documents are untrusted input. So are buyer-supplied themes. Verification is the defence, not

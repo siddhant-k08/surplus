@@ -1,6 +1,6 @@
 # @surplus/api
 
-The x402 paid research endpoint. A buyer pays USDC on Base Sepolia and gets the newest verified brief; the sale lands in the ledger as real testnet revenue. Working end to end since 21 Nov 2026.
+The x402 paid research endpoint. A buyer pays USDC on Base and gets the newest verified brief; the sale lands in the ledger as real revenue, tagged with the network it settled on. Working on Base Sepolia since 21 Nov 2026 and in production on Base mainnet since 27 Nov 2026. A local run defaults to Sepolia.
 
 ## Run it
 
@@ -31,7 +31,7 @@ curl -s localhost:4021/health | python3 -m json.tool
 curl -sD - -o /dev/null localhost:4021/brief | grep -i '^payment-required' | sed 's/^[^:]*: //' | tr -d '\r' | base64 -d | python3 -m json.tool
 ```
 
-The decoded challenge should name `eip155:84532`, the Base Sepolia USDC address, your `payTo`, and the price in atomic units (`$0.25` becomes `250000`, USDC having 6 decimals).
+On the default network the decoded challenge should name `eip155:84532`, the Base Sepolia USDC address, your `payTo`, and the price in atomic units (`$0.25` becomes `250000`, USDC having 6 decimals).
 
 ## Buying one, end to end
 
@@ -39,7 +39,7 @@ Set two things in `.env`, then run the buyer in a second terminal while the serv
 
 ```
 X402_PAY_TO=0xSellerAddress
-X402_BUYER_PRIVATE_KEY=0xThrowawayTestnetKey
+X402_BUYER_PRIVATE_KEY=0xThrowawayKey
 ```
 
 ```bash
@@ -52,9 +52,19 @@ Three things to get right:
 
 - `X402_PAY_TO` must not be the buyer's own address. Paying yourself is not a meaningful test.
 - Only the buyer wallet needs test USDC, at least `BRIEF_PRICE_USD` of it. The seller address receives and needs nothing.
-- The key is read from `.env` and never printed. Use a throwaway testnet wallet, never a key that holds anything real.
+- The key is read from `.env` and never printed. Use a throwaway wallet that holds no more than you plan to spend.
 
 The buyer needs **no testnet ETH**, only USDC. Confirmed onchain on the first real sale: the settlement transaction's sender is the facilitator (`0xd407e409e34e0b9afb99ecceb609bdbcd5e7f1bf`), not the buyer, so the facilitator submits the signed EIP-3009 authorization and pays the gas. This is a property of the x402.org facilitator, not a guarantee of the protocol.
+
+### Buying on mainnet
+
+This spends real USDC. The buyer wallet needs `BRIEF_PRICE_USD` of USDC on Base and no ETH.
+
+```bash
+X402_API_URL=https://your-host X402_NETWORK=eip155:8453 MAINNET_ENABLED=true npm run buy -w @surplus/api
+```
+
+Run it once. If it fails after "Paying and fetching...", check whether the payment settled before trying again.
 
 ## On-demand research
 
@@ -130,7 +140,7 @@ The agent never creates a version on its own: `buildServer` only gets the abilit
 
 ### Two books, on purpose
 
-The sales book (`LEDGER_PATH`) records real money received onchain and is tagged `testnet`. The investing book (`INVEST_LEDGER_PATH`) records what the agent decided to do with the surplus and is tagged `sim` while fills are simulated. A simulated fill must never land in the book that records real money, so `/invest/sync` mirrors the revenue total into the investing book with an entry naming the transactions it stands for, and reads the sales book read-only.
+The sales book (`LEDGER_PATH`) records money received onchain and is tagged `testnet` or `mainnet`, one book per network. The investing book (`INVEST_LEDGER_PATH`) records what the agent decided to do with the surplus and is tagged `sim` while fills are simulated. A simulated fill must never land in the book that records real money, so `/invest/sync` mirrors the revenue total into the investing book with an entry naming the transactions it stands for, and reads the sales book read-only.
 
 Revenue and costs are attributed per brief. Every saved brief's model cost is booked exactly once (keyed `llm-<briefId>`), because a brief costs real money whether or not anyone buys it. Each sale is mirrored individually, keyed and tagged with its settlement transaction, and attributed to the brief that sale actually bought, which the sales ledger records. Then every brief that earned something is settled in turn, so the first fills the reserve gap and later ones go to surplus.
 
@@ -149,7 +159,7 @@ Revenue is booked in the SDK's `onAfterSettle` hook, not in the route handler, s
 - an unsuccessful or zero settlement books nothing
 - ledger entries are tagged `testnet` (or `mainnet`), never `sim`: money really moves
 
-State is in memory for now. Persistence is a later milestone, so restarting loses the booked sales.
+Booked sales persist in JSONL files, or in Postgres when `DATABASE_URL` is set.
 
 ## Safety
 
@@ -160,5 +170,5 @@ State is in memory for now. Persistence is a later milestone, so restarting lose
 - `@x402/core`, `@x402/evm`, `@x402/express` at 2.32.0, published 20 Nov 2026. The older `x402-express` has been at 1.2.0 since April 2026 and is not used.
 - Buyer side: `wrapFetchWithPaymentFromConfig` and `decodePaymentResponseHeader` from `@x402/fetch`, with the client-side `ExactEvmScheme` from `@x402/evm` (root, not `/exact/server`) and `privateKeyToAccount` from `viem/accounts`.
 - API shape read from the installed package: `paymentMiddleware(routes, server)`, `new x402ResourceServer(facilitator).register(network, new ExactEvmScheme()).onAfterSettle(hook)`, `HTTPFacilitatorClient` from `@x402/core/server`. `@x402/paywall` is an optional peer dependency and is not installed: this endpoint serves agents, not a browser paywall.
-- `https://x402.org/facilitator/supported` advertises `exact` on `eip155:84532` and no other EVM network, which is why mainnet needs a different facilitator.
+- `https://x402.org/facilitator/supported` advertises `exact` on `eip155:84532` and no other EVM network, which is why mainnet needs another one. `X402_FACILITATOR=local` settles in this process and is what production uses (`docs/DEPLOY.md`).
 - USDC on Base Sepolia is `0x036CbD53842c5426634e7929541eC2318f3dCF7e` (Circle's contract address list). The running server's own 402 challenge resolved `$3.00` to `3000000` against that address, which confirms it independently.
