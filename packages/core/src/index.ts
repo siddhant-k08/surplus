@@ -12,6 +12,7 @@ export * from "./tokens";
 export * from "./research";
 export * from "./briefstore";
 export * from "./approval";
+export * from "./proposalstore";
 export * from "./eip712";
 export * from "./registry";
 export * from "./liquidity";

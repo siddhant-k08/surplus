@@ -13,6 +13,7 @@ import {
     type PrecheckOutcome,
     type PriceMap,
 } from "./approval";
+import type { StoredProposal } from "./proposalstore";
 
 export type CostKind = "llm" | "search" | "gas";
 
@@ -442,6 +443,11 @@ export class Treasury {
             decimals: ReadonlyMap<string, number>;
             blocks?: readonly string[];
             realized?: ReadonlyMap<number, RealizedFill>;
+            /**
+             * When `preflight` passed, if swaps were sent on the strength of it. Expiry is judged as of
+             * then: money that has already moved has to be booked however long the swaps took.
+             */
+            checkedAt?: Date;
         },
     ): ExecuteResult {
         const rec = this.get(id);
@@ -460,7 +466,7 @@ export class Treasury {
             approval: rec.approval,
             proposal: rec.proposal,
             mandate: { version: mandate.version, hash: mandate.hash, terms: mandate.terms },
-            now: this.now(),
+            now: i.checkedAt ?? this.now(),
             quotedPrices: rec.quotedPrices,
             freshPrices: i.freshPrices,
         });
@@ -661,8 +667,59 @@ export class Treasury {
         this.event("PROPOSAL_CREATED", `proposal ${id} re-proposed with fresh quotes`);
     }
 
+    /**
+     * What would stop this proposal executing, asked without changing anything.
+     *
+     * For a caller about to send real swaps, which cannot be taken back: `execute` makes the same
+     * checks, but it books what happened, so by then the money has moved.
+     */
+    preflight(id: string, freshPrices: PriceMap, at: Date): string[] {
+        const rec = this.get(id);
+        if (rec.machine.state !== "APPROVED" || !rec.approval) {
+            throw new Error(`Proposal ${id} is ${rec.machine.state}, expected APPROVED`);
+        }
+        const mandate = this.opts.mandates.current();
+        const { reasons } = precheck({
+            approval: rec.approval,
+            proposal: rec.proposal,
+            mandate: { version: mandate.version, hash: mandate.hash, terms: mandate.terms },
+            now: at,
+            quotedPrices: rec.quotedPrices,
+            freshPrices,
+        });
+        const spend = rec.proposal.legs.filter((l) => !isSell(l)).reduce((a, l) => a + l.usdcIn, 0n);
+        if (this.ledger.balance("surplus.investable") < spend) reasons.push("insufficient investable surplus");
+        return reasons;
+    }
+
     proposal(id: string): ProposalRecord {
         return this.get(id);
+    }
+
+    /** A proposal as storage needs it, without what only the offering caller knows. */
+    exportProposal(id: string): Omit<StoredProposal, "offered"> {
+        const rec = this.get(id);
+        return {
+            id: rec.id,
+            proposal: rec.proposal,
+            ...(rec.briefId !== undefined && { briefId: rec.briefId }),
+            quotedPrices: rec.quotedPrices,
+            ...(rec.approval !== undefined && { approval: rec.approval }),
+            state: rec.machine.state,
+            history: rec.machine.history(),
+        };
+    }
+
+    /** Puts a stored proposal back, replacing whatever this process remembered about it. */
+    restoreProposal(stored: StoredProposal): void {
+        this.records.set(stored.id, {
+            id: stored.id,
+            proposal: stored.proposal,
+            ...(stored.briefId !== undefined && { briefId: stored.briefId }),
+            quotedPrices: stored.quotedPrices,
+            ...(stored.approval !== undefined && { approval: stored.approval }),
+            machine: ProposalMachine.restore(stored.state, stored.history),
+        });
     }
 
     state(id: string) {

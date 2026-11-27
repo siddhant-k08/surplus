@@ -38,6 +38,14 @@ export class ProposalMachine {
     private current: ProposalState = "DRAFT";
     private readonly log: StateChange[] = [];
 
+    /** A machine as it was stored. Nothing is replayed: the history is the record of what happened. */
+    static restore(state: ProposalState, history: readonly StateChange[]): ProposalMachine {
+        const machine = new ProposalMachine();
+        machine.current = state;
+        machine.log.push(...history);
+        return machine;
+    }
+
     get state(): ProposalState {
         return this.current;
     }
