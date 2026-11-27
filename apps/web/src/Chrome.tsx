@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useReducedMotion } from "motion/react";
 import { CountUp, Reveal, motion } from "./motion";
 import { applyChoice, nextChoice, storedChoice, type Choice } from "./theme";
+import { wavePath } from "./wave";
 
 /**
  * The parts every surface shares.
@@ -11,16 +12,60 @@ import { applyChoice, nextChoice, storedChoice, type Choice } from "./theme";
  */
 
 export function Wordmark({ href = "/", label = "Surplus" }: { href?: string; label?: string }) {
+    const line = useRef<SVGPathElement>(null);
+    const over = useRef(false);
+    const frame = useRef(0);
+    const still = useReducedMotion() === true;
+
+    useEffect(() => () => cancelAnimationFrame(frame.current), []);
+
+    const start = () => {
+        over.current = true;
+        if (still || frame.current !== 0) return;
+        let began: number | null = null;
+        let cycles = 0;
+        const step = (now: number) => {
+            began ??= now;
+            const t = (now - began) / WAVE_MS;
+            // A cycle that has started is finished, so the wave always comes to rest in its own shape.
+            const done = !over.current && Math.floor(t) > cycles;
+            cycles = Math.floor(t);
+            line.current?.setAttribute("d", wavePath(done ? 0 : t % 1));
+            frame.current = done ? 0 : requestAnimationFrame(step);
+        };
+        frame.current = requestAnimationFrame(step);
+    };
+    const leave = () => {
+        over.current = false;
+    };
+
     return (
         <a
             href={href}
-            className="group flex items-center gap-2.5 text-[1.0625rem] font-bold tracking-[-0.03em] text-ink no-underline"
+            onMouseEnter={start}
+            onMouseLeave={leave}
+            onFocus={start}
+            onBlur={leave}
+            className="flex items-center gap-2.5 text-[1.0625rem] font-bold tracking-[-0.03em] text-ink no-underline"
         >
-            <span className="size-2.5 rounded-[2px] bg-lime transition-transform duration-500 ease-[var(--ease-out-soft)] group-hover:rotate-45" />
+            <svg aria-hidden="true" viewBox="0 1.5 21 13" className="h-[13px] w-[21px] shrink-0 text-lime">
+                <path
+                    ref={line}
+                    d={wavePath(0)}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                />
+            </svg>
             {label}
         </a>
     );
 }
+
+/** One full swing, down and back up. */
+const WAVE_MS = 1100;
 
 /** A link whose underline draws rather than appears. */
 export function NavLink({ href, children, current }: { href: string; children: ReactNode; current?: boolean }) {
