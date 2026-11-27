@@ -4,6 +4,10 @@ Written 21 Nov 2026 when the project moved from a Claude chat to Claude Code. Th
 
 ## Where we stopped
 
+Latest first. **27 Nov 2026: sales are live on Base mainnet and the full loop has run in production with
+simulated fills.** See "Mainnet sales, 27 Nov 2026" near the end. The numbered notes below are from
+21 Nov and kept as history.
+
 1. The research pipeline works end to end against real SEC filings and Gemini (`gemini-3.1-flash-lite`). Latest real run: 3 model calls, about 70,600 input tokens, cost about $0.021 booked at paid-tier rates, zero validation issues.
 2. `npm test` runs core (244 tests, 26 files) and the API (100 tests, 6 files).
 3. Milestone 1 (research quality) is closed, 21 Nov 2026. What the diagnosis found:
@@ -2020,9 +2024,9 @@ execute, reconcile, attribute, take profit, stop loss, rebalance. All three plan
 2. **Re-check the Quest page rules.** Scheduled for 24 Nov and 2 Dec; the 24 Nov pass was missed. Re-read
    base.org/stocks before any mainnet use.
 3. **Submission.** Demo rehearsal, video, X post tagging @buildonbase, the form. Target Fri 4 Dec.
-4. Real swaps only after Siddhant's explicit authorization, eligibility advice, a spend cap, the mainnet
-   flag, and a throwaway wallet. Execute one swap per `SwapOrder` from `swapPlan`, not one per leg: gas is
-   2 to 4 percent of a $0.10 leg.
+4. Real swaps are undecided. Decide by about Mon 30 Nov, or submit with investing simulated. They need
+   Siddhant's explicit authorization, a spend cap and a throwaway trading wallet. Execute one swap per
+   `SwapOrder` from `swapPlan`, not one per leg: gas is 2 to 4 percent of a $0.10 leg.
 
 Two known limits to decide on before the demo, neither a defect:
 
@@ -2047,7 +2051,7 @@ money, ledger, mandate, surplus, policy, allocator (water-filling; leaves unplac
 
 ## Assumptions and unverified items
 
-- Siddhant believes he can access these tokens from India. Legal eligibility is not verified and needs qualified advice before any real purchase.
+- Eligibility: Siddhant stated on 27 Nov 2026 that this is handled. It was not checked as part of this project.
 - The meaning of each `paused_features` flag is unknown, so any flag blocks trading.
 - Whether KyberSwap's extraFee is truly zero is unverified.
 - Gemini 3.8 Flash pricing ($0.75 / $3.75 until 31 Dec 2026, then $1.50 / $7.50) comes from secondary sources only; Google's pricing page did not list it on 21 Nov 2026.
@@ -2063,7 +2067,7 @@ money, ledger, mandate, surplus, policy, allocator (water-filling; leaves unplac
 
 ## Environment (.env, never committed)
 
-`MODE`, `MAINNET_ENABLED`, `MAINNET_SPEND_CAP_USDC`, `BASE_RPC_URL`, `BASE_SEPOLIA_RPC_URL`, `SEC_USER_AGENT`, `LLM_PROVIDER`, `RESEARCH_MODEL`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `PRICE_INPUT_PER_MTOK_USD`, `PRICE_OUTPUT_PER_MTOK_USD`, `RESEARCH_MAX_USD`. Prices are paid-tier rates even on a free tier so the ledger books a realistic cost.
+`MODE`, `MAINNET_ENABLED`, `MAINNET_SPEND_CAP_USDC`, `BASE_RPC_URL`, `BASE_SEPOLIA_RPC_URL`, `SEC_USER_AGENT`, `X402_NETWORK`, `X402_FACILITATOR`, `FACILITATOR_PRIVATE_KEY`, `LLM_PROVIDER`, `RESEARCH_MODEL`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `PRICE_INPUT_PER_MTOK_USD`, `PRICE_OUTPUT_PER_MTOK_USD`, `RESEARCH_MAX_USD`. Prices are paid-tier rates even on a free tier so the ledger books a realistic cost.
 
 ## The loop ran on production from a browser, 25 Nov 2026
 
@@ -2191,6 +2195,41 @@ right now. That will not be true when the underlying market has moved and the to
 
 Note on size: these tokens are $150 to $614 each, so a 0.30 USDC leg buys roughly half a thousandth of
 a share. Fractions are fine, but it is worth seeing the number before reading a fill.
+
+## Mainnet sales, 27 Nov 2026
+
+Production switched to `X402_NETWORK=eip155:8453` with the local facilitator. `INVEST_MODE=sim` and no
+execution key, so no swap can be sent.
+
+**First real sale, verified onchain.** Transaction `0x5c10865e99d5e6e20a505ef31f021c0f2fadedf0296d836a427ed47382384ca4`, block 62988924, 14:02:40 UTC. 0.25 USDC from the
+buyer `0x8Ab8b5d0b8806868B636B9251e2e1d2753356384` to `0xc0cB2732A63a5F91F17A2E657F1A8f1B56b33F3a`, submitted
+by the settlement wallet `0x5cF57B21bad1e7cd108694C4a59Ca152B39c4A57`, which paid 0.00000062 ETH of gas.
+The buyer held no ETH. Booked once, tagged `mainnet`, against `brief-2026-11-27T03-48-09-876Z`.
+
+**Simulated loop on production.** Mandate v4 (ai-compute 50%, platform-giants 30%, digital-assets 20%).
+Sync, propose, sign and execute produced 9 simulated fills totalling 0.887931 USDC in those proportions
+across NVDAc, MSFTc, AMZNc, GOOGLc, METAc and MSTRc, all attributed to the 27 Nov brief. Of that surplus
+only 0.091838 came from the mainnet sale; the rest came from testnet revenue already in the simulated
+book. The accurate claim is "sales settle on Base mainnet; investing is simulated".
+
+Also this day:
+
+- Approving a proposal had been failing in production: proposals lived in memory and the staleness
+  rebuild dropped them. They are now stored.
+- Research widened to every company the Tokenized Stocks API listed (435), with a shortlist per theme,
+  20-F filings and a quote check. The quote check was added after the brief now on sale was generated;
+  that brief was edited by hand to match its quotes and says so. The check has not yet run against a
+  real model.
+- The switch first failed on a typo (`eip155:8543`), and every route answered 503 until it was fixed.
+- The nightly backup had never succeeded, for want of a repository secret. Because the repository is
+  public it now uploads only an encrypted archive, and covers both networks' sales books.
+
+Open:
+
+- A custom brief has not been timed against the 60 second function limit since the extra model calls.
+- One Postgres test (execution journal, signed transaction across a restart) failed in one full local run
+  on 27 Nov. The rerun was stopped, so the cause is unknown. CI passed on the merges that followed.
+- Payment requests name the resource with `http://` rather than `https://`.
 
 ## Lessons from earlier milestones
 

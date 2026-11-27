@@ -135,13 +135,37 @@ wrong while every route still answers.
 | `OWNER_ADDRESS` | The only address whose signature approves a trade. Required; no default |
 | `OWNER_TOKEN` | Machine and CLI access. At least 16 characters; never reaches a browser |
 | `COOKIE_SECURE` | Leave unset in production. `false` only for plain-http local development |
-| `X402_PAY_TO` | Where USDC lands. A throwaway wallet while this is a testnet demo |
+| `X402_PAY_TO` | Where USDC lands. Real revenue on mainnet, so be sure you hold its key |
+| `X402_NETWORK` | `eip155:84532` (default) or `eip155:8453`. A typo stops the server from starting |
 | `PUBLIC_LEDGER` | `true` publishes the sales book. The transparency is the pitch, but it is your financial history |
-| `MAINNET_ENABLED` | Off. Turning it on is a decision about real money, not a deploy step |
+| `MAINNET_ENABLED` | Needed for mainnet sales or swaps. A decision about real money, not a deploy step |
 | `EXECUTION_PRIVATE_KEY` | Empty unless real swaps are deliberately on. Empty means simulated fills |
 | `MAINNET_SPEND_CAP_USDC` | The ceiling the executor refuses to pass. No default, on purpose |
 | `RESEARCH_TOTAL_MAX_USD` | Ceiling on model spend for the life of the process |
 | `DATABASE_URL` | Empty keeps the books in the JSONL files; a connection string moves them to Postgres |
+
+## Selling on Base mainnet
+
+Live since 27 Nov 2026. Investing stays simulated.
+
+| Variable | Value |
+|---|---|
+| `MAINNET_ENABLED` | `true` |
+| `X402_NETWORK` | `eip155:8453` |
+| `X402_FACILITATOR` | `local` |
+| `FACILITATOR_PRIVATE_KEY` | a wallet holding a little ETH on Base, not the trading key |
+| `BASE_RPC_URL` | a Base mainnet endpoint |
+| `INVEST_MODE` | `sim` |
+| `EXECUTION_PRIVATE_KEY` | not set, so no swap can be sent |
+| `FACILITATOR_RPC_URL`, `APPROVAL_CHAIN_ID` | not set, so neither can point at Sepolia |
+
+Redeploy after changing them, then read `GET /health`: `ok` true, `network` `eip155:8453`, and the
+facilitator naming the settlement wallet. If every route answers 503, the reason is the `startup_failed`
+line in the logs (`vercel logs --environment production`). The first switch failed that way, on
+`eip155:8543` typed for `eip155:8453`.
+
+The mainnet sales book is a new one, so the public sales count starts at zero. The first sale used
+0.00000062 ETH of gas from the settlement wallet and none from the buyer.
 
 ## Keeping it running
 
@@ -314,14 +338,16 @@ gas on Base is cents. Exposure should be a few dollars at most.
 
 ### The books have to stay honest about where the money came from
 
-Selling runs on Base Sepolia and the stocks are on Base mainnet. Revenue earned on one network cannot
-fund trades on another, and `syncRevenue` refuses to mirror across: a mainnet book fed by testnet
-revenue would have the agent spending real money while its books claimed it had earned it. Those sales
-are reported as `refusedSales` rather than silently skipped.
+Revenue earned on one network cannot fund trades on another, and `syncRevenue` refuses to mirror across:
+a mainnet book fed by testnet revenue would have the agent spending real money while its books claimed it
+had earned it. Those sales are reported as `refusedSales` rather than silently skipped.
 
-So **a mainnet trade today is funded by owner capital, not by surplus the agent earned.** That is what
-`OPENING_FLOAT_USDC` is, and the entry says "owner-provided working capital". The earned-surplus story
-stays on the simulated book until selling moves to mainnet too, which needs a paid facilitator.
+Since selling moved to mainnet, a mainnet investing book can mirror mainnet sales. Two things still hold:
+
+- It starts as a new book. Owner capital is what `OPENING_FLOAT_USDC` records, labelled "owner-provided
+  working capital".
+- Revenue arrives in the `X402_PAY_TO` wallet. The trading wallet receives none of it until someone moves
+  it there, so check that wallet's balance against what the book says is investable.
 
 ### Rehearse it first
 
@@ -345,8 +371,8 @@ during US market hours**, when the gate is actually doing its job.
 
 ### The order to do it in
 
-1. Buy a brief on the live site with Base Sepolia USDC. Free, and it exercises payment, settlement,
-   receipt and recovery against the real deployment.
+1. Complete a mainnet sale first (see "Selling on Base mainnet"), so payment, settlement and receipt are
+   proven before the agent can spend anything.
 2. Fund a throwaway wallet on **Base mainnet** with a few dollars of USDC and a little ETH for gas.
    USDC on Ethereum mainnet is on the wrong chain: it has to be bridged to Base first, and that costs
    Ethereum gas, which on a small amount is a meaningful fraction of it.
@@ -367,11 +393,7 @@ during US market hours**, when the gate is actually doing its job.
 
 ## Turning on real swaps
 
-Not a deploy step. It needs, in order: eligibility advice that buying these tokens is lawful for you,
-a funded throwaway wallet, `MAINNET_ENABLED=true`, a `MAINNET_SPEND_CAP_USDC` you would be relaxed to
-lose, and `EXECUTION_PRIVATE_KEY`. The executor refuses to exist if any of those is missing, and the
-startup banner says `execution  simulated (...)` with the reason whenever it has refused.
-
-Note the thing that makes this more than a flag: selling runs on Base Sepolia because that is the only
-EVM network the free x402 facilitator serves, and the tokenized stocks exist only on Base mainnet. Real
-revenue cannot fund a real swap until both halves are on mainnet, which also needs a paid facilitator.
+Not a deploy step. It needs the owner's explicit decision, then a funded throwaway wallet,
+`MAINNET_ENABLED=true`, `INVEST_MODE=mainnet`, a `MAINNET_SPEND_CAP_USDC` you would be relaxed to lose,
+and `EXECUTION_PRIVATE_KEY`. The executor refuses to exist if the flag, the cap or the key is missing, and
+the startup banner says `execution  simulated (...)` with the reason whenever it has refused.

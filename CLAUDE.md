@@ -23,6 +23,8 @@ Full history, decisions, verified facts and open questions: read `docs/HANDOFF.m
 - `apps/web` (`@surplus/web`): Vite, React, TS, Tailwind v4 and `motion`. Tests in `apps/web/test` (vitest, no extra config: they cover pure logic only). The whole look lives in `src/theme.css` as `@theme` tokens; components use those tokens and never raw hex. Motion goes through `src/motion.tsx`, which wraps `LazyMotion` with `domAnimation` and re-exports `m` as `motion`: importing `motion` from the package directly ships the heavy bundle and `strict` mode throws to stop it. Never import `@surplus/core` as a value here; it reaches for `node:fs` and `node:crypto` and will break the browser build. Use `import type` and keep small helpers local. Built with `npm run build:web`; the API serves `apps/web/dist`. Routing is about forty lines in `src/App.tsx` over `history.pushState`: `/` landing, `/themes`, `/filings`, `/app`, `/app/portfolio`, `/r/:id` and the desk's three tabs, with retired paths replaced in history rather than left to 404. The owner desk is lazily loaded (`Owner.tsx`) so a visitor does not download it. A client route and an API route must never share a path: the API wins and answers a person's navigation with JSON, which is why the catalogue's public data sits at `/catalogue/themes` and `/catalogue/filings`. Wallets go through wagmi 3: `src/wagmi.ts` holds the one config (Coinbase Wallet and injected connectors, Base and Base Sepolia), `src/wallet.ts` is the imperative face the payment stack and the signing flows call, and `src/Connect.tsx` owns the single `ConnectButton` every surface uses, which shows a wallet picker only when more than one is actually available. Stay on wagmi 3: a connect-modal library (RainbowKit, OnchainKit) needs wagmi 2, whose `@wagmi/connectors` hard-depends on WalletConnect and reown, which took `npm audit --omit=dev` from 0 to 22 high advisories and the bundle from 326 kB to 1.1 MB gzipped. wagmi, viem and react-query load only with the pages that can hold a wallet (`Wallets.tsx`, mounted by `WalletPages.tsx` and `Owner.tsx`); the landing, themes and filings pages never download them. The owner desk accepts one fixed address and verifies EOA signatures, so a Smart Wallet there would be rejected after signing.
 - `api/index.ts`: the serverless entry point, used with `vercel.json`. It caches one assembly per instance and serves the same Express app the long-running server does. Typechecked by `api/tsconfig.json` (`tsc -p api`, part of `npm run typecheck`).
 - `apps/api` (`@surplus/api`): never resolve paths against the cwd here; npm runs workspace scripts from `apps/api`, so use `src/paths.ts` (`REPO_ROOT`, `loadRootEnv`, `fromRepoRoot`). The x402 paid research endpoint, Express 5 plus `@x402/*` 2.x, tests with vitest and supertest. See `apps/api/README.md`.
+- `.github/workflows/backup.yml`: nightly export of both networks' books. The repository is public, so only
+  an encrypted archive is uploaded and the export prints nothing to the log.
 - `docs/briefs/`: research briefs saved by `demo-research.ts`.
 - The mandate panel (`apps/web/src/MandatePanel.tsx`, `src/terms.ts`) edits every term the mandate
   carries, including the three exit rules. An empty box there means the rule is not set at all, which
@@ -40,8 +42,8 @@ npm run test:core           # core only
 npm run test:api            # API only
 npm run typecheck           # core, then API
 npm run typecheck:scripts   # scripts
-X402_PAY_TO=0x... npm run api   # the x402 endpoint on Base Sepolia
-npm run buy -w @surplus/api     # buy one brief from it (needs X402_BUYER_PRIVATE_KEY, testnet only)
+X402_PAY_TO=0x... npm run api   # the x402 endpoint, Base Sepolia by default
+npm run buy -w @surplus/api     # buy one brief from it (needs X402_BUYER_PRIVATE_KEY; on mainnet it spends real USDC)
 npm run web                     # the owner desk on :5173, proxying the API
 npm run api:files               # the API against the JSONL files, ignoring DATABASE_URL (local review)
 npm run build:web               # build it; the API then serves apps/web/dist
@@ -58,7 +60,8 @@ node scripts/spike-edgar.mjs            # read-only SEC shape check
 
 Last known test count: core 32 files, 409 tests. API 14 files, 283 tests (about 35 fewer without `DATABASE_URL`). Web 3 files, 78 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
-The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway testnet key.
+The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway key. Since
+27 Nov 2026 that wallet holds real USDC on Base mainnet, so a buy against production spends money.
 
 ## Money and ledger rules (do not break)
 
@@ -192,11 +195,14 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
   against the onchain spend cap: it returns USDC rather than spending it.
 - `GET /invest/positions` compares units the execution journal recorded receiving against the wallet's onchain balances (`comparePositions`). Short fails: the books claim tokens the wallet does not hold. Extra is reported, not a failure. With simulated fills it says there is nothing to compare rather than claiming reconciled.
 - The NAV deviation gate blocks only when NAV is fresh, so it is inert whenever the underlying market is closed, which is when the premium to NAV is widest. A first real swap belongs in US market hours.
-- Mainnet stays off (`MAINNET_ENABLED=false`) until Siddhant explicitly authorizes it, with a spend cap and a throwaway wallet. The API refuses to start on Base mainnet without that flag, and `INVEST_MODE=mainnet` needs it too.
+- Production has sold on Base mainnet since 27 Nov 2026 (`MAINNET_ENABLED=true`, `INVEST_MODE=sim`, no
+  `EXECUTION_PRIVATE_KEY`). Real swaps stay off until Siddhant explicitly authorizes them, with a spend cap
+  and a throwaway wallet; local `.env` keeps `MAINNET_ENABLED=false`. The API refuses to start on Base
+  mainnet without that flag, and `INVEST_MODE=mainnet` needs it too.
 - The four routes that are neither paid for nor signed (the nonce routes and the two that spend a nonce) are capped per caller in the database, so the limit is one limit across every instance. A limiter that cannot answer lets the request through and logs it; it stops abuse, it is not a dependency of the API.
 - `GET /health` checks its dependencies and answers 503 when storage is unreachable or the books do not reconcile. An empty catalogue is reported, never a fault.
 - Owner routes (`/invest/*`, `/mandate`) are gated by `OWNER_TOKEN`, with no default and no open mode. That token is a shared secret, not the owner's signature on a trade; EIP-712 replaces it.
-- Two books: the sales book is real money tagged `testnet`; the investing book is tagged `sim` while fills are simulated. Simulated activity never enters the real book.
+- Two books: the sales book is money received onchain, one per network, tagged `testnet` or `mainnet`; the investing book is tagged `sim` while fills are simulated. Simulated activity never enters the real book.
 - Revenue cannot cross networks. `syncRevenue` refuses to mirror a sale whose mode differs from the investing book's and reports it as a refused sale: a mainnet book fed by testnet revenue would have the agent spend real money while claiming to have earned it. Whatever a mainnet book invests is owner capital (`OPENING_FLOAT_USDC`) until selling moves to mainnet too.
 - **The facilitator can run in this process** (`apps/api/src/facilitator.ts`), chosen by
   `X402_FACILITATOR=local` and off by default. It is the only route to mainnet revenue without a paid
@@ -205,9 +211,9 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
   moves the settlement gas bill here, so `FACILITATOR_PRIVATE_KEY` names a wallet holding ETH on the
   served chain, and **the facilitator takes its own `FACILITATOR_RPC_URL`**: `BASE_RPC_URL` belongs to
   the executor, which trades tokenized stocks and is therefore always on Base mainnet, while the
-  facilitator must be on whatever `X402_NETWORK` says. Those differ for as long as the agent sells on
-  Sepolia and trades on mainnet, so the fallback to `BASE_RPC_URL` is correct only once both halves are
-  on one chain. `verifyChain()` asks the RPC which chain it is on and refuses to start on a mismatch,
+  facilitator must be on whatever `X402_NETWORK` says. The two differ whenever the agent sells on
+  Sepolia, so the lookup follows the served network: `BASE_RPC_URL` on mainnet,
+  `BASE_SEPOLIA_RPC_URL` on Sepolia, and `FACILITATOR_RPC_URL` overrides both. `verifyChain()` asks the RPC which chain it is on and refuses to start on a mismatch,
   because the alternative is finding out mid-settlement holding a buyer's signed authorization. **That key must not be `EXECUTION_PRIVATE_KEY`**: the settlement wallet pays other
   people's gas and publishes its address in `getSupported`, the trading wallet spends the agent's own
   USDC, and a shared key is refused rather than warned about. `registerExactEvmScheme` also registers
@@ -215,7 +221,7 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
   refuses anything but the configured network: the advertised list is far wider than the one wallet can
   reach, and this process pays the gas for whatever it accepts. A local facilitator that cannot be built
   is a startup error, never a silent fall back to the hosted one.
-- The free x402.org facilitator serves Base Sepolia (`eip155:84532`) only; it advertises no other EVM network. Mainnet needs a different facilitator. It submits the buyer's signed EIP-3009 authorization and pays the gas, so a buyer needs USDC but no ETH (verified onchain 21 Nov 2026).
+- The free x402.org facilitator serves Base Sepolia (`eip155:84532`) only; it advertises no other EVM network. Mainnet uses the local one. It submits the buyer's signed EIP-3009 authorization and pays the gas, so a buyer needs USDC but no ETH (verified onchain 21 Nov 2026).
 - Sale revenue is booked only from a confirmed settlement, idempotent on the settlement transaction, and only when the settled asset is the expected USDC.
 - A receipt is keyed on a secret id issued at purchase, never on the settlement transaction: settlements are public on Base, so a transaction-keyed receipt would give briefs away to anyone watching the seller's address.
 
