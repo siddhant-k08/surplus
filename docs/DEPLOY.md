@@ -146,7 +146,8 @@ wrong while every route still answers.
 
 ## Selling on Base mainnet
 
-Live since 27 Nov 2026. Investing stays simulated.
+Live since 27 Nov 2026. The table below is selling with investing simulated; "Turning on real swaps"
+further down is what changes for real trades.
 
 | Variable | Value |
 |---|---|
@@ -395,6 +396,22 @@ during US market hours**, when the gate is actually doing its job.
    chain returned, and `reconcile.ok` is still true.
 
 ## Turning on real swaps
+
+Done once on 27 Nov 2026: a buy and a sale of MSTRc, both reconciled against the wallet (see
+`docs/HANDOFF.md`, "First real swaps"). What production carried for it:
+
+| Variable | Value |
+|---|---|
+| `INVEST_MODE` | `mainnet` |
+| `EXECUTION_PRIVATE_KEY` | the throwaway trading wallet, never the settlement or buyer key |
+| `MAINNET_SPEND_CAP_USDC` | `0.50`, counted from the execution journal; sales do not count against it |
+| `OPENING_FLOAT_USDC` | `0.50`, what the wallet held. Defaults to 1.00 and cannot be lowered once booked |
+
+The sequence that worked: buy a second brief so the surplus clears the reserve, run the preflight
+against the funded wallet, set the variables and redeploy, check `GET /invest/execution` names the wallet
+and the cap, then sync, propose, sign and execute on the desk. Selling is the Sell button on the desk's
+Book tab, which proposes the whole position for the owner to sign. To stop, sync once (anything confirmed
+late is booked), then set `INVEST_MODE=sim` and redeploy; the key can stay, since sim never sends.
 
 Not a deploy step. It needs the owner's explicit decision, then a funded throwaway wallet,
 `MAINNET_ENABLED=true`, `INVEST_MODE=mainnet`, a `MAINNET_SPEND_CAP_USDC` you would be relaxed to lose,

@@ -4,8 +4,9 @@ Written 21 Nov 2026 when the project moved from a Claude chat to Claude Code. Th
 
 ## Where we stopped
 
-Latest first. **27 Nov 2026: sales are live on Base mainnet and the full loop has run in production with
-simulated fills.** See "Mainnet sales, 27 Nov 2026" near the end. The numbered notes below are from
+Latest first. **27 Nov 2026: sales are live on Base mainnet, and the agent has made one real round trip:
+bought MSTRc with surplus from a real sale and sold it back, both reconciled against the wallet.** See
+"Mainnet sales, 27 Nov 2026" and "First real swaps, 27 Nov 2026" near the end. The numbered notes below are from
 21 Nov and kept as history.
 
 1. The research pipeline works end to end against real SEC filings and Gemini (`gemini-3.1-flash-lite`). Latest real run: 3 model calls, about 70,600 input tokens, cost about $0.021 booked at paid-tier rates, zero validation issues.
@@ -2024,9 +2025,10 @@ execute, reconcile, attribute, take profit, stop loss, rebalance. All three plan
 2. **Re-check the Quest page rules.** Scheduled for 24 Nov and 2 Dec; the 24 Nov pass was missed. Re-read
    base.org/stocks before any mainnet use.
 3. **Submission.** Demo rehearsal, video, X post tagging @buildonbase, the form. Target Fri 4 Dec.
-4. Real swaps are undecided. Decide by about Mon 30 Nov, or submit with investing simulated. They need
-   Siddhant's explicit authorization, a spend cap and a throwaway trading wallet. Execute one swap per
-   `SwapOrder` from `swapPlan`, not one per leg: gas is 2 to 4 percent of a $0.10 leg.
+4. Real swaps are done once (27 Nov, a buy and a sale of MSTRc). Decide whether production stays in
+   `INVEST_MODE=mainnet` for the demo or goes back to `sim`, and whether a further trade should be made in
+   US market hours with the NAV gate active. Each direction cost about 0.000002 ETH of gas across two
+   transactions, a large share of a two-cent leg, so a trade meant as more than a proof needs a larger leg.
 
 Two known limits to decide on before the demo, neither a defect:
 
@@ -2227,9 +2229,60 @@ Also this day:
 Open:
 
 - A custom brief has not been timed against the 60 second function limit since the extra model calls.
-- One Postgres test (execution journal, signed transaction across a restart) failed in one full local run
-  on 27 Nov. The rerun was stopped, so the cause is unknown. CI passed on the merges that followed.
+- One Postgres test (execution journal, signed transaction across a restart) times out at 60 s in some
+  full local runs and passes alone in about 16 s. It is slow against the remote database rather than
+  wrong; CI, with a local Postgres, has passed every time.
 - Payment requests name the resource with `http://` rather than `https://`.
+
+## First real swaps, 27 Nov 2026
+
+**What happened.** A second mainnet sale (0.25 USDC, settlement `0xe93b25f5f0c1a54e0efef8ae11cd327a6891a54adf3c7b71bff5a707cac17bb3`)
+took the fresh mainnet book past its reserve: 0.50 revenue, 0.213938 of model costs across eight briefs,
+0.20 to the reserve, and 0.116838 investable at the 50% invest share. The allocator placed one leg,
+0.023367 USDC of MSTRc under digital-assets, the only leg above the 0.02 minimum. Siddhant signed and
+executed it, then later sold the position with the desk's Sell button.
+
+| | Buy | Sale |
+|---|---|---|
+| Transaction | `0x528d4e8b148ff1b99e3b69c2d353a2d0aeeaa34f7c72a37cb21a5347ffaa9b5e` | `0x9447463af08feee0bd2c4165dbf501f99f0263b916a7ff4e87e09ad55d98dca5` |
+| Time (UTC) | 18:01:42 | 18:17:31 |
+| Moved | 0.023367 USDC out, 28439 MSTRc units (8 decimals) in | 28439 units out, 0.023312 USDC in |
+| Booked | 28439 units, exactly what arrived | 0.023312 proceeds, a realized loss of 0.000055 |
+| Gas, approval and swap together | about 0.0000026 ETH | about 0.0000020 ETH |
+
+Trading wallet `0xe0143cA7b7F4a1791aB4A28D63c88A9b6c1668c9`, a throwaway funded by Siddhant with 0.50 USDC
+and 0.0003 ETH. Each swap was preceded by an approval of exactly its amount, and no allowance is left.
+After the sale: wallet 0.499945 USDC and no MSTRc, books the same, `GET /invest/positions` "matches",
+ledger reconciled, spend cap 0.023367 of 0.50 used (sales do not count). Proceeds went back to
+`surplus.investable` (0.116783), not to operating cash, and the sale is attributed to the brief and theme
+that bought the position.
+
+**Caveat on the buy.** It confirmed 1 minute 42 seconds after the early close of the post-Thanksgiving US
+session (13:00 New York), so the NAV deviation gate may have been inert. The price paid, 82.17 USDC per
+token, was about 1.8% above the NAV read shortly before the close, inside the 3% limit either way.
+
+**Fixed on the way, each before it could cost anything:**
+
+- A live fill was booked with the route's estimate rather than what arrived, and a swap recovered after
+  a restart was booked as zero units. The executor now nets the receipt's ERC-20 transfers to its own
+  wallet (checked against `balanceOf` for all ten tokens), and a successful swap showing nothing
+  received stays unresolved.
+- A swap that filled but never reached the books (the process dying, or giving up waiting) was found only
+  by executing the same proposal again. `reconcileSwaps` now books it from the execution journal, and
+  nothing new is proposed while any swap is unresolved or unbooked.
+- A leg split across two swaps, one of which failed, booked its full amount.
+- The desk had no holdings view and no way to sell. The Book tab now lists holdings in whole tokens with
+  cost, a live sell-quote value, BaseScan links, and a Sell button that runs the same propose, sign and
+  execute flow as a purchase.
+- Cross-Origin-Opener-Policy `same-origin` cut the page off from the Coinbase Wallet popup, so connecting
+  with Coinbase Wallet hung. Now `same-origin-allow-popups`; the SDK's console error is gone. A Coinbase
+  Wallet sign-in has not been confirmed since.
+
+**State at the end of the day.** Production is still in real-swap mode (`INVEST_MODE=mainnet`) with
+0.476633 of the cap and 0.116783 investable, so any proposal signed and executed on the desk trades real
+money. A buy proposal `p-1795803476208` (0.023356 USDC) was created after the sale and never signed.
+The simulated positions from earlier are in the separate sim book and no longer show on the desk or the
+public pages.
 
 ## Lessons from earlier milestones
 

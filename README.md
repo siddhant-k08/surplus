@@ -19,15 +19,20 @@ Being specific about this matters more than the feature list.
 | Selling briefs for USDC | **Real.** Base mainnet since 27 Nov 2026, settled onchain ([first sale](https://basescan.org/tx/0x5c10865e99d5e6e20a505ef31f021c0f2fadedf0296d836a427ed47382384ca4)), booked from confirmed settlements |
 | Research from SEC filings | **Real.** EDGAR 10-K, 20-F and 10-Q, verified quote by quote |
 | The books, the mandate, receipts | **Real**, in Postgres, append-only, hash chained where it matters |
-| Buying tokenized stocks | **Simulated**, and labelled as simulated everywhere it appears |
+| Buying and selling tokenized stocks | **Real, at test size.** One round trip on Base mainnet on 27 Nov 2026: bought 0.023367 USDC of MSTRc ([buy](https://basescan.org/tx/0x528d4e8b148ff1b99e3b69c2d353a2d0aeeaa34f7c72a37cb21a5347ffaa9b5e)), sold it for 0.023312 ([sale](https://basescan.org/tx/0x9447463af08feee0bd2c4165dbf501f99f0263b916a7ff4e87e09ad55d98dca5)), both booked from what the chain returned. Earlier fills in the simulated book stay labelled as simulated |
 
-Sales settle on Base mainnet; investing is simulated. No token has been bought. The swap path is built
-and tested, and it refuses to exist without `MAINNET_ENABLED`, a spend cap and a trading key, none of
-which a sale needs. Using it is a separate decision about real money, not a deploy step.
+Sales settle on Base mainnet, and the investing loop has run once for real: a sale funded the surplus,
+the owner signed a purchase, the agent swapped USDC for MSTRc through the KyberSwap aggregator, and the
+owner later signed its sale back to USDC. Each step was checked against the wallet's own balances. The
+amounts are deliberately tiny (two cents) and capped at 0.50 USDC, and the two sales behind them were the
+owner's own test purchases, so this proves the mechanism and says nothing about demand.
 
-The simulated investing book carries revenue from earlier testnet sales as well as mainnet ones, so its
-totals are not a measure of real earnings. The sales book is kept per network and the mainnet one holds
-mainnet sales only.
+Real swaps refuse to exist without `MAINNET_ENABLED`, a spend cap and a trading key, and `INVEST_MODE`
+decides whether a proposal executes for real. Turning them on is a decision about real money, not a
+deploy step.
+
+The mainnet investing book holds mainnet sales only. The older simulated book also carries revenue from
+testnet sales, so its totals are not a measure of real earnings.
 
 Research reads every company the Tokenized Stocks API lists. The agent can invest only in the smaller
 set that also appears in Base's own registry, and pages mark which those are.

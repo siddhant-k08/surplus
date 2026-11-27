@@ -204,11 +204,21 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
   disposal, then report the books short of tokens they had correctly sold. A sale also does not count
   against the onchain spend cap: it returns USDC rather than spending it.
 - `GET /invest/positions` compares units the execution journal recorded receiving against the wallet's onchain balances (`comparePositions`). Short fails: the books claim tokens the wallet does not hold. Extra is reported, not a failure. With simulated fills it says there is nothing to compare rather than claiming reconciled.
+- The security headers are set twice, by the function (`apps/api/src/server.ts`) and for static files
+  (`scripts/build-vercel.mjs`), and must match. Cross-Origin-Opener-Policy is `same-origin-allow-popups`:
+  `same-origin` severed the page from the Coinbase Wallet popup and connecting hung with no visible error.
 - The NAV deviation gate blocks only when NAV is fresh, so it is inert whenever the underlying market is closed, which is when the premium to NAV is widest. A first real swap belongs in US market hours.
-- Production has sold on Base mainnet since 27 Nov 2026 (`MAINNET_ENABLED=true`, `INVEST_MODE=sim`, no
-  `EXECUTION_PRIVATE_KEY`). Real swaps stay off until Siddhant explicitly authorizes them, with a spend cap
-  and a throwaway wallet; local `.env` keeps `MAINNET_ENABLED=false`. The API refuses to start on Base
-  mainnet without that flag, and `INVEST_MODE=mainnet` needs it too.
+- Production has sold on Base mainnet since 27 Nov 2026, and on the same day made one real round trip
+  (MSTRc bought, then sold) from the throwaway trading wallet `0xe0143cA7b7F4a1791aB4A28D63c88A9b6c1668c9`
+  with `MAINNET_SPEND_CAP_USDC=0.50` and `OPENING_FLOAT_USDC=0.50`. Siddhant runs each real trade from
+  the desk; never execute one yourself. Check `GET /invest/execution` for whether production currently
+  sends real swaps rather than assuming. Local `.env` holds the same trading key but keeps
+  `MAINNET_ENABLED=false`, so nothing trades from a laptop. The API refuses to start on Base mainnet
+  without that flag, and `INVEST_MODE=mainnet` needs it too. Before setting `INVEST_MODE` back to `sim`,
+  sync once so no swap is left unbooked in the mainnet book.
+- `OPENING_FLOAT_USDC` defaults to 1.00 and can never be lowered once booked: the engine refuses to start
+  rather than rewrite capital. Set it to what the trading wallet actually holds before a book's first
+  start.
 - The four routes that are neither paid for nor signed (the nonce routes and the two that spend a nonce) are capped per caller in the database, so the limit is one limit across every instance. A limiter that cannot answer lets the request through and logs it; it stops abuse, it is not a dependency of the API.
 - `GET /health` checks its dependencies and answers 503 when storage is unreachable or the books do not reconcile. An empty catalogue is reported, never a fault.
 - Owner routes (`/invest/*`, `/mandate`) are gated by `OWNER_TOKEN`, with no default and no open mode. That token is a shared secret, not the owner's signature on a trade; EIP-712 replaces it.
