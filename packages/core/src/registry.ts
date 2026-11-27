@@ -1,3 +1,4 @@
+import type { CandidateCompany } from "./pipeline";
 import type { TokenRecord } from "./tokens";
 
 export interface RegistryEntry {
@@ -63,4 +64,33 @@ export function crossCheck(
 
     const missingFromApi = registry.filter((r) => !seen.has(r.address.toLowerCase()));
     return { trusted, missingFromApi, apiOnly, symbolMismatch };
+}
+
+/** A company name goes into a model prompt, so it is stripped of anything that could pose as markup. */
+const promptSafe = (name: string): string =>
+    name.replace(/[<>\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+
+/**
+ * Every company research may cover: all the API lists, which is far more than the agent may trade.
+ *
+ * Reading a company's filings puts no money at risk, so this does not apply the registry. Investing
+ * still goes through `crossCheck`. Where two tokens claim a symbol the registry's address wins, so an
+ * unlisted token can never stand in for a listed one.
+ */
+export function researchUniverse(
+    apiTokens: readonly TokenRecord[],
+    registry: readonly RegistryEntry[] = BASE_REGISTRY,
+): CandidateCompany[] {
+    const bySymbol = new Map<string, CandidateCompany>();
+    const listed = new Set(registry.map((r) => r.address.toLowerCase()));
+    const names = new Map(registry.map((r) => [r.address.toLowerCase(), r.name]));
+    const registrySymbols = new Set(registry.map((r) => r.symbol.toLowerCase()));
+    for (const t of apiTokens) {
+        const asset = t.address.toLowerCase();
+        const key = t.symbol.toLowerCase();
+        if (registrySymbols.has(key) && !listed.has(asset)) continue;
+        if (bySymbol.has(key) && !listed.has(asset)) continue;
+        bySymbol.set(key, { asset, symbol: t.symbol, name: names.get(asset) ?? promptSafe(t.name) });
+    }
+    return [...bySymbol.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
 }

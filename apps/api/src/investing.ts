@@ -411,8 +411,10 @@ export class InvestingEngine {
         const market = await this.deps.market();
         const eligible = new Set(market.trusted.map((t) => t.address.toLowerCase()));
 
-        // the brief may predate the current trusted set; refuse rather than trade on a stale one
-        const issues = validateBrief(saved.brief, { eligible });
+        // A brief may cover far more companies than the agent may trade, so its shape is checked against
+        // what it names and the trusted set is applied to the candidates below.
+        const named = new Set(saved.brief.themes.flatMap((t) => t.fits.map((f) => f.asset.toLowerCase())));
+        const issues = validateBrief(saved.brief, { eligible: named });
         if (issues.length > 0) {
             return { ok: false, reasons: issues.map((i) => `${i.path} ${i.rule}: ${i.message}`) };
         }
@@ -445,7 +447,19 @@ export class InvestingEngine {
         const unfunded = saved.brief.themes.filter((t) => !funded.has(t.themeId)).map((t) => t.themeId);
         const themes = saved.brief.themes
             .filter((t) => funded.has(t.themeId))
-            .map((t) => ({ id: t.themeId, candidates: toCandidates(t.fits, market.liquidity, 3, 1) }));
+            .map((t) => ({
+                id: t.themeId,
+                candidates: toCandidates(
+                    t.fits.filter((f) => eligible.has(f.asset.toLowerCase())), market.liquidity, 3, 1,
+                ),
+            }));
+        const researchOnly = [...new Set(
+            saved.brief.themes
+                .filter((t) => funded.has(t.themeId))
+                .flatMap((t) => t.fits)
+                .filter((f) => !eligible.has(f.asset.toLowerCase()))
+                .map((f) => f.symbol),
+        )];
         if (themes.length === 0) {
             return {
                 ok: false,
@@ -502,6 +516,9 @@ export class InvestingEngine {
             warnings: [
                 ...[...quoted.errors].map(([asset, why]) => `no quote for ${asset}: ${why}`),
                 ...unfunded.map((t) => `theme ${t} is in the brief but not funded by the mandate, so it was skipped`),
+                ...(researchOnly.length === 0
+                    ? []
+                    : [`research only, not tradable, so left out: ${researchOnly.join(", ")}`]),
             ],
         };
     }

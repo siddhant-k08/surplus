@@ -1472,3 +1472,42 @@ describe("a proposal served by a different process at each step", () => {
         await expect(second.propose("p1")).rejects.toThrow(/already exists/);
     });
 });
+
+describe("a brief that covers companies the agent may not trade", () => {
+    const wide = (): SavedBrief => {
+        const saved = savedBrief();
+        const theme = saved.brief.themes[0]!;
+        return {
+            ...saved,
+            brief: {
+                ...saved.brief,
+                themes: [{
+                    ...theme,
+                    fits: [
+                        ...theme.fits,
+                        { asset: "0x" + "c".repeat(40), symbol: "AMDc", fit: 5, evidence: 5, claimIds: ["ai-compute:c1"] },
+                    ],
+                }],
+            },
+        };
+    };
+
+    it("funds only the tradable ones and says which were left out", async () => {
+        const e = new InvestingEngine({
+            mode: "sim",
+            openingFloat: u("1.00"),
+            mandates: mandateFor(terms),
+            readBrief: wide,
+            allBriefs: () => [wide()],
+            salesLedger: () => salesLedger("3.00"),
+            market,
+            chainId: CHAIN_ID,
+        });
+        await e.syncRevenue();
+        const p = await e.propose("p1");
+        expect(p.ok).toBe(true);
+        if (!p.ok) return;
+        expect(p.view.legs.map((l) => l.symbol)).not.toContain("AMDc");
+        expect(p.warnings.join(" ")).toMatch(/research only.*AMDc/);
+    });
+});

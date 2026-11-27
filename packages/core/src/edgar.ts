@@ -64,6 +64,21 @@ export function latestByForm(filings: readonly Filing[], forms: readonly string[
     return out;
 }
 
+/** Annual reports: a US filer's 10-K, a foreign private issuer's 20-F. */
+const ANNUAL_FORMS: readonly string[] = ["10-K", "20-F"];
+
+/**
+ * The newest filing per form, keeping only the newer annual report. A company that moved from 20-F to
+ * 10-K still has the old one on file, and reading both would offer superseded figures as current.
+ */
+export function currentFilings(filings: readonly Filing[], forms: readonly string[]): Filing[] {
+    const latest = latestByForm(filings, forms);
+    const newestAnnual = latest
+        .filter((f) => ANNUAL_FORMS.includes(f.form))
+        .sort((a, b) => b.filingDate.localeCompare(a.filingDate))[0];
+    return latest.filter((f) => !ANNUAL_FORMS.includes(f.form) || f === newestAnnual);
+}
+
 export function filingUrl(cik10: string, f: Filing): string {
     const cik = String(Number(cik10));
     const folder = f.accessionNumber.replace(/-/g, "");
@@ -152,7 +167,8 @@ export class EdgarClient {
 /** Token symbol to listed ticker: "NVDAc" -> "NVDA". Anything else returns null and is reported. */
 export function underlyingTicker(symbol: string): string | null {
     const m = /^([A-Z][A-Z.]{0,9})c$/.exec(symbol);
-    return m?.[1] ?? null;
+    // SEC writes a share class with a hyphen: BRK.B is listed there as BRK-B.
+    return m?.[1]?.replace(/\./g, "-") ?? null;
 }
 
 export interface EdgarProviderOptions {
@@ -175,7 +191,7 @@ export class EdgarDocProvider implements DocProvider {
     private readonly tickerOf: (c: CandidateCompany) => string | null;
 
     constructor(private readonly client: EdgarClient, opts: EdgarProviderOptions = {}) {
-        this.forms = opts.forms ?? ["10-K", "10-Q"];
+        this.forms = opts.forms ?? ["10-K", "20-F", "10-Q"];
         this.maxDocChars = opts.maxDocChars ?? 800_000;
         this.now = opts.now ?? (() => new Date());
         this.tickerOf = opts.tickerOf ?? ((c) => underlyingTicker(c.symbol));
@@ -199,7 +215,7 @@ export class EdgarDocProvider implements DocProvider {
         }
         let filings: Filing[];
         try {
-            filings = latestByForm(parseRecentFilings(await this.client.getJson(submissionsUrl(info.cik10))), this.forms);
+            filings = currentFilings(parseRecentFilings(await this.client.getJson(submissionsUrl(info.cik10))), this.forms);
         } catch (e) {
             this.warnings.push(`${c.symbol}: submissions error: ${(e as Error).message}`);
             return docs;

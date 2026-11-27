@@ -1,4 +1,6 @@
 import { isFactSupported, validateBrief } from "./research";
+import { CHECK_SYSTEM_PROMPT, applyCheck, buildCheckPrompt, checkItems } from "./factcheck";
+import { DEFAULT_SHORTLIST, SHORTLIST_SYSTEM_PROMPT, buildShortlistPrompt, parseShortlist } from "./shortlist";
 import type {
     Brief,
     Claim,
@@ -161,6 +163,12 @@ export const SYSTEM_PROMPT = [
     "shorten any that run past 300 by cutting words from the end.",
     "Only quote text that appears in the <source> passages given to you. Do not quote a company's other filings from memory.",
     "A fact's text must say only what its quotes say. Do not add products, figures, causes or comparisons that are not in the quotes.",
+    "Before you answer, check each fact against its own quotes: every activity, product, customer, market and purpose the text names",
+    "must be stated in those quotes, whatever else you know about the company. If the quotes show less, shorten the fact to match.",
+    "For example, a quote saying where a company keeps an asset supports only that, not that the company has a strategy built on it.",
+    "Choose quotes that themselves say how the company is connected to the theme.",
+    "Each quote is one unbroken span. Never join two passages, with an ellipsis or otherwise: give them as two quotes.",
+    "Do not write a digit in a fact unless one of its quotes contains it, including digits inside product, disease or company names.",
     "Each fit should cite one to three facts, each from that company's own filing. Evidence strength is computed from the verified facts, so do not score it.",
     "fit is an integer from 0 to 5 measuring how directly the company's own revenue depends on the theme:",
     "5 = the theme is the core revenue driver; 4 = a major segment; 3 = a meaningful but secondary revenue source;",
@@ -266,6 +274,10 @@ export function parseThemeOutput(json: unknown): ParsedTheme {
     return { claims, fits, dropped };
 }
 
+/** The quotes behind a rejection, in full, so a person can see why something was turned away. */
+const shown = (quotes: readonly string[]): string =>
+    quotes.length === 0 ? "none" : quotes.map((q) => `"${q.replace(/\s+/g, " ")}"`).join(" | ");
+
 export interface AssembledTheme {
     theme: ThemeBrief;
     usedSources: Source[];
@@ -313,13 +325,16 @@ export function assembleTheme(
                               : first.verdict === "uncited_source"
                                 ? `quote points at a source the fact does not cite (${first.q.sourceId})`
                                 : "quote not found in the cited document";
-                    dropped.push(`${newId}: fact dropped, ${reason}. Tried: "${first.q.text.slice(0, 120)}"`);
+                    dropped.push(`${newId}: fact dropped, ${reason}. Tried: ${shown(c.quotes.map((q) => q.text))}`);
                 }
                 continue;
             }
             const missing = numbersNotIn(c.text, verified.map((q) => q.text));
             if (missing.length > 0) {
-                dropped.push(`${newId}: fact dropped, numbers not in its quotes: ${missing.join(", ")}`);
+                dropped.push(
+                    `${newId}: fact dropped, numbers not in its quotes: ${missing.join(", ")}. ` +
+                    `Fact: "${c.text}" Quotes: ${shown(verified.map((q) => q.text))}`,
+                );
                 continue;
             }
             const ids = [...new Set(verified.map((q) => q.sourceId))];
@@ -367,13 +382,18 @@ export function assembleTheme(
                 return d !== undefined && (d.asset === undefined || d.asset.toLowerCase() === co.asset);
             });
         if (!ids.some(aboutCompany)) {
-            dropped.push(`fit ${f.symbol}: no surviving fact about this company`);
+            dropped.push(
+                `fit ${f.symbol}: no surviving fact about this company (it cited ${f.claimIds.join(", ") || "nothing"})`,
+            );
             continue;
         }
         const supports = (id: string): boolean =>
             aboutCompany(id) && (keywords.length === 0 || mentionsAny(factQuotes.get(id) ?? [], keywords));
         if (!ids.some(supports)) {
-            dropped.push(`fit ${f.symbol}: no supporting quote mentions the theme (${keywords.join(", ")})`);
+            dropped.push(
+                `fit ${f.symbol}: no supporting quote mentions the theme (${keywords.join(", ")}). ` +
+                `Quotes: ${shown(ids.filter(aboutCompany).flatMap((id) => factQuotes.get(id) ?? []))}`,
+            );
             continue;
         }
         seen.add(co.asset);
@@ -428,6 +448,10 @@ export interface ResearchInput {
     now: Date;
     disclaimer: string;
     maxPassageChars?: number;
+    /** The most companies read for one theme. A longer candidate list is narrowed to this first. */
+    shortlistSize?: number;
+    /** Addresses the shortlist should favour, such as the ones the agent can actually buy. */
+    preferred?: ReadonlySet<string>;
 }
 
 export interface ResearchResult {
@@ -444,6 +468,10 @@ export interface ResearchResult {
      * discovered in production.
      */
     timings: StageTiming[];
+    /** Which companies were chosen to be read, for each theme that had to narrow the list. */
+    shortlists: { themeId: string; symbols: string[] }[];
+    /** Facts the quote check rewrote, before and after. */
+    reworded: string[];
 }
 
 /** Milliseconds spent on each stage of one theme. */
@@ -451,7 +479,7 @@ export interface StageTiming {
     themeId: string;
     /** Fetching filings from the source provider. */
     docsMs: number;
-    /** The model call, including building the prompt. */
+    /** The model calls, including building the prompts. */
     modelMs: number;
 }
 
@@ -472,6 +500,17 @@ export async function researchBrief(
     const usage: Usage = { inputTokens: 0, outputTokens: 0, calls: 0 };
     const timings: StageTiming[] = [];
     const clock = (): number => Date.now();
+    const shortlists: { themeId: string; symbols: string[] }[] = [];
+    const reworded: string[] = [];
+    const max = input.shortlistSize ?? DEFAULT_SHORTLIST;
+
+    const ask = async (system: string, user: string): Promise<LlmResult> => {
+        const res = await deps.llm.complete(system, user);
+        usage.calls += 1;
+        usage.inputTokens += res.inputTokens;
+        usage.outputTokens += res.outputTokens;
+        return res;
+    };
 
     const gap = (theme: ThemeSpec, reason: string): ThemeBrief => ({
         themeId: theme.id,
@@ -485,10 +524,33 @@ export async function researchBrief(
         const timing: StageTiming = { themeId: theme.id, docsMs: 0, modelMs: 0 };
         timings.push(timing);
 
+        let companies = input.companies;
+        if (companies.length > max) {
+            const pickStarted = clock();
+            try {
+                const res = await ask(
+                    SHORTLIST_SYSTEM_PROMPT,
+                    buildShortlistPrompt(theme, input.companies, max, input.preferred),
+                );
+                companies = parseShortlist(extractJson(res.text), input.companies, max);
+            } catch (e) {
+                themes.push(gap(theme, "The research step failed for this theme."));
+                rejected.push(`${theme.id}: shortlist error: ${(e as Error).message}`);
+                continue;
+            } finally {
+                timing.modelMs += clock() - pickStarted;
+            }
+            shortlists.push({ themeId: theme.id, symbols: companies.map((c) => c.symbol) });
+            if (companies.length === 0) {
+                themes.push(gap(theme, "No listed company was judged relevant to this theme."));
+                continue;
+            }
+        }
+
         let docs: SourceDoc[];
         const docsStarted = clock();
         try {
-            docs = await deps.docs.fetchDocs(theme, input.companies);
+            docs = await deps.docs.fetchDocs(theme, companies);
         } catch (e) {
             timing.docsMs = clock() - docsStarted;
             themes.push(gap(theme, "Source retrieval failed for this theme."));
@@ -500,26 +562,31 @@ export async function researchBrief(
             themes.push(gap(theme, "No usable sources were retrieved for this theme."));
             continue;
         }
-        const kws = keywordsFor(theme, input.companies);
+        const kws = keywordsFor(theme, companies);
         const prompt = buildThemePrompt(
             theme,
-            input.companies,
+            companies,
             docs.map((d) => ({ id: d.id, title: d.title, publisher: d.publisher, passages: selectPassages(d.text, kws, maxChars) })),
         );
         const modelStarted = clock();
         try {
-            const res = await deps.llm.complete(SYSTEM_PROMPT, prompt);
-            timing.modelMs = clock() - modelStarted;
-            usage.calls += 1;
-            usage.inputTokens += res.inputTokens;
-            usage.outputTokens += res.outputTokens;
-            const parsed = parseThemeOutput(extractJson(res.text));
-            const a = assembleTheme(theme, parsed, docs, input.companies, nowIso);
+            const res = await ask(SYSTEM_PROMPT, prompt);
+            let parsed = parseThemeOutput(extractJson(res.text));
+            const items = checkItems(parsed, docs);
+            if (items.length > 0) {
+                // If this fails the theme becomes a gap: unchecked sentences are not published.
+                const check = await ask(CHECK_SYSTEM_PROMPT, buildCheckPrompt(items));
+                const checked = applyCheck(parsed, items, extractJson(check.text));
+                parsed = checked.parsed;
+                for (const r of checked.reworded) reworded.push(`${theme.id}: ${r}`);
+            }
+            timing.modelMs += clock() - modelStarted;
+            const a = assembleTheme(theme, parsed, docs, companies, nowIso);
             for (const d of a.dropped) rejected.push(`${theme.id}: ${d}`);
             for (const s of a.usedSources) if (!sources.has(s.id)) sources.set(s.id, s);
             themes.push(a.theme);
         } catch (e) {
-            timing.modelMs = clock() - modelStarted;
+            timing.modelMs += clock() - modelStarted;
             themes.push(gap(theme, "The research step failed for this theme."));
             rejected.push(`${theme.id}: model step error: ${(e as Error).message}`);
         }
@@ -533,7 +600,7 @@ export async function researchBrief(
         disclaimer: input.disclaimer,
     };
     const issues = validateBrief(brief, { eligible: new Set(input.companies.map((c) => c.asset.toLowerCase())) });
-    return { brief, issues, rejected, usage, timings };
+    return { brief, issues, rejected, usage, timings, shortlists, reworded };
 }
 
 // ---------- Cost ----------

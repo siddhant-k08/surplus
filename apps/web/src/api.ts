@@ -283,6 +283,8 @@ export interface BriefSource {
 
 /** What `/receipt/:id` answers. The brief is the same shape the owner's desk reads. */
 export interface PaidReceipt {
+    /** Token addresses the agent can buy. Absent from a server that predates research-only companies. */
+    tradable?: string[];
     receipt: {
         transaction: string;
         amountUsdcMinor: string;

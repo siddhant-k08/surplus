@@ -6,6 +6,7 @@ import {
     filingUrl,
     htmlToText,
     latestByForm,
+    currentFilings,
     parseRecentFilings,
     parseTickerMap,
     submissionsUrl,
@@ -140,5 +141,19 @@ describe("EdgarDocProvider", () => {
         expect(docs[0]?.text.length).toBe(30);
         expect(p.warnings.join("|")).toMatch(/10-Q: SEC returned HTTP 404/);
         expect(p.warnings.join("|")).toMatch(/truncated/);
+    });
+});
+describe("annual reports", () => {
+    const filing = (form: string, filingDate: string) =>
+        ({ form, filingDate, accessionNumber: "1-1-1", reportDate: null, primaryDocument: "a.htm" });
+    const forms = ["10-K", "20-F", "10-Q"];
+
+    it("reads a foreign issuer's 20-F", () => {
+        expect(currentFilings([filing("20-F", "2026-03-01")], forms).map((f) => f.form)).toEqual(["20-F"]);
+    });
+
+    it("drops the superseded one when a company changed forms", () => {
+        const rows = [filing("20-F", "2023-03-01"), filing("10-K", "2026-02-01"), filing("10-Q", "2026-05-01")];
+        expect(currentFilings(rows, forms).map((f) => f.form)).toEqual(["10-K", "10-Q"]);
     });
 });

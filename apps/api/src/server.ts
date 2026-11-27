@@ -681,7 +681,9 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                     seen.set(theme.themeId, row);
                 }
             }
+            const buyable = new Set(BASE_REGISTRY.map((r) => r.symbol));
             res.json({
+                tradable: [...new Set([...seen.values()].flatMap((t) => t.symbols))].filter((s) => buyable.has(s)),
                 themes: [...seen.values()].sort((a, b) => b.briefs - a.briefs || a.id.localeCompare(b.id)),
                 briefs: briefs.length,
             });
@@ -937,6 +939,8 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                     network: receipt.network ?? null,
                 },
                 brief: found.brief,
+                // Which of the companies named the agent could also buy. A fit is not an offer to trade.
+                tradable: BASE_REGISTRY.map((r) => r.address),
                 provider: found.provider,
                 model: found.model,
             });

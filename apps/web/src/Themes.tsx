@@ -12,7 +12,10 @@ interface ThemeRow {
     symbols: string[];
 }
 
-type Load = { k: "loading" } | { k: "ready"; themes: ThemeRow[]; briefs: number } | { k: "down" };
+type Load =
+    | { k: "loading" }
+    | { k: "ready"; themes: ThemeRow[]; briefs: number; tradable: string[] }
+    | { k: "down" };
 
 /**
  * Every theme the agent has researched, and which companies reached each one.
@@ -25,8 +28,8 @@ export function Themes() {
     const [load, setLoad] = useState<Load>({ k: "loading" });
 
     useEffect(() => {
-        get<{ themes: ThemeRow[]; briefs: number }>("/catalogue/themes")
-            .then((r) => setLoad({ k: "ready", themes: r.themes, briefs: r.briefs }))
+        get<{ themes: ThemeRow[]; briefs: number; tradable?: string[] }>("/catalogue/themes")
+            .then((r) => setLoad({ k: "ready", themes: r.themes, briefs: r.briefs, tradable: r.tradable ?? [] }))
             .catch(() => setLoad({ k: "down" }));
     }, []);
 
@@ -38,6 +41,7 @@ export function Themes() {
     const gapped = themes.filter((t) => t.gaps > 0);
     const emptyRuns = themes.reduce((a, t) => a + t.gaps, 0);
     const symbols = new Set(themes.flatMap((t) => t.symbols));
+    const tradable = new Set(load.k === "ready" ? load.tradable : []);
 
     return (
         <>
@@ -105,9 +109,17 @@ export function Themes() {
                                     quotable behind it is returned as a gap rather than filled.
                                 </p>
                             ) : (
-                                <div className="border-t border-line">
-                                    {covered.map((t, i) => <ThemeLine key={t.id} row={t} delay={Math.min(i, 8) * 0.04} />)}
-                                </div>
+                                <>
+                                    <p className="m-0 mb-4 text-[0.8125rem] text-dim">
+                                        Research covers more companies than the agent can invest in. The agent can buy
+                                        the ones <span className="rounded-[3px] border border-lime px-1.5 py-0.5 font-mono text-[0.75rem] text-ink">outlined</span>.
+                                    </p>
+                                    <div className="border-t border-line">
+                                        {covered.map((t, i) => (
+                                            <ThemeLine key={t.id} row={t} tradable={tradable} delay={Math.min(i, 8) * 0.04} />
+                                        ))}
+                                    </div>
+                                </>
                             )}
                         </div>
                     </div>
@@ -183,7 +195,7 @@ export function Themes() {
  * asked in several briefs says so, because a question worth repeating is itself a fact about the
  * catalogue.
  */
-function ThemeLine({ row, delay }: { row: ThemeRow; delay: number }) {
+function ThemeLine({ row, tradable, delay }: { row: ThemeRow; tradable: Set<string>; delay: number }) {
     return (
         <Reveal delay={delay}>
             <div className="grid gap-x-6 gap-y-3 border-b border-line py-5 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -191,8 +203,14 @@ function ThemeLine({ row, delay }: { row: ThemeRow; delay: number }) {
                     <h3 className="font-mono text-[0.9375rem] font-medium tracking-[-0.01em]">{row.id}</h3>
                     <div className="mt-3 flex flex-wrap gap-1.5">
                         {row.symbols.map((s) => (
-                            <span key={s} className="rounded-[3px] bg-pill px-2 py-1 font-mono text-[0.75rem] text-ink">
+                            <span
+                                key={s}
+                                className={`rounded-[3px] border bg-pill px-2 py-1 font-mono text-[0.75rem] text-ink ${
+                                    tradable.has(s) ? "border-lime" : "border-transparent"
+                                }`}
+                            >
                                 {s}
+                                {tradable.has(s) && <span className="sr-only"> (the agent can buy this)</span>}
                             </span>
                         ))}
                     </div>

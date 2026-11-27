@@ -174,7 +174,11 @@ export function Receipt({ id }: { id: string }) {
                                                         fit={fit}
                                                         claims={claims}
                                                         sources={sources}
-                                                        label={`fit ${fit.fit}/5`}
+                                                        label={
+                                                            paid.tradable === undefined || paid.tradable.includes(fit.asset.toLowerCase())
+                                                                ? `fit ${fit.fit}/5`
+                                                                : `fit ${fit.fit}/5 · research only`
+                                                        }
                                                         {...(stake !== null && { lead: formatUsdc(stake) })}
                                                         defaultOpen={i === 0}
                                                     />

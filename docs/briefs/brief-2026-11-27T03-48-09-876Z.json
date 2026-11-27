@@ -1,0 +1,1682 @@
+{
+  "provider": "gemini",
+  "model": "gemini-3.1-flash-lite",
+  "brief": {
+    "id": "brief-2026-11-27T03-48-09-876Z",
+    "createdAt": "2026-11-27T03:48:09.876Z",
+    "sources": [
+      {
+        "id": "NVDA-10-K-0001045810-26-000021",
+        "tier": 1,
+        "title": "NVIDIA CORP 10-K for period ending 2026-01-25",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000021/nvda-20260125.htm",
+        "publishedAt": "2026-02-25",
+        "retrievedAt": "2026-11-27T03:48:12.027Z",
+        "excerpt": "The NVIDIA Data Center platform is focused on accelerating compute-intensive workloads, such as AI, data processing, graphics, robotics, and scientific computing, delivering superior total cost of ownership relative to conventional CPU-only approaches."
+      },
+      {
+        "id": "MSFT-10-Q-0001193125-26-436133",
+        "tier": 1,
+        "title": "MICROSOFT CORP 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526436133/msft-20260930.htm",
+        "publishedAt": "2026-10-28",
+        "retrievedAt": "2026-11-27T03:48:12.857Z",
+        "excerpt": "Revenue from Azure, comprising consumption-based services across non-GPU workloads, including compute, data and analytics, storage, networking, and security; and GPU workloads, including GPU infrastructure-as-a-service and Foundry ... XBOX, including XBOX content and services, comprising first- and third-party content (including games and in-game content), XBOX Game Pass and other subscriptions, XBOX Cloud Gaming, advertising, and other cloud services"
+      },
+      {
+        "id": "AMZN-10-K-0001018724-26-000004",
+        "tier": 1,
+        "title": "AMAZON COM INC 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000004/amzn-20251231.htm",
+        "publishedAt": "2026-02-06",
+        "retrievedAt": "2026-11-27T03:48:13.216Z",
+        "excerpt": "We serve developers and enterprises of all sizes, including start-ups, government agencies, and academic institutions, through AWS, which offers a broad set of on-demand technology services, including compute, storage, database, analytics, artificial intelligence and machine learning ... We also offer other services such as compute, storage, and database offerings, fulfillment, advertising, publishing, and digital content subscriptions."
+      },
+      {
+        "id": "GOOGL-10-K-0001652044-26-000018",
+        "tier": 1,
+        "title": "Alphabet Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000018/goog-20251231.htm",
+        "publishedAt": "2026-02-05",
+        "retrievedAt": "2026-11-27T03:48:13.743Z",
+        "excerpt": "At the foundation of our full-stack approach is our AI-optimized infrastructure — a key differentiator enabling us to power our own products, such as Search and YouTube, and support the services we provide to our Google Cloud customers. ... Google Services generates revenues primarily from advertising; fees received for consumer subscription-based products such as YouTube TV, YouTube Music and Premium, and NFL Sunday Ticket, as well as Google One; the sale of apps and in-app purchases; and devices."
+      },
+      {
+        "id": "SMCI-10-K-0001375365-26-000022",
+        "tier": 1,
+        "title": "Super Micro Computer, Inc. 10-K for period ending 2026-06-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1375365/000137536526000022/smci-20260630.htm",
+        "publishedAt": "2026-08-31",
+        "retrievedAt": "2026-11-27T03:48:14.327Z",
+        "excerpt": "We deliver rack-scale solutions optimized for various workloads, including artificial intelligence (“AI”) and high-performance computing (“HPC”), where acceleration is critical."
+      },
+      {
+        "id": "AMD-10-K-0000002488-26-000018",
+        "tier": 1,
+        "title": "ADVANCED MICRO DEVICES INC 10-K for period ending 2025-12-27",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/2488/000000248826000018/amd-20251227.htm",
+        "publishedAt": "2026-02-04",
+        "retrievedAt": "2026-11-27T03:48:15.043Z",
+        "excerpt": "For data centers, we offer AI accelerators, microprocessors (CPUs), graphic processing units (GPUs), data processing units (DPUs), AI Network Interface Cards (AI NICs) and field programmable gate arrays (FPGAs)."
+      },
+      {
+        "id": "AVGO-10-K-0001730168-25-000121",
+        "tier": 1,
+        "title": "Broadcom Inc. 10-K for period ending 2025-11-02",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1730168/000173016825000121/avgo-20251102.htm",
+        "publishedAt": "2025-12-18",
+        "retrievedAt": "2026-11-27T03:48:15.698Z",
+        "excerpt": "Our semiconductor and semiconductor-based solutions also enable our customers to build and deploy AI data center infrastructure for their training and inference workloads"
+      },
+      {
+        "id": "HPE-10-K-0001645590-25-000130",
+        "tier": 1,
+        "title": "Hewlett Packard Enterprise Co 10-K for period ending 2025-10-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1645590/000164559025000130/hpe-20251031.htm",
+        "publishedAt": "2025-12-18",
+        "retrievedAt": "2026-11-27T03:48:16.364Z",
+        "excerpt": "Our high-throughput, low-latency networking solutions are foundational to AI workloads, enabling efficient data movement across distributed systems and accelerating model training and inference at scale."
+      },
+      {
+        "id": "ANET-10-K-0001596532-26-000013",
+        "tier": 1,
+        "title": "Arista Networks, Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1596532/000159653226000013/anet-20251231.htm",
+        "publishedAt": "2026-02-17",
+        "retrievedAt": "2026-11-27T03:48:16.911Z",
+        "excerpt": "Arista’s \"AI Center\" now delivers a unified, data-driven network architecture that integrates distinct connectivity layers to optimize time-to-first-job, AI job completion times, and XPU utilization/efficiency."
+      },
+      {
+        "id": "VRT-10-K-0001674101-26-000008",
+        "tier": 1,
+        "title": "Vertiv Holdings Co 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1674101/000167410126000008/vrt-20251231.htm",
+        "publishedAt": "2026-02-13",
+        "retrievedAt": "2026-11-27T03:48:17.597Z",
+        "excerpt": "Vertiv leads with first-to-market designs engineered for next-gen rack-scale artificial intelligence (\"AI\") compute — enabling transformation and scale to stay multiple compute generations ahead."
+      },
+      {
+        "id": "META-10-Q-0001628280-26-066773",
+        "tier": 1,
+        "title": "Meta Platforms, Inc. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1326801/000162828026066773/meta-20260930.htm",
+        "publishedAt": "2026-10-22",
+        "retrievedAt": "2026-11-27T03:48:30.767Z",
+        "excerpt": "Non-advertising revenue includes RL revenue generated from the delivery of consumer hardware products and FoA Other revenue, which consists of revenue from paid messaging from WhatsApp, subscriptions, and revenue from various other sources."
+      },
+      {
+        "id": "AMZN-10-Q-0001018724-26-000040",
+        "tier": 1,
+        "title": "AMAZON COM INC 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000040/amzn-20260930.htm",
+        "publishedAt": "2026-10-30",
+        "retrievedAt": "2026-11-27T03:48:13.398Z",
+        "excerpt": "The North America segment primarily consists of amounts earned from retail sales of consumer products (including from sellers) and advertising and subscription services through North America-focused online and physical stores."
+      },
+      {
+        "id": "MSFT-10-K-0001193125-26-323660",
+        "tier": 1,
+        "title": "MICROSOFT CORP 10-K for period ending 2026-06-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/789019/000119312526323660/msft-20260630.htm",
+        "publishedAt": "2026-07-29",
+        "retrievedAt": "2026-11-27T03:48:12.648Z",
+        "excerpt": "We generate revenue by offering a wide range of cloud-based solutions, content, and other services to people and businesses; licensing and supporting an array of software products; delivering relevant online advertising to a global audience; and designing and selling devices."
+      },
+      {
+        "id": "PINS-10-Q-0001506293-26-000153",
+        "tier": 1,
+        "title": "PINTEREST, INC. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1506293/000150629326000153/pins-20260930.htm",
+        "publishedAt": "2026-10-29",
+        "retrievedAt": "2026-11-27T03:48:31.856Z",
+        "excerpt": "We generate revenue by delivering ads on our website, mobile application and connected TV platforms."
+      },
+      {
+        "id": "TTD-10-Q-0001671933-26-000116",
+        "tier": 1,
+        "title": "Trade Desk, Inc. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1671933/000167193326000116/ttd-20260930.htm",
+        "publishedAt": "2026-11-09",
+        "retrievedAt": "2026-11-27T03:48:33.219Z",
+        "excerpt": "Historically, our clients have predominantly used our platform to purchase CTV and other video, mobile and display advertising inventory."
+      },
+      {
+        "id": "EBAY-10-Q-0001065088-26-000212",
+        "tier": 1,
+        "title": "EBAY INC 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1065088/000106508826000212/ebay-20260930.htm",
+        "publishedAt": "2026-10-29",
+        "retrievedAt": "2026-11-27T03:48:33.730Z",
+        "excerpt": "We earn revenue primarily through fees collected on paid transactions, first-party advertising and shipping. ... Advertising revenues primarily consist of fees charged to sellers to promote their listings on our Marketplace platforms, as well as third-party advertising fees."
+      },
+      {
+        "id": "YELP-10-Q-0001345016-26-000075",
+        "tier": 1,
+        "title": "YELP INC 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1345016/000134501626000075/yelp-20260930.htm",
+        "publishedAt": "2026-11-06",
+        "retrievedAt": "2026-11-27T03:48:34.723Z",
+        "excerpt": "We generate substantially all of our revenue from the sale of performance-based advertising products, which our advertising platform matches to individual consumers through auctions priced on a cost-per-click (“CPC”) basis."
+      },
+      {
+        "id": "YELP-10-K-0001345016-26-000019",
+        "tier": 1,
+        "title": "YELP INC 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1345016/000134501626000019/yelp-20251231.htm",
+        "publishedAt": "2026-02-27",
+        "retrievedAt": "2026-11-27T03:48:34.528Z",
+        "excerpt": "The Company generates other revenue through non-advertising contracts, including subscription services contracts"
+      },
+      {
+        "id": "MSTR-10-K-0001050446-26-000020",
+        "tier": 1,
+        "title": "Strategy Inc 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1050446/000105044626000020/mstr-20251231.htm",
+        "publishedAt": "2026-02-19",
+        "retrievedAt": "2026-11-27T03:51:20.405Z",
+        "excerpt": "other companies executing a bitcoin strategy similar to ours"
+      },
+      {
+        "id": "RIOT-10-Q-0001104659-26-122417",
+        "tier": 1,
+        "title": "Riot Platforms, Inc. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1167419/000110465926122417/riot-20260930x10q.htm",
+        "publishedAt": "2026-11-04",
+        "retrievedAt": "2026-11-27T03:51:21.358Z",
+        "excerpt": "We generate non-cash revenue through mining bitcoin at our Facilities, which we manage based on our Bitcoin Treasury Strategy"
+      },
+      {
+        "id": "WULF-10-K-0001083301-26-000031",
+        "tier": 1,
+        "title": "TERAWULF INC. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1083301/000108330126000031/wulf-20251231.htm",
+        "publishedAt": "2026-02-27",
+        "retrievedAt": "2026-11-27T03:51:22.948Z",
+        "excerpt": "TeraWulf derives the majority of its revenue by providing hash computation services to a mining pool operator, facilitating transaction validation of transactions on the global bitcoin network ... Our data center campuses are engineered to support high-density, mission-critical compute while emphasizing efficient power utilization, advanced cooling architectures, and resilient electrical design."
+      },
+      {
+        "id": "CORZ-10-Q-0001839341-26-000030",
+        "tier": 1,
+        "title": "Core Scientific, Inc./tx 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1839341/000183934126000030/core-20260930.htm",
+        "publishedAt": "2026-11-05",
+        "retrievedAt": "2026-11-27T03:51:23.721Z",
+        "excerpt": "The Digital Asset Self-Mining segment performs digital asset mining for the Company’s own account and generates revenue from operating owned infrastructure and computer equipment as part of mining pools in exchange for digital assets."
+      },
+      {
+        "id": "CIFR-10-Q-0001819989-26-000050",
+        "tier": 1,
+        "title": "Cipher Digital Inc. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1819989/000181998926000050/cifr-20260930.htm",
+        "publishedAt": "2026-11-02",
+        "retrievedAt": "2026-11-27T03:51:24.824Z",
+        "excerpt": "Our bitcoin mining revenue consists of bitcoin earned through mining activities at the Odessa and Black Pearl Facilities. We currently participate in third-party mining pools to mine bitcoin."
+      },
+      {
+        "id": "XYZ-10-K-0001628280-26-012254",
+        "tier": 1,
+        "title": "Block, Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1512673/000162828026012254/xyz-20251231.htm",
+        "publishedAt": "2026-02-26",
+        "retrievedAt": "2026-11-27T03:51:25.371Z",
+        "excerpt": "Cash App and Square have features that permit our customers and sellers to transact in bitcoin."
+      },
+      {
+        "id": "HOOD-10-Q-0001783879-26-000167",
+        "tier": 1,
+        "title": "Robinhood Markets, Inc. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1783879/000178387926000167/hood-20260930.htm",
+        "publishedAt": "2026-10-28",
+        "retrievedAt": "2026-11-27T03:51:26.132Z",
+        "excerpt": "We currently facilitate customer trades for certain cryptocurrencies that we have analyzed under applicable internal policies and procedures"
+      },
+      {
+        "id": "NOC-10-K-0001133421-26-000003",
+        "tier": 1,
+        "title": "NORTHROP GRUMMAN CORP /DE/ 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1133421/000113342126000003/noc-20251231.htm",
+        "publishedAt": "2026-01-27",
+        "retrievedAt": "2026-11-27T03:52:52.897Z",
+        "excerpt": "Northrop Grumman Corporation (herein referred to as “Northrop Grumman,” the “company,” “we,” “us,” or “our”) is a leading global aerospace and defense technology company."
+      },
+      {
+        "id": "RTX-10-K-0000101829-26-000006",
+        "tier": 1,
+        "title": "RTX Corp 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/101829/000010182926000006/rtx-20251231.htm",
+        "publishedAt": "2026-02-06",
+        "retrievedAt": "2026-11-27T03:52:53.733Z",
+        "excerpt": "RTX Corporation is an aerospace and defense company that provides advanced systems and services for commercial, military, and government customers worldwide."
+      },
+      {
+        "id": "PLTR-10-K-0001321655-26-000011",
+        "tier": 1,
+        "title": "Palantir Technologies Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1321655/000132165526000011/pltr-20251231.htm",
+        "publishedAt": "2026-02-17",
+        "retrievedAt": "2026-11-27T03:52:55.308Z",
+        "excerpt": "Gotham integrates with our other platforms, as well as our broader defense offerings, and enables users to see, understand, and act in the modern battlespace"
+      },
+      {
+        "id": "RKLB-10-K-0001819994-26-000013",
+        "tier": 1,
+        "title": "Rocket Lab Corp 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1819994/000181999426000013/rklb-20251231.htm",
+        "publishedAt": "2026-02-26",
+        "retrievedAt": "2026-11-27T03:52:56.107Z",
+        "excerpt": "We deliver reliable launch services, spacecraft design services, spacecraft components, spacecraft manufacturing and other spacecraft and on-orbit management solutions"
+      },
+      {
+        "id": "ASTS-10-K-0001780312-26-000006",
+        "tier": 1,
+        "title": "AST SpaceMobile, Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1780312/000178031226000006/asts-20251231.htm",
+        "publishedAt": "2026-03-02",
+        "retrievedAt": "2026-11-27T03:52:57.145Z",
+        "excerpt": "We believe our satellites will be capable of supporting both SpaceMobile Service to end users of the MNOs and a variety of applications in the government sector."
+      },
+      {
+        "id": "LUNR-10-K-0001628280-26-019865",
+        "tier": 1,
+        "title": "Intuitive Machines, Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1844452/000162828026019865/lunr-20251231.htm",
+        "publishedAt": "2026-03-19",
+        "retrievedAt": "2026-11-27T03:52:57.660Z",
+        "excerpt": "Build — designing, manufacturing, and delivering spacecraft, landers, satellites, surface systems, propulsion, and avionics for government and commercial customers"
+      },
+      {
+        "id": "BKSY-10-K-0001753539-26-000032",
+        "tier": 1,
+        "title": "BlackSky Technology Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1753539/000175353926000032/bksy-20251231.htm",
+        "publishedAt": "2026-03-17",
+        "retrievedAt": "2026-11-27T03:52:59.633Z",
+        "excerpt": "BlackSky Technology Inc. (“BlackSky,” the “Company,” “we,” “us,” or “our”) is a space-based technology company that delivers real-time imagery, analytics and high-frequency monitoring"
+      },
+      {
+        "id": "VST-10-Q-0001692819-26-000025",
+        "tier": 1,
+        "title": "Vistra Corp. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1692819/000169281926000025/vistra-20260930.htm",
+        "publishedAt": "2026-11-09",
+        "retrievedAt": "2026-11-27T03:53:22.476Z",
+        "excerpt": "Electricity demand drivers including the rise of large-scale data centers, the electrification of oil field operations, and electric vehicle load building are contributing to a projected fast-paced load growth in the regions we serve."
+      },
+      {
+        "id": "CEG-10-K-0001868275-26-000032",
+        "tier": 1,
+        "title": "Constellation Energy Corp 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1868275/000186827526000032/ceg-20251231.htm",
+        "publishedAt": "2026-02-24",
+        "retrievedAt": "2026-11-27T03:53:23.154Z",
+        "excerpt": "Microsoft will purchase the output generated from the renewed plant which includes energy, capacity and emissions-free attributes as part of its goal to help power its data centers in PJM with clean reliable energy."
+      },
+      {
+        "id": "BE-10-K-0001628280-26-006516",
+        "tier": 1,
+        "title": "Bloom Energy Corp 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1664703/000162828026006516/be-20251231.htm",
+        "publishedAt": "2026-02-09",
+        "retrievedAt": "2026-11-27T03:53:23.889Z",
+        "excerpt": "we have recently seen a significant increase in demand for Bloom Energy Server systems to meet the power needs of AI data centers, which are experiencing increased demand for reliable, on-site power."
+      },
+      {
+        "id": "SMR-10-K-0001822966-26-000018",
+        "tier": 1,
+        "title": "NUSCALE POWER Corp 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1822966/000182296626000018/smr-20251231.htm",
+        "publishedAt": "2026-02-26",
+        "retrievedAt": "2026-11-27T03:53:24.627Z",
+        "excerpt": "management believes this clean baseload power generation provides energy at scale for large technology companies to help meet power needs for data centers and artificial intelligence (“AI”) while achieving sustainability objectives."
+      },
+      {
+        "id": "OKLO-10-K-0001628280-26-018698",
+        "tier": 1,
+        "title": "Oklo Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1849056/000162828026018698/oklo-20251231.htm",
+        "publishedAt": "2026-03-17",
+        "retrievedAt": "2026-11-27T03:53:25.412Z",
+        "excerpt": "We plan to leverage the next-generation fast fission powerhouses that we are developing in order to sell power to a variety of potential customers, including data centers, military and other government facilities"
+      },
+      {
+        "id": "NNE-10-K-0001493152-25-028285",
+        "tier": 1,
+        "title": "Nano Nuclear Energy Inc. 10-K for period ending 2025-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1923891/000149315225028285/form10-k.htm",
+        "publishedAt": "2025-12-18",
+        "retrievedAt": "2026-11-27T03:53:26.043Z",
+        "excerpt": "The KRONOS MMR ™ reactor will also target larger population centers, larger industrial operations, industrial heat for larger industries, and data and artificial intelligence centers for the tech industry."
+      },
+      {
+        "id": "PANW-10-K-0001327567-26-000023",
+        "tier": 1,
+        "title": "Palo Alto Networks Inc 10-K for period ending 2026-07-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1327567/000132756726000023/panw-20260731.htm",
+        "publishedAt": "2026-09-10",
+        "retrievedAt": "2026-11-27T03:53:35.265Z",
+        "excerpt": "Our platforms and services help secure enterprise users, networks, clouds, endpoints, AI apps and agents, and identities by delivering comprehensive cybersecurity backed by AI and automation"
+      },
+      {
+        "id": "ZS-10-K-0001713683-26-000157",
+        "tier": 1,
+        "title": "Zscaler, Inc. 10-K for period ending 2026-07-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1713683/000171368326000157/zs-20260731.htm",
+        "publishedAt": "2026-09-03",
+        "retrievedAt": "2026-11-27T03:53:37.759Z",
+        "excerpt": "We deliver a comprehensive, cloud-native zero trust platform that minimizes the attack surface of an enterprise and eliminates lateral threat movement, enabling security at the scale and speed of AI."
+      },
+      {
+        "id": "RBRK-10-K-0001943896-26-000013",
+        "tier": 1,
+        "title": "Rubrik, Inc. 10-K for period ending 2026-01-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1943896/000194389626000013/rbrk-20260131.htm",
+        "publishedAt": "2026-03-19",
+        "retrievedAt": "2026-11-27T03:53:39.646Z",
+        "excerpt": "we created Zero Trust Data Security to deliver cyber resilience so that organizations can secure their data across the cloud and recover from cyberattacks."
+      },
+      {
+        "id": "CSCO-10-Q-0000858877-26-000185",
+        "tier": 1,
+        "title": "CISCO SYSTEMS, INC. 10-Q for period ending 2026-10-24",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/858877/000085887726000185/csco-20261024.htm",
+        "publishedAt": "2026-11-17",
+        "retrievedAt": "2026-11-27T03:53:41.279Z",
+        "excerpt": "Subscription revenue includes revenue recognized from our term software licenses, security software licenses, SaaS, and associated service arrangements."
+      },
+      {
+        "id": "NVO-20-F-0000353278-26-000012",
+        "tier": 1,
+        "title": "NOVO NORDISK A S 20-F for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/353278/000035327826000012/nvo-20251231.htm",
+        "publishedAt": "2026-02-04",
+        "retrievedAt": "2026-11-27T03:54:06.306Z",
+        "excerpt": "The Company has a broad product portfolio across Obesity and Diabetes care and Rare disease, including a portfolio of glucagon-like-peptide-1 (GLP-1) receptor agonists for the treatment of obesity and diabetes"
+      },
+      {
+        "id": "VKTX-10-K-0001193125-26-046876",
+        "tier": 1,
+        "title": "Viking Therapeutics, Inc. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1607678/000119312526046876/vktx-20251231.htm",
+        "publishedAt": "2026-02-11",
+        "retrievedAt": "2026-11-27T03:54:09.173Z",
+        "excerpt": "VK2735, a novel dual agonist of the glucagon-like peptide 1, or GLP-1, and glucose-dependent insulinotropic polypeptide, or GIP, receptors. VK2735 is being developed in both oral and subcutaneous formulations for the potential treatment of various metabolic disorders such as obesity."
+      },
+      {
+        "id": "MDGL-10-K-0001628280-26-009514",
+        "tier": 1,
+        "title": "MADRIGAL PHARMACEUTICALS, INC. 10-K for period ending 2025-12-31",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/1157601/000162828026009514/mdgl-20251231.htm",
+        "publishedAt": "2026-02-19",
+        "retrievedAt": "2026-11-27T03:54:11.090Z",
+        "excerpt": "In March 2024, Rezdiffra became the first therapy approved by the FDA for patients with MASH and was commercially available in the United States beginning in April 2024."
+      },
+      {
+        "id": "LFMD-10-Q-0001493152-26-051463",
+        "tier": 1,
+        "title": "LifeMD, Inc. 10-Q for period ending 2026-09-30",
+        "publisher": "SEC EDGAR",
+        "url": "https://www.sec.gov/Archives/edgar/data/948320/000149315226051463/form10-q.htm",
+        "publishedAt": "2026-11-12",
+        "retrievedAt": "2026-11-27T03:54:16.365Z",
+        "excerpt": "In August 2026, LifeMD entered into an agreement to facilitate patient access to Novo Nordisk’s FDA-approved GLP-1 therapies, including Wegovy® and Ozempic®."
+      }
+    ],
+    "themes": [
+      {
+        "themeId": "ai-compute",
+        "claims": [
+          {
+            "id": "ai-compute:c1",
+            "type": "fact",
+            "text": "NVIDIA's Data Center platform is focused on accelerating compute-intensive workloads, such as AI, data processing, graphics, robotics and scientific computing.",
+            "sourceIds": [
+              "NVDA-10-K-0001045810-26-000021"
+            ],
+            "quotes": [
+              {
+                "sourceId": "NVDA-10-K-0001045810-26-000021",
+                "text": "The NVIDIA Data Center platform is focused on accelerating compute-intensive workloads, such as AI, data processing, graphics, robotics, and scientific computing, delivering superior total cost of ownership relative to conventional CPU-only approaches."
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c2",
+            "type": "fact",
+            "text": "Microsoft's Azure revenue includes GPU workloads, such as GPU infrastructure-as-a-service and Foundry, alongside non-GPU workloads such as compute, storage, networking and security.",
+            "sourceIds": [
+              "MSFT-10-Q-0001193125-26-436133"
+            ],
+            "quotes": [
+              {
+                "sourceId": "MSFT-10-Q-0001193125-26-436133",
+                "text": "Revenue from Azure, comprising consumption-based services across non-GPU workloads, including compute, data and analytics, storage, networking, and security; and GPU workloads, including GPU infrastructure-as-a-service and Foundry"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c3",
+            "type": "fact",
+            "text": "Through AWS, Amazon serves developers and enterprises with on-demand technology services including compute, storage, database, analytics, artificial intelligence and machine learning.",
+            "sourceIds": [
+              "AMZN-10-K-0001018724-26-000004"
+            ],
+            "quotes": [
+              {
+                "sourceId": "AMZN-10-K-0001018724-26-000004",
+                "text": "We serve developers and enterprises of all sizes, including start-ups, government agencies, and academic institutions, through AWS, which offers a broad set of on-demand technology services, including compute, storage, database, analytics, artificial intelligence and machine learning"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c4",
+            "type": "fact",
+            "text": "Alphabet says its AI-optimized infrastructure enables it to power its own products, such as Search and YouTube, and to support the services it provides to Google Cloud customers.",
+            "sourceIds": [
+              "GOOGL-10-K-0001652044-26-000018"
+            ],
+            "quotes": [
+              {
+                "sourceId": "GOOGL-10-K-0001652044-26-000018",
+                "text": "At the foundation of our full-stack approach is our AI-optimized infrastructure — a key differentiator enabling us to power our own products, such as Search and YouTube, and support the services we provide to our Google Cloud customers."
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c5",
+            "type": "fact",
+            "text": "Super Micro Computer delivers rack-scale solutions optimized for workloads including artificial intelligence and high-performance computing.",
+            "sourceIds": [
+              "SMCI-10-K-0001375365-26-000022"
+            ],
+            "quotes": [
+              {
+                "sourceId": "SMCI-10-K-0001375365-26-000022",
+                "text": "We deliver rack-scale solutions optimized for various workloads, including artificial intelligence (“AI”) and high-performance computing (“HPC”), where acceleration is critical."
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c6",
+            "type": "fact",
+            "text": "For data centers, AMD offers AI accelerators, CPUs, GPUs, data processing units, AI network interface cards and field programmable gate arrays.",
+            "sourceIds": [
+              "AMD-10-K-0000002488-26-000018"
+            ],
+            "quotes": [
+              {
+                "sourceId": "AMD-10-K-0000002488-26-000018",
+                "text": "For data centers, we offer AI accelerators, microprocessors (CPUs), graphic processing units (GPUs), data processing units (DPUs), AI Network Interface Cards (AI NICs) and field programmable gate arrays (FPGAs)."
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c7",
+            "type": "fact",
+            "text": "Broadcom says its semiconductor solutions enable customers to build and deploy AI data center infrastructure for training and inference workloads.",
+            "sourceIds": [
+              "AVGO-10-K-0001730168-25-000121"
+            ],
+            "quotes": [
+              {
+                "sourceId": "AVGO-10-K-0001730168-25-000121",
+                "text": "Our semiconductor and semiconductor-based solutions also enable our customers to build and deploy AI data center infrastructure for their training and inference workloads"
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c8",
+            "type": "fact",
+            "text": "Hewlett Packard Enterprise says its high-throughput, low-latency networking solutions are foundational to AI workloads.",
+            "sourceIds": [
+              "HPE-10-K-0001645590-25-000130"
+            ],
+            "quotes": [
+              {
+                "sourceId": "HPE-10-K-0001645590-25-000130",
+                "text": "Our high-throughput, low-latency networking solutions are foundational to AI workloads, enabling efficient data movement across distributed systems and accelerating model training and inference at scale."
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c9",
+            "type": "fact",
+            "text": "Arista's AI Center delivers a unified network architecture intended to optimize AI job completion times and XPU utilization.",
+            "sourceIds": [
+              "ANET-10-K-0001596532-26-000013"
+            ],
+            "quotes": [
+              {
+                "sourceId": "ANET-10-K-0001596532-26-000013",
+                "text": "Arista’s \"AI Center\" now delivers a unified, data-driven network architecture that integrates distinct connectivity layers to optimize time-to-first-job, AI job completion times, and XPU utilization/efficiency."
+              }
+            ]
+          },
+          {
+            "id": "ai-compute:c10",
+            "type": "fact",
+            "text": "Vertiv says it leads with designs engineered for next-generation rack-scale AI compute.",
+            "sourceIds": [
+              "VRT-10-K-0001674101-26-000008"
+            ],
+            "quotes": [
+              {
+                "sourceId": "VRT-10-K-0001674101-26-000008",
+                "text": "Vertiv leads with first-to-market designs engineered for next-gen rack-scale artificial intelligence (\"AI\") compute — enabling transformation and scale to stay multiple compute generations ahead."
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb20000000000000000000078ee7ce2fe4908108c",
+            "symbol": "NVDAc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c1"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000ab99cfa739e253872b",
+            "symbol": "MSFTc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c2"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000d9192b6b456483c2e8",
+            "symbol": "AMZNc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c3"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000002d0ba3164cc74f58b7",
+            "symbol": "GOOGLc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c4"
+            ]
+          },
+          {
+            "asset": "0xb20000000000000000000065f11d53a1e442bb84",
+            "symbol": "SMCIc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c5"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000000d8ce462e99ee7a47b",
+            "symbol": "AMDc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c6"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000fc737aea6196ab5a4c",
+            "symbol": "AVGOc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c7"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000d8aeccf70906ab125d",
+            "symbol": "HPEc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c8"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000e71d4e45d1421251cb",
+            "symbol": "ANETc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c9"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000b2e8dba585b1ffb158",
+            "symbol": "VRTc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "ai-compute:c10"
+            ]
+          }
+        ],
+        "gap": false
+      },
+      {
+        "themeId": "platform-giants",
+        "claims": [
+          {
+            "id": "platform-giants:c1",
+            "type": "fact",
+            "text": "Google Services generates revenue primarily from advertising, along with consumer subscription products such as YouTube TV and Google One, sales of apps and in-app purchases, and devices.",
+            "sourceIds": [
+              "GOOGL-10-K-0001652044-26-000018"
+            ],
+            "quotes": [
+              {
+                "sourceId": "GOOGL-10-K-0001652044-26-000018",
+                "text": "Google Services generates revenues primarily from advertising; fees received for consumer subscription-based products such as YouTube TV, YouTube Music and Premium, and NFL Sunday Ticket, as well as Google One; the sale of apps and in-app purchases; and devices."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c2",
+            "type": "fact",
+            "text": "Meta's non-advertising revenue includes revenue from consumer hardware products, paid messaging on WhatsApp, subscriptions and other sources.",
+            "sourceIds": [
+              "META-10-Q-0001628280-26-066773"
+            ],
+            "quotes": [
+              {
+                "sourceId": "META-10-Q-0001628280-26-066773",
+                "text": "Non-advertising revenue includes RL revenue generated from the delivery of consumer hardware products and FoA Other revenue, which consists of revenue from paid messaging from WhatsApp, subscriptions, and revenue from various other sources."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c3",
+            "type": "fact",
+            "text": "Amazon offers advertising and digital content subscriptions among other services, and its North America segment earns revenue from retail sales of consumer products, advertising and subscription services.",
+            "sourceIds": [
+              "AMZN-10-K-0001018724-26-000004",
+              "AMZN-10-Q-0001018724-26-000040"
+            ],
+            "quotes": [
+              {
+                "sourceId": "AMZN-10-K-0001018724-26-000004",
+                "text": "We also offer other services such as compute, storage, and database offerings, fulfillment, advertising, publishing, and digital content subscriptions."
+              },
+              {
+                "sourceId": "AMZN-10-Q-0001018724-26-000040",
+                "text": "The North America segment primarily consists of amounts earned from retail sales of consumer products (including from sellers) and advertising and subscription services through North America-focused online and physical stores."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c5",
+            "type": "fact",
+            "text": "Microsoft generates revenue from sources including online advertising, software licensing, devices, and Xbox content, subscriptions and cloud services.",
+            "sourceIds": [
+              "MSFT-10-K-0001193125-26-323660",
+              "MSFT-10-Q-0001193125-26-436133"
+            ],
+            "quotes": [
+              {
+                "sourceId": "MSFT-10-K-0001193125-26-323660",
+                "text": "We generate revenue by offering a wide range of cloud-based solutions, content, and other services to people and businesses; licensing and supporting an array of software products; delivering relevant online advertising to a global audience; and designing and selling devices."
+              },
+              {
+                "sourceId": "MSFT-10-Q-0001193125-26-436133",
+                "text": "XBOX, including XBOX content and services, comprising first- and third-party content (including games and in-game content), XBOX Game Pass and other subscriptions, XBOX Cloud Gaming, advertising, and other cloud services"
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c6",
+            "type": "fact",
+            "text": "Pinterest generates revenue by delivering ads on its website, mobile application and connected TV platforms.",
+            "sourceIds": [
+              "PINS-10-Q-0001506293-26-000153"
+            ],
+            "quotes": [
+              {
+                "sourceId": "PINS-10-Q-0001506293-26-000153",
+                "text": "We generate revenue by delivering ads on our website, mobile application and connected TV platforms."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c8",
+            "type": "fact",
+            "text": "The Trade Desk says clients have predominantly used its platform to purchase connected TV and other video, mobile and display advertising inventory.",
+            "sourceIds": [
+              "TTD-10-Q-0001671933-26-000116"
+            ],
+            "quotes": [
+              {
+                "sourceId": "TTD-10-Q-0001671933-26-000116",
+                "text": "Historically, our clients have predominantly used our platform to purchase CTV and other video, mobile and display advertising inventory."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c9",
+            "type": "fact",
+            "text": "eBay earns revenue primarily through transaction fees, first-party advertising and shipping, and its advertising revenue includes fees charged to sellers to promote listings.",
+            "sourceIds": [
+              "EBAY-10-Q-0001065088-26-000212"
+            ],
+            "quotes": [
+              {
+                "sourceId": "EBAY-10-Q-0001065088-26-000212",
+                "text": "We earn revenue primarily through fees collected on paid transactions, first-party advertising and shipping."
+              },
+              {
+                "sourceId": "EBAY-10-Q-0001065088-26-000212",
+                "text": "Advertising revenues primarily consist of fees charged to sellers to promote their listings on our Marketplace platforms, as well as third-party advertising fees."
+              }
+            ]
+          },
+          {
+            "id": "platform-giants:c10",
+            "type": "fact",
+            "text": "Yelp generates substantially all of its revenue from performance-based advertising products, with other revenue including subscription services contracts.",
+            "sourceIds": [
+              "YELP-10-Q-0001345016-26-000075",
+              "YELP-10-K-0001345016-26-000019"
+            ],
+            "quotes": [
+              {
+                "sourceId": "YELP-10-Q-0001345016-26-000075",
+                "text": "We generate substantially all of our revenue from the sale of performance-based advertising products, which our advertising platform matches to individual consumers through auctions priced on a cost-per-click (“CPC”) basis."
+              },
+              {
+                "sourceId": "YELP-10-K-0001345016-26-000019",
+                "text": "The Company generates other revenue through non-advertising contracts, including subscription services contracts"
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb2000000000000000000002d0ba3164cc74f58b7",
+            "symbol": "GOOGLc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c1"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000008bc8786b856e61707c",
+            "symbol": "METAc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c2"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000d9192b6b456483c2e8",
+            "symbol": "AMZNc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c3"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000ab99cfa739e253872b",
+            "symbol": "MSFTc",
+            "fit": 3,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c5"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000001dfd8c413ecd6ec630",
+            "symbol": "PINSc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c6"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000008baf7bb82e4c37743f",
+            "symbol": "TTDc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c8"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000007578836b0ff7780eb4",
+            "symbol": "EBAYc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c9"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000006454926ad8576dc50e",
+            "symbol": "YELPc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "platform-giants:c10"
+            ]
+          }
+        ],
+        "gap": false
+      },
+      {
+        "themeId": "digital-assets",
+        "claims": [
+          {
+            "id": "digital-assets:c1",
+            "type": "fact",
+            "text": "Strategy refers to other companies executing a bitcoin strategy similar to its own.",
+            "sourceIds": [
+              "MSTR-10-K-0001050446-26-000020"
+            ],
+            "quotes": [
+              {
+                "sourceId": "MSTR-10-K-0001050446-26-000020",
+                "text": "other companies executing a bitcoin strategy similar to ours"
+              }
+            ]
+          },
+          {
+            "id": "digital-assets:c2",
+            "type": "fact",
+            "text": "Riot generates non-cash revenue by mining bitcoin at its facilities, which it manages under its Bitcoin Treasury Strategy.",
+            "sourceIds": [
+              "RIOT-10-Q-0001104659-26-122417"
+            ],
+            "quotes": [
+              {
+                "sourceId": "RIOT-10-Q-0001104659-26-122417",
+                "text": "We generate non-cash revenue through mining bitcoin at our Facilities, which we manage based on our Bitcoin Treasury Strategy"
+              }
+            ]
+          },
+          {
+            "id": "digital-assets:c4",
+            "type": "fact",
+            "text": "TeraWulf derives the majority of its revenue from providing hash computation services to a mining pool operator, facilitating validation of transactions on the bitcoin network.",
+            "sourceIds": [
+              "WULF-10-K-0001083301-26-000031"
+            ],
+            "quotes": [
+              {
+                "sourceId": "WULF-10-K-0001083301-26-000031",
+                "text": "TeraWulf derives the majority of its revenue by providing hash computation services to a mining pool operator, facilitating transaction validation of transactions on the global bitcoin network"
+              }
+            ]
+          },
+          {
+            "id": "digital-assets:c5",
+            "type": "fact",
+            "text": "Core Scientific's self-mining segment mines digital assets for the company's own account, earning digital assets as part of mining pools.",
+            "sourceIds": [
+              "CORZ-10-Q-0001839341-26-000030"
+            ],
+            "quotes": [
+              {
+                "sourceId": "CORZ-10-Q-0001839341-26-000030",
+                "text": "The Digital Asset Self-Mining segment performs digital asset mining for the Company’s own account and generates revenue from operating owned infrastructure and computer equipment as part of mining pools in exchange for digital assets."
+              }
+            ]
+          },
+          {
+            "id": "digital-assets:c6",
+            "type": "fact",
+            "text": "Cipher's bitcoin mining revenue consists of bitcoin earned through mining at its Odessa and Black Pearl facilities, where it participates in third-party mining pools.",
+            "sourceIds": [
+              "CIFR-10-Q-0001819989-26-000050"
+            ],
+            "quotes": [
+              {
+                "sourceId": "CIFR-10-Q-0001819989-26-000050",
+                "text": "Our bitcoin mining revenue consists of bitcoin earned through mining activities at the Odessa and Black Pearl Facilities. We currently participate in third-party mining pools to mine bitcoin."
+              }
+            ]
+          },
+          {
+            "id": "digital-assets:c7",
+            "type": "fact",
+            "text": "Cash App and Square have features that permit customers and sellers to transact in bitcoin.",
+            "sourceIds": [
+              "XYZ-10-K-0001628280-26-012254"
+            ],
+            "quotes": [
+              {
+                "sourceId": "XYZ-10-K-0001628280-26-012254",
+                "text": "Cash App and Square have features that permit our customers and sellers to transact in bitcoin."
+              }
+            ]
+          },
+          {
+            "id": "digital-assets:c8",
+            "type": "fact",
+            "text": "Robinhood facilitates customer trades in certain cryptocurrencies.",
+            "sourceIds": [
+              "HOOD-10-Q-0001783879-26-000167"
+            ],
+            "quotes": [
+              {
+                "sourceId": "HOOD-10-Q-0001783879-26-000167",
+                "text": "We currently facilitate customer trades for certain cryptocurrencies that we have analyzed under applicable internal policies and procedures"
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb2000000000000000000004884b426556b92883d",
+            "symbol": "MSTRc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "digital-assets:c1"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000bd0c7627b663c581a6",
+            "symbol": "RIOTc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "digital-assets:c2"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000432a1d2bd864acec82",
+            "symbol": "WULFc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "digital-assets:c4"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000001aaa9010cd65f82c5e",
+            "symbol": "CORZc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "digital-assets:c5"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000690275843b6e246286",
+            "symbol": "CIFRc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "digital-assets:c6"
+            ]
+          },
+          {
+            "asset": "0xb20000000000000000000067c8c151f24e1c9924",
+            "symbol": "XYZc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "digital-assets:c7"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000006f944897540579d3f2",
+            "symbol": "HOODc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "digital-assets:c8"
+            ]
+          }
+        ],
+        "gap": false
+      },
+      {
+        "themeId": "space-defense",
+        "claims": [
+          {
+            "id": "space-defense:c1",
+            "type": "fact",
+            "text": "Northrop Grumman describes itself as a global aerospace and defense technology company.",
+            "sourceIds": [
+              "NOC-10-K-0001133421-26-000003"
+            ],
+            "quotes": [
+              {
+                "sourceId": "NOC-10-K-0001133421-26-000003",
+                "text": "Northrop Grumman Corporation (herein referred to as “Northrop Grumman,” the “company,” “we,” “us,” or “our”) is a leading global aerospace and defense technology company."
+              }
+            ]
+          },
+          {
+            "id": "space-defense:c2",
+            "type": "fact",
+            "text": "RTX is an aerospace and defense company providing systems and services to commercial, military and government customers.",
+            "sourceIds": [
+              "RTX-10-K-0000101829-26-000006"
+            ],
+            "quotes": [
+              {
+                "sourceId": "RTX-10-K-0000101829-26-000006",
+                "text": "RTX Corporation is an aerospace and defense company that provides advanced systems and services for commercial, military, and government customers worldwide."
+              }
+            ]
+          },
+          {
+            "id": "space-defense:c4",
+            "type": "fact",
+            "text": "Palantir's Gotham integrates with its broader defense offerings and enables users to see, understand and act in the modern battlespace.",
+            "sourceIds": [
+              "PLTR-10-K-0001321655-26-000011"
+            ],
+            "quotes": [
+              {
+                "sourceId": "PLTR-10-K-0001321655-26-000011",
+                "text": "Gotham integrates with our other platforms, as well as our broader defense offerings, and enables users to see, understand, and act in the modern battlespace"
+              }
+            ]
+          },
+          {
+            "id": "space-defense:c5",
+            "type": "fact",
+            "text": "Rocket Lab delivers launch services, spacecraft design, components and manufacturing, and on-orbit management solutions.",
+            "sourceIds": [
+              "RKLB-10-K-0001819994-26-000013"
+            ],
+            "quotes": [
+              {
+                "sourceId": "RKLB-10-K-0001819994-26-000013",
+                "text": "We deliver reliable launch services, spacecraft design services, spacecraft components, spacecraft manufacturing and other spacecraft and on-orbit management solutions"
+              }
+            ]
+          },
+          {
+            "id": "space-defense:c6",
+            "type": "fact",
+            "text": "AST SpaceMobile believes its satellites will be capable of supporting its SpaceMobile Service and a variety of government applications.",
+            "sourceIds": [
+              "ASTS-10-K-0001780312-26-000006"
+            ],
+            "quotes": [
+              {
+                "sourceId": "ASTS-10-K-0001780312-26-000006",
+                "text": "We believe our satellites will be capable of supporting both SpaceMobile Service to end users of the MNOs and a variety of applications in the government sector."
+              }
+            ]
+          },
+          {
+            "id": "space-defense:c7",
+            "type": "fact",
+            "text": "Intuitive Machines designs, manufactures and delivers spacecraft, landers, satellites, surface systems, propulsion and avionics for government and commercial customers.",
+            "sourceIds": [
+              "LUNR-10-K-0001628280-26-019865"
+            ],
+            "quotes": [
+              {
+                "sourceId": "LUNR-10-K-0001628280-26-019865",
+                "text": "Build — designing, manufacturing, and delivering spacecraft, landers, satellites, surface systems, propulsion, and avionics for government and commercial customers"
+              }
+            ]
+          },
+          {
+            "id": "space-defense:c10",
+            "type": "fact",
+            "text": "BlackSky is a space-based technology company that delivers real-time imagery, analytics and high-frequency monitoring.",
+            "sourceIds": [
+              "BKSY-10-K-0001753539-26-000032"
+            ],
+            "quotes": [
+              {
+                "sourceId": "BKSY-10-K-0001753539-26-000032",
+                "text": "BlackSky Technology Inc. (“BlackSky,” the “Company,” “we,” “us,” or “our”) is a space-based technology company that delivers real-time imagery, analytics and high-frequency monitoring"
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb200000000000000000000c5b17c065e5378d2a5",
+            "symbol": "NOCc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "space-defense:c1"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000e6eb8a05d09d73dad5",
+            "symbol": "RTXc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "space-defense:c2"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000007d16372840df4dabbe",
+            "symbol": "PLTRc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "space-defense:c4"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000e8e50cbbb9a3861a3c",
+            "symbol": "RKLBc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "space-defense:c5"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000b1a29cf17a1819288a",
+            "symbol": "ASTSc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "space-defense:c6"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000674e1325dbdf06b309",
+            "symbol": "LUNRc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "space-defense:c7"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000bc4d895df1eeed1d06",
+            "symbol": "BKSYc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "space-defense:c10"
+            ]
+          }
+        ],
+        "gap": false
+      },
+      {
+        "themeId": "data-center-power",
+        "claims": [
+          {
+            "id": "data-center-power:c2",
+            "type": "fact",
+            "text": "Vistra says demand drivers, including the rise of large-scale data centers, are contributing to projected fast load growth in the regions it serves.",
+            "sourceIds": [
+              "VST-10-Q-0001692819-26-000025"
+            ],
+            "quotes": [
+              {
+                "sourceId": "VST-10-Q-0001692819-26-000025",
+                "text": "Electricity demand drivers including the rise of large-scale data centers, the electrification of oil field operations, and electric vehicle load building are contributing to a projected fast-paced load growth in the regions we serve."
+              }
+            ]
+          },
+          {
+            "id": "data-center-power:c3",
+            "type": "fact",
+            "text": "Constellation reports that Microsoft will purchase the output of a renewed plant, including energy and capacity, as part of its goal to help power its data centers.",
+            "sourceIds": [
+              "CEG-10-K-0001868275-26-000032"
+            ],
+            "quotes": [
+              {
+                "sourceId": "CEG-10-K-0001868275-26-000032",
+                "text": "Microsoft will purchase the output generated from the renewed plant which includes energy, capacity and emissions-free attributes as part of its goal to help power its data centers in PJM with clean reliable energy."
+              }
+            ]
+          },
+          {
+            "id": "data-center-power:c4",
+            "type": "fact",
+            "text": "Bloom Energy has recently seen a significant increase in demand for its Energy Server systems to meet the on-site power needs of AI data centers.",
+            "sourceIds": [
+              "BE-10-K-0001628280-26-006516"
+            ],
+            "quotes": [
+              {
+                "sourceId": "BE-10-K-0001628280-26-006516",
+                "text": "we have recently seen a significant increase in demand for Bloom Energy Server systems to meet the power needs of AI data centers, which are experiencing increased demand for reliable, on-site power."
+              }
+            ]
+          },
+          {
+            "id": "data-center-power:c5",
+            "type": "fact",
+            "text": "NuScale's management believes its clean baseload power generation provides energy at scale to help meet power needs for data centers and AI.",
+            "sourceIds": [
+              "SMR-10-K-0001822966-26-000018"
+            ],
+            "quotes": [
+              {
+                "sourceId": "SMR-10-K-0001822966-26-000018",
+                "text": "management believes this clean baseload power generation provides energy at scale for large technology companies to help meet power needs for data centers and artificial intelligence (“AI”) while achieving sustainability objectives."
+              }
+            ]
+          },
+          {
+            "id": "data-center-power:c6",
+            "type": "fact",
+            "text": "Oklo plans to use the fast fission powerhouses it is developing to sell power to potential customers, including data centers.",
+            "sourceIds": [
+              "OKLO-10-K-0001628280-26-018698"
+            ],
+            "quotes": [
+              {
+                "sourceId": "OKLO-10-K-0001628280-26-018698",
+                "text": "We plan to leverage the next-generation fast fission powerhouses that we are developing in order to sell power to a variety of potential customers, including data centers, military and other government facilities"
+              }
+            ]
+          },
+          {
+            "id": "data-center-power:c7",
+            "type": "fact",
+            "text": "NANO Nuclear's KRONOS reactor will target markets including data and artificial intelligence centers.",
+            "sourceIds": [
+              "NNE-10-K-0001493152-25-028285"
+            ],
+            "quotes": [
+              {
+                "sourceId": "NNE-10-K-0001493152-25-028285",
+                "text": "The KRONOS MMR ™ reactor will also target larger population centers, larger industrial operations, industrial heat for larger industries, and data and artificial intelligence centers for the tech industry."
+              }
+            ]
+          },
+          {
+            "id": "data-center-power:c9",
+            "type": "fact",
+            "text": "TeraWulf's data center campuses are engineered for high-density compute, emphasizing efficient power use, advanced cooling and resilient electrical design.",
+            "sourceIds": [
+              "WULF-10-K-0001083301-26-000031"
+            ],
+            "quotes": [
+              {
+                "sourceId": "WULF-10-K-0001083301-26-000031",
+                "text": "Our data center campuses are engineered to support high-density, mission-critical compute while emphasizing efficient power utilization, advanced cooling architectures, and resilient electrical design."
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb20000000000000000000079dc24fe2fbd09110f",
+            "symbol": "VSTc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "data-center-power:c2"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000da9874b62b55e791b5",
+            "symbol": "CEGc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "data-center-power:c3"
+            ]
+          },
+          {
+            "asset": "0xb20000000000000000000016f9dfe862feba122b",
+            "symbol": "BEc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "data-center-power:c4"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000978546fe604b8dcbc6",
+            "symbol": "SMRc",
+            "fit": 3,
+            "evidence": 2,
+            "claimIds": [
+              "data-center-power:c5"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000009188edfd2fcc8cc81e",
+            "symbol": "OKLOc",
+            "fit": 3,
+            "evidence": 2,
+            "claimIds": [
+              "data-center-power:c6"
+            ]
+          },
+          {
+            "asset": "0xb20000000000000000000069d694d397b9388dac",
+            "symbol": "NNEc",
+            "fit": 3,
+            "evidence": 2,
+            "claimIds": [
+              "data-center-power:c7"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000432a1d2bd864acec82",
+            "symbol": "WULFc",
+            "fit": 4,
+            "evidence": 2,
+            "claimIds": [
+              "data-center-power:c9"
+            ]
+          }
+        ],
+        "gap": false
+      },
+      {
+        "themeId": "cybersecurity",
+        "claims": [
+          {
+            "id": "cybersecurity:c1",
+            "type": "fact",
+            "text": "Palo Alto Networks says its platforms and services help secure enterprise users, networks, clouds, endpoints, AI apps and agents, and identities.",
+            "sourceIds": [
+              "PANW-10-K-0001327567-26-000023"
+            ],
+            "quotes": [
+              {
+                "sourceId": "PANW-10-K-0001327567-26-000023",
+                "text": "Our platforms and services help secure enterprise users, networks, clouds, endpoints, AI apps and agents, and identities by delivering comprehensive cybersecurity backed by AI and automation"
+              }
+            ]
+          },
+          {
+            "id": "cybersecurity:c3",
+            "type": "fact",
+            "text": "Zscaler delivers a cloud-native zero trust platform intended to minimize an enterprise's attack surface and eliminate lateral threat movement.",
+            "sourceIds": [
+              "ZS-10-K-0001713683-26-000157"
+            ],
+            "quotes": [
+              {
+                "sourceId": "ZS-10-K-0001713683-26-000157",
+                "text": "We deliver a comprehensive, cloud-native zero trust platform that minimizes the attack surface of an enterprise and eliminates lateral threat movement, enabling security at the scale and speed of AI."
+              }
+            ]
+          },
+          {
+            "id": "cybersecurity:c5",
+            "type": "fact",
+            "text": "Rubrik created Zero Trust Data Security so that organizations can secure their data across the cloud and recover from cyberattacks.",
+            "sourceIds": [
+              "RBRK-10-K-0001943896-26-000013"
+            ],
+            "quotes": [
+              {
+                "sourceId": "RBRK-10-K-0001943896-26-000013",
+                "text": "we created Zero Trust Data Security to deliver cyber resilience so that organizations can secure their data across the cloud and recover from cyberattacks."
+              }
+            ]
+          },
+          {
+            "id": "cybersecurity:c7",
+            "type": "fact",
+            "text": "Cisco's subscription revenue includes security software licenses, among other software and SaaS arrangements.",
+            "sourceIds": [
+              "CSCO-10-Q-0000858877-26-000185"
+            ],
+            "quotes": [
+              {
+                "sourceId": "CSCO-10-Q-0000858877-26-000185",
+                "text": "Subscription revenue includes revenue recognized from our term software licenses, security software licenses, SaaS, and associated service arrangements."
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb2000000000000000000008b934a18e189efe90f",
+            "symbol": "PANWc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "cybersecurity:c1"
+            ]
+          },
+          {
+            "asset": "0xb20000000000000000000076a288b15b61ec78f6",
+            "symbol": "ZSc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "cybersecurity:c3"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000b6354bc256dbcd93a8",
+            "symbol": "RBRKc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "cybersecurity:c5"
+            ]
+          },
+          {
+            "asset": "0xb20000000000000000000015776ea82655c4f034",
+            "symbol": "CSCOc",
+            "fit": 3,
+            "evidence": 2,
+            "claimIds": [
+              "cybersecurity:c7"
+            ]
+          }
+        ],
+        "gap": false
+      },
+      {
+        "themeId": "metabolic-health",
+        "claims": [
+          {
+            "id": "metabolic-health:c1",
+            "type": "fact",
+            "text": "Novo Nordisk has a product portfolio across obesity and diabetes care, including GLP-1 receptor agonists.",
+            "sourceIds": [
+              "NVO-20-F-0000353278-26-000012"
+            ],
+            "quotes": [
+              {
+                "sourceId": "NVO-20-F-0000353278-26-000012",
+                "text": "The Company has a broad product portfolio across Obesity and Diabetes care and Rare disease, including a portfolio of glucagon-like-peptide-1 (GLP-1) receptor agonists for the treatment of obesity and diabetes"
+              }
+            ]
+          },
+          {
+            "id": "metabolic-health:c3",
+            "type": "fact",
+            "text": "Viking is developing VK2735, a dual GLP-1 and GIP receptor agonist, for the potential treatment of metabolic disorders such as obesity.",
+            "sourceIds": [
+              "VKTX-10-K-0001193125-26-046876"
+            ],
+            "quotes": [
+              {
+                "sourceId": "VKTX-10-K-0001193125-26-046876",
+                "text": "VK2735, a novel dual agonist of the glucagon-like peptide 1, or GLP-1, and glucose-dependent insulinotropic polypeptide, or GIP, receptors. VK2735 is being developed in both oral and subcutaneous formulations for the potential treatment of various metabolic disorders such as obesity."
+              }
+            ]
+          },
+          {
+            "id": "metabolic-health:c4",
+            "type": "fact",
+            "text": "In 2024, Rezdiffra became the first FDA-approved therapy for patients with MASH and became commercially available in the United States.",
+            "sourceIds": [
+              "MDGL-10-K-0001628280-26-009514"
+            ],
+            "quotes": [
+              {
+                "sourceId": "MDGL-10-K-0001628280-26-009514",
+                "text": "In March 2024, Rezdiffra became the first therapy approved by the FDA for patients with MASH and was commercially available in the United States beginning in April 2024."
+              }
+            ]
+          },
+          {
+            "id": "metabolic-health:c7",
+            "type": "fact",
+            "text": "LifeMD entered into an agreement to facilitate patient access to Novo Nordisk's GLP-1 therapies, including Wegovy and Ozempic.",
+            "sourceIds": [
+              "LFMD-10-Q-0001493152-26-051463"
+            ],
+            "quotes": [
+              {
+                "sourceId": "LFMD-10-Q-0001493152-26-051463",
+                "text": "In August 2026, LifeMD entered into an agreement to facilitate patient access to Novo Nordisk’s FDA-approved GLP-1 therapies, including Wegovy® and Ozempic®."
+              }
+            ]
+          }
+        ],
+        "fits": [
+          {
+            "asset": "0xb2000000000000000000008d5328e9208773dc58",
+            "symbol": "NVOc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "metabolic-health:c1"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000979ef4dd6a001b58b1",
+            "symbol": "VKTXc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "metabolic-health:c3"
+            ]
+          },
+          {
+            "asset": "0xb2000000000000000000008d426f3543babee7bb",
+            "symbol": "MDGLc",
+            "fit": 5,
+            "evidence": 2,
+            "claimIds": [
+              "metabolic-health:c4"
+            ]
+          },
+          {
+            "asset": "0xb200000000000000000000db15c02e133a9dab99",
+            "symbol": "LFMDc",
+            "fit": 3,
+            "evidence": 2,
+            "claimIds": [
+              "metabolic-health:c7"
+            ]
+          }
+        ],
+        "gap": false
+      }
+    ],
+    "disclaimer": "Informational research only. Not investment advice. Simulated where labeled. Fact wording was edited after generation to match the quoted filing text."
+  },
+  "issues": [],
+  "rejected": [
+    "platform-giants: platform-giants:c4: fact dropped, quote not found in the cited document. Tried: \"The Company’s advertising services include third-party licensing arrangements and the Company’s own advertising platforms. The Company operates various platforms, including the App Store ® , that allow customers to discover and download applications and digital content\"",
+    "platform-giants: platform-giants:c7: fact dropped, quote not found in the cited document. Tried: \"We generate the substantial majority of our revenue through the sale of our advertising products on Snapchat... Other revenue primarily consists of service revenue from our Snapchat subscriptions and partnerships... also includes our subscriptions and sales of physical products.\"",
+    "platform-giants: fit AAPLc: no surviving fact about this company (it cited c4)",
+    "platform-giants: fit SNAPc: no surviving fact about this company (it cited c7)",
+    "digital-assets: digital-assets:c3: fact dropped, numbers not in its quotes: 8. Fact: \"Hut 8 Corp. generates revenue from bitcoin mining and holds bitcoin as part of its operations.\" Quotes: \"the value of any Bitcoin we or American Bitcoin mine or otherwise acquire or hold for our own accounts\"",
+    "digital-assets: fit HUTc: no surviving fact about this company (it cited c3)",
+    "space-defense: space-defense:c3: fact dropped, quote is 329 characters, over the 300 limit. Tried: \"AeroVironment, Inc., a Delaware corporation and its fully owned subsidiaries (collectively referred to herein as the “Company”), is engaged in the design, development, production, delivery and support of autonomous systems, precision strike systems, Counter-Uncrewed Aircraft Systems (“C-UAS”) technologies, space-based platforms\"",
+    "space-defense: fit AVAVc: no surviving fact about this company (it cited c3)",
+    "space-defense: fit SPCEc: no supporting quote mentions the theme (satellite, satellites, spacecraft, rocket, rockets, launch services, launch vehicle, launch vehicles, space systems, space-based, defense, missile, missiles, aerospace, unmanned). Quotes: \"Virgin Galactic Holdings, Inc., together with its consolidated subsidiaries (“Virgin Galactic” or the “Company”), is a spaceflight expeditions company offering people access to space, while enabling scientific discovery and supporting strategic government missions.\"",
+    "space-defense: fit RDWc: no supporting quote mentions the theme (satellite, satellites, spacecraft, rocket, rockets, launch services, launch vehicle, launch vehicles, space systems, space-based, defense, missile, missiles, aerospace, unmanned). Quotes: \"Redwire is a leading innovator in space infrastructure, enabling space mission providers with the foundational building blocks and integrated solutions needed for complex space missions\"",
+    "data-center-power: data-center-power:c8: fact dropped, quote not found in the cited document. Tried: \"NRG Energy, Inc., or NRG or the Company, serves electricity, natural gas, and smart-home technology solutions to approximately 8 million residential customers... in addition to large commercial and industrial, data center, and wholesale customers.\"",
+    "data-center-power: fit VRTc: no supporting quote mentions the theme (electricity, power generation, power plants, nuclear, reactor, reactors, megawatts, gigawatts, grid, cooling, power management, energy, generation capacity, fission, powerhouse, powerhouses). Quotes: \"We design, manufacture and service critical digital infrastructure technology primarily for data centers, communication networks and commercial and industrial environments.\"",
+    "data-center-power: fit NRGc: no surviving fact about this company (it cited c8)",
+    "data-center-power: fit BWc: no supporting quote mentions the theme (electricity, power generation, power plants, nuclear, reactor, reactors, megawatts, gigawatts, grid, cooling, power management, energy, generation capacity, fission, powerhouse, powerhouses). Quotes: \"Our proven platforms help utilities, data centers, oil and gas, and other industries meet rising demand\"",
+    "cybersecurity: fit CRWDc: no supporting quote mentions the theme (cybersecurity, cyber, threat, threats, endpoint, firewall, zero trust, identity security, network security, cloud security, security, breaches). Quotes: \"The Company’s unified, cloud-delivered platform provides protection across endpoints, cloud workloads, identity, and data through a software as a service (“SaaS”) subscription-based model\"",
+    "cybersecurity: fit OKTAc: no supporting quote mentions the theme (cybersecurity, cyber, threat, threats, endpoint, firewall, zero trust, identity security, network security, cloud security, security, breaches). Quotes: \"Our Okta Platform and Auth0 Platform enable our customers to securely connect the right people to the right technologies and services at the right time.\"",
+    "cybersecurity: fit Sc: no supporting quote mentions the theme (cybersecurity, cyber, threat, threats, endpoint, firewall, zero trust, identity security, network security, cloud security, security, breaches). Quotes: \"We face significant challenges in ensuring that our platform effectively identifies and responds to these advanced and evolving attacks, including as a result of the evolving AI landscape.\"",
+    "metabolic-health: metabolic-health:c2: fact dropped, numbers not in its quotes: 1. Fact: \"Eli Lilly manufactures and markets GLP-1 medications such as Mounjaro, Zepbound, and the newly launched Foundayo (orforglipron) for obesity and type 2 diabetes.\" Quotes: \"In the second quarter of 2026, we launched Foundayo (orforglipron) in the U.S. for the treatment of obesity and submitted orforglipron to the FDA for type 2 diabetes.\"",
+    "metabolic-health: metabolic-health:c5: fact dropped, numbers not in its quotes: 1, 2. Fact: \"Tandem Diabetes Care produces insulin delivery systems that include automated algorithms for managing type 1 and type 2 diabetes.\" Quotes: \"We develop our automated insulin delivery systems and related technology solutions using a consumer-focused approach.\"",
+    "metabolic-health: metabolic-health:c6: fact dropped, numbers not in its quotes: 1. Fact: \"WW International provides weight management programs and clinical services, including access to GLP-1 medications through its Med+ offering.\" Quotes: \"Med+ is our Clinical offering in the United States which provides members who medically qualify with access to specialized clinicians, including board-certified doctors and clinicians trained in obesity medicine\"",
+    "metabolic-health: fit LLYc: no surviving fact about this company (it cited c2)",
+    "metabolic-health: fit TNDMc: no surviving fact about this company (it cited c5)",
+    "metabolic-health: fit WWc: no surviving fact about this company (it cited c6)"
+  ],
+  "usage": {
+    "inputTokens": 197175,
+    "outputTokens": 11353,
+    "calls": 14
+  },
+  "costUsd": 0.06632325,
+  "costUsdcMinor": "66324",
+  "secWarnings": [],
+  "handEdit": {
+    "at": "2026-11-27T04:06:31+00:00",
+    "note": "Fact sentences rewritten by Claude to say only what their quotes state. Quotes, sources, companies and scores unchanged.",
+    "factsChanged": 50,
+    "unattachedFactsRemoved": [
+      "space-defense:c8",
+      "space-defense:c9",
+      "data-center-power:c1",
+      "data-center-power:c10",
+      "cybersecurity:c2",
+      "cybersecurity:c4",
+      "cybersecurity:c6"
+    ],
+    "companiesRemoved": [
+      "digital-assets PYPLc",
+      "cybersecurity IBMc",
+      "cybersecurity MSFTc"
+    ]
+  }
+}
