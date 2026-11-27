@@ -26,6 +26,14 @@ export function explorerTx(network: string | null | undefined, transaction: stri
     return known === undefined ? null : { name: known.name, url: `${known.tx}${transaction}` };
 }
 
+/** Where to see one wallet's balance of one token, or null for a chain this does not know. */
+export function explorerTokenBalance(network: string, token: string, holder: string): ExplorerLink | null {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(token) || !/^0x[0-9a-fA-F]{40}$/.test(holder)) return null;
+    const known = EXPLORERS[network.trim()];
+    if (known === undefined) return null;
+    return { name: known.name, url: `${known.tx.replace(/\/tx\/$/, "/token/")}${token}?a=${holder}` };
+}
+
 /** A hash shortened for display. The full value stays in the link and the title attribute. */
 export function shortHash(hash: string, lead = 10, tail = 6): string {
     return hash.length <= lead + tail + 1 ? hash : `${hash.slice(0, lead)}…${hash.slice(-tail)}`;

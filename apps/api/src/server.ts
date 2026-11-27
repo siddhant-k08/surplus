@@ -1248,8 +1248,23 @@ export function buildServer(deps: ServerDeps): BuiltServer {
         });
 
         /** What the agent holds, what it cost, and what selling it would realize. */
-        app.get("/invest/holdings", owner, (_req: Request, res: Response) => {
+        app.get("/invest/holdings", owner, async (req: Request, res: Response) => {
             const symbols = new Map(BASE_REGISTRY.map((t) => [t.address.toLowerCase(), t.symbol]));
+            // `?value=live` asks for a sell quote per token, which is why it is not the default.
+            const live = req.query.value === "live";
+            const valued = await engine.valueHoldings(live);
+            const entries = engine.treasury.ledger.all();
+            // The transactions that built or reduced each position, so each can be looked up onchain.
+            const transactions = new Map<string, string[]>();
+            for (const tx of entries) {
+                if ((tx.type !== "PURCHASE_SETTLED" && tx.type !== "SALE_SETTLED") || tx.txHash === undefined) continue;
+                const line = tx.lines.find((l) => l.account.startsWith("positions."));
+                if (line === undefined) continue;
+                const asset = line.account.slice("positions.".length).toLowerCase();
+                const list = transactions.get(asset) ?? [];
+                if (!list.includes(tx.txHash)) list.push(tx.txHash);
+                transactions.set(asset, list);
+            }
             // Everything the books know about, closed positions included. A position bought and sold is
             // part of what the agent did, and dropping it the moment it goes flat would make a round
             // trip that broke even disappear without trace.
@@ -1269,8 +1284,19 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                     // Can be sold, but its cost basis covers units nobody wrote down, so what a sale
                     // realizes is not a statement about the market. Said rather than left to be inferred.
                     caveat: partlyUnrecorded(p),
+                    decimals: valued.get(asset)?.decimals ?? null,
+                    transactions: transactions.get(asset) ?? [],
+                    ...(live && {
+                        valueUsdcMinor: valued.get(asset)?.valueUsdc?.toString() ?? null,
+                        priceUsdcMinor: valued.get(asset)?.priceUsdc?.toString() ?? null,
+                        ...(valued.get(asset)?.error !== undefined && { valueError: valued.get(asset)!.error }),
+                    }),
                 }));
             res.json({
+                // Simulated fills hold no tokens; every surface showing these numbers has to say so.
+                mode: entries[0]?.mode ?? config.investMode,
+                simulated: !entries.some((t) => t.type === "PURCHASE_SETTLED" && t.txHash !== undefined),
+                ...(live && { valuedAt: new Date().toISOString() }),
                 positions,
                 realizedUsdcMinor: (-engine.treasury.ledger.balance("pnl.realized")).toString(),
                 exit: {

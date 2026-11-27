@@ -397,6 +397,65 @@ export interface PositionsView {
     issues: string[];
 }
 
+/** One position as the books hold it, and its live value when one was asked for. */
+export interface Holding {
+    asset: string;
+    symbol: string | null;
+    /** Token minor units. */
+    units: string;
+    costUsdcMinor: string;
+    realizedUsdcMinor: string;
+    buys: number;
+    sells: number;
+    /** Null when the token list could not be read. */
+    decimals: number | null;
+    /** Onchain transactions behind the position. Empty while fills are simulated. */
+    transactions: string[];
+    /** Present only on a live valuation; null when the token could not be quoted. */
+    valueUsdcMinor?: string | null;
+    priceUsdcMinor?: string | null;
+    valueError?: string;
+}
+
+export interface Holdings {
+    mode: string;
+    simulated: boolean;
+    valuedAt?: string;
+    positions: Holding[];
+    realizedUsdcMinor: string;
+}
+
+/**
+ * Fills in what an older server leaves out.
+ *
+ * The page and the API deploy separately, and a server from before the holdings table answers with
+ * no `transactions`, no `decimals` and no `simulated`. Reading those as present crashed the whole
+ * Book tab. Missing transactions are none, missing decimals are unknown, and a missing `simulated`
+ * is read as simulated, since claiming tokens exist on a guess is the one wrong answer here.
+ */
+export function normalizeHoldings(raw: Partial<Holdings> & { positions?: Partial<Holding>[] }): Holdings {
+    return {
+        mode: raw.mode ?? "unknown",
+        simulated: raw.simulated ?? true,
+        ...(raw.valuedAt !== undefined && { valuedAt: raw.valuedAt }),
+        realizedUsdcMinor: raw.realizedUsdcMinor ?? "0",
+        positions: (raw.positions ?? []).map((p) => ({
+            asset: p.asset ?? "",
+            symbol: p.symbol ?? null,
+            units: p.units ?? "0",
+            costUsdcMinor: p.costUsdcMinor ?? "0",
+            realizedUsdcMinor: p.realizedUsdcMinor ?? "0",
+            buys: p.buys ?? 0,
+            sells: p.sells ?? 0,
+            decimals: typeof p.decimals === "number" ? p.decimals : null,
+            transactions: Array.isArray(p.transactions) ? p.transactions : [],
+            ...(p.valueUsdcMinor !== undefined && { valueUsdcMinor: p.valueUsdcMinor }),
+            ...(p.priceUsdcMinor !== undefined && { priceUsdcMinor: p.priceUsdcMinor }),
+            ...(p.valueError !== undefined && { valueError: p.valueError }),
+        })),
+    };
+}
+
 /** What pressing execute would actually do. Asked of the agent, never inferred from config. */
 export interface ExecutionStatus {
     willSendRealSwaps: boolean;
@@ -459,6 +518,9 @@ export const api = {
     sync: () => post<SyncResult>("/invest/sync"),
     execution: () => call<ExecutionStatus>("/invest/execution"),
     positions: () => call<PositionsView>("/invest/positions"),
+    /** `live` asks for one sell quote per token held, so the desk asks for it rather than loading it. */
+    holdings: async (live = false): Promise<Holdings> =>
+        normalizeHoldings(await call<Holdings>(live ? "/invest/holdings?value=live" : "/invest/holdings")),
     propose: (id?: string) => post<Proposal>("/invest/propose", id === undefined ? {} : { id }),
     approve: (id: string, signature: string) =>
         post<{ id: string; approved: boolean; expiresAt: string; signer: string }>("/invest/approve", {
