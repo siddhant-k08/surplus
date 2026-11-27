@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseUsdc as u } from "@surplus/core";
+import { privateKeyToAccount } from "viem/accounts";
 import { SwapExecutor, ExecutorRefused, openExecutor, type ChainAccess } from "../src/executor";
 import { MemoryJournal } from "../src/journal";
 
@@ -87,6 +88,23 @@ describe("sending a swap without losing track of it", () => {
         amountIn: u("1.00"),
     } as unknown as Parameters<SwapExecutor["fill"]>[1];
 
+    const ME = privateKeyToAccount(KEY as `0x${string}`).address;
+    const ELSEWHERE = ("0x" + "99".repeat(20)) as `0x${string}`;
+
+    const transfer = (token: string, to: string, value: bigint, from: string = ELSEWHERE) => ({
+        token: token as `0x${string}`,
+        from: from as `0x${string}`,
+        to: to as `0x${string}`,
+        value,
+    });
+
+    /** A successful receipt in which the wallet received `units` of the ordered token. */
+    const receipt = (units = 1_000_000n, gasUsed = 21_000n) => ({
+        status: "success" as const,
+        gasUsed,
+        transfers: [transfer(order.asset, ME, units)],
+    });
+
     /** A chain that records what it was asked to do, and can be told to fail at a chosen step. */
     function fakeChain(over: Partial<ChainAccess> & { failAt?: "simulate" | "broadcast" } = {}) {
         const calls: string[] = [];
@@ -106,7 +124,7 @@ describe("sending a swap without losing track of it", () => {
                 if (over.failAt === "broadcast") throw new Error("connection lost");
                 return HASH;
             },
-            waitFor: async () => { calls.push("waitFor"); return { status: "success" as const, gasUsed: 21_000n }; },
+            waitFor: async () => { calls.push("waitFor"); return receipt(); },
             receiptFor: async () => { calls.push("receiptFor"); return null; },
             nativeBalance: async () => 10_000_000_000_000n,
             chainId: async () => 8453,
@@ -171,12 +189,83 @@ describe("sending a swap without losing track of it", () => {
         await journal.recordSigned("p1:0", HASH, RAW);
 
         const { chain, calls } = fakeChain({
-            receiptFor: async () => ({ status: "success", gasUsed: 42_000n }),
+            receiptFor: async () => receipt(1_000_000n, 42_000n),
         });
         const filled = await executorWith(chain, journal).fill(order, quote, "p1:0");
         expect(calls).not.toContain("broadcast");
         expect(calls).not.toContain("sign");
         expect(filled.gasUsed).toBe(42_000n);
+    });
+
+    it("books the units the wallet received, not the units the route expected", async () => {
+        // the route expects 1,000,000; slippage inside the tolerance delivers less
+        const journal = new MemoryJournal();
+        const { chain } = fakeChain({ waitFor: async () => receipt(995_000n) });
+        const filled = await executorWith(chain, journal).fill(order, quote, "p1:0");
+
+        expect(filled.amountOut).toBe(995_000n);
+        expect((await journal.find("p1:0"))?.amountOutMinor).toBe(995_000n);
+    });
+
+    it("counts only the bought token arriving at this wallet, net of anything leaving it", async () => {
+        const journal = new MemoryJournal();
+        const { chain } = fakeChain({
+            waitFor: async () => ({
+                status: "success" as const,
+                gasUsed: 21_000n,
+                transfers: [
+                    // addresses differ in case between a receipt and the configuration
+                    transfer(order.asset.toUpperCase().replace("0X", "0x"), ME.toLowerCase(), 700_000n),
+                    transfer(order.asset, ME, 300_000n),
+                    transfer(order.asset, ELSEWHERE, 4_000n, ME),
+                    transfer(order.asset, ELSEWHERE, 50_000n), // another pool's hop
+                    transfer(USDC, ME, 123n), // another token
+                ],
+            }),
+        });
+        const filled = await executorWith(chain, journal).fill(order, quote, "p1:0");
+        expect(filled.amountOut).toBe(996_000n);
+    });
+
+    it("books the USDC a sale returned", async () => {
+        const journal = new MemoryJournal();
+        const sale = { ...order, side: "sell", unitsIn: 500n } as typeof order;
+        const { chain } = fakeChain({
+            tokenBalance: async () => 500n,
+            waitFor: async () => ({
+                status: "success" as const,
+                gasUsed: 21_000n,
+                transfers: [transfer(order.asset, ELSEWHERE, 500n, ME), transfer(USDC, ME, 970_000n)],
+            }),
+        });
+        const filled = await executorWith(chain, journal).fill(sale, quote, "p1:0");
+        expect(filled.amountOut).toBe(970_000n);
+        expect((await journal.find("p1:0"))?.amountOutMinor).toBe(970_000n);
+    });
+
+    it("reads what a recovered swap delivered from its receipt", async () => {
+        // signed and broadcast, then the process died: nothing recorded what came back
+        const journal = new MemoryJournal();
+        await journal.reserve({ key: "p1:0", symbol: "NVDAc", asset: order.asset, usdcInMinor: u("1.00") });
+        await journal.recordSigned("p1:0", HASH, RAW);
+
+        const { chain } = fakeChain({ receiptFor: async () => receipt(993_000n) });
+        const filled = await executorWith(chain, journal).fill(order, quote, "p1:0");
+        expect(filled.amountOut).toBe(993_000n);
+        expect((await journal.find("p1:0"))?.amountOutMinor).toBe(993_000n);
+    });
+
+    it("leaves a swap unresolved rather than booking nothing as a fill", async () => {
+        // success, yet no transfer to this wallet can be read: the money moved and the result is unknown
+        const journal = new MemoryJournal();
+        const blind = { status: "success" as const, gasUsed: 21_000n, transfers: [] };
+        const { chain } = fakeChain({ waitFor: async () => blind, receiptFor: async () => blind });
+        const ex = executorWith(chain, journal);
+
+        await expect(ex.fill(order, quote, "p1:0")).rejects.toThrow(/shows nothing received/);
+        expect((await journal.find("p1:0"))?.status).toBe("sent");
+        expect(await journal.committedUsdcMinor()).toBe(u("1.00"));
+        expect(await ex.recover()).toEqual([{ key: "p1:0", outcome: "unknown" }]);
     });
 
     it("never sends twice for the same order", async () => {
@@ -203,7 +292,7 @@ describe("sending a swap without losing track of it", () => {
 
     it("refuses to retry an order the chain already rejected", async () => {
         const journal = new MemoryJournal();
-        const reverting = fakeChain({ waitFor: async () => ({ status: "reverted", gasUsed: 21_000n }) });
+        const reverting = fakeChain({ waitFor: async () => ({ status: "reverted", gasUsed: 21_000n, transfers: [] }) });
         await expect(executorWith(reverting.chain, journal).fill(order, quote, "p1:0")).rejects.toThrow(/reverted/);
         expect((await journal.find("p1:0"))?.status).toBe("failed");
 
@@ -307,7 +396,7 @@ describe("sending a swap without losing track of it", () => {
         await journal.reserve({ key: "p1:0", symbol: "NVDAc", asset: order.asset, usdcInMinor: u("1.00") });
         await journal.recordSigned("p1:0", HASH, RAW);
 
-        const { chain } = fakeChain({ receiptFor: async () => ({ status: "success", gasUsed: 30_000n }) });
+        const { chain } = fakeChain({ receiptFor: async () => receipt(1_000_000n, 30_000n) });
         const resolved = await executorWith(chain, journal).recover();
         expect(resolved).toEqual([{ key: "p1:0", outcome: "filled" }]);
         expect((await journal.find("p1:0"))?.status).toBe("filled");

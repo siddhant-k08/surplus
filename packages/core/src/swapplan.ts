@@ -10,7 +10,12 @@ export interface SwapOrder {
     readonly symbol: string;
     readonly usdcIn: bigint;
     readonly maxSlippageBps: number;
-    readonly parts: readonly { readonly theme: string; readonly usdcIn: bigint }[];
+    readonly parts: readonly {
+        readonly theme: string;
+        readonly usdcIn: bigint;
+        /** Sell only: the units of this leg that went into this swap. */
+        readonly unitsIn?: bigint;
+    }[];
     /** Absent for a buy, so an order that predates the sell path is unchanged. */
     readonly side?: "sell";
     /** Sell only: the token units this one swap disposes of. */
@@ -49,7 +54,7 @@ export function swapPlan(legs: readonly Leg[], maxTradeUsdc: bigint): SwapOrder[
         const maxSlippageBps = Math.min(...group.map((l) => l.maxSlippageBps));
 
         // fill orders up to the cap, in leg order, splitting a leg across orders only when it has to be
-        let parts: { theme: string; usdcIn: bigint }[] = [];
+        let parts: { theme: string; usdcIn: bigint; unitsIn?: bigint }[] = [];
         let running = 0n;
         let units = 0n;
         const flush = (): void => {
@@ -73,12 +78,12 @@ export function swapPlan(legs: readonly Leg[], maxTradeUsdc: bigint): SwapOrder[
                     continue;
                 }
                 const take = left < room ? left : room;
-                parts.push({ theme: leg.theme, usdcIn: take });
                 running += take;
                 // Units follow the notional they were cut with, and the last slice takes what is left so
                 // a split leg disposes of exactly the units it was asked to and never a rounding less.
                 const takeUnits = take === left ? unitsLeft : (legUnits * take) / leg.usdcIn;
                 units += takeUnits;
+                parts.push({ theme: leg.theme, usdcIn: take, ...(sell && { unitsIn: takeUnits }) });
                 unitsLeft -= takeUnits;
                 left -= take;
             }
@@ -131,49 +136,62 @@ export function splitFill(amountOut: bigint, parts: readonly bigint[]): bigint[]
 }
 
 
-/**
- * Attributes what each swap returned back to the legs that paid for it.
- *
- * `swapPlan` groups legs by token and cuts them at the trade cap, so one swap can cover several legs
- * and one leg can be spread over several swaps. The ledger keeps an entry per leg, so the quantities
- * have to go back the way the money came out. The plan consumes a token's legs in order, which is what
- * makes this recoverable: the running total of what has been spent on a token says which leg the next
- * slice belongs to.
- *
- * `filled` is keyed by position in the plan. An order missing from it did not execute, and its legs are
- * absent from the result rather than credited with a quantity they never received.
- */
-export function attributeFills(
-    legs: readonly Leg[],
-    plan: readonly SwapOrder[],
-    filled: ReadonlyMap<number, bigint>,
-): Map<number, bigint> {
-    const out = new Map<number, bigint>();
-    const spentPerAsset = new Map<string, bigint>();
-
-    for (const [position, order] of plan.entries()) {
-        const key = order.asset.toLowerCase();
-        const amountOut = filled.get(position);
-        const shares = amountOut === undefined ? null : splitFill(amountOut, order.parts.map((p) => p.usdcIn));
-
-        for (const [k, part] of order.parts.entries()) {
-            const offset = spentPerAsset.get(key) ?? 0n;
-            if (shares !== null) {
-                const index = legAt(legs, key, offset);
-                if (index < 0) throw new Error(`the plan spends more on ${order.symbol} than its legs do`);
-                out.set(index, (out.get(index) ?? 0n) + shares[k]!);
-            }
-            spentPerAsset.set(key, offset + part.usdcIn);
-        }
-    }
-    return out;
+/** What one swap did for one leg. */
+export interface SwapShare {
+    /** Index of the leg in the proposal. */
+    readonly leg: number;
+    /** What came back to this leg: token units on a buy, USDC minor units on a sale. */
+    readonly quantity: bigint;
+    /** The part of the leg's notional this swap covered. */
+    readonly usdcIn: bigint;
+    /** Sell only: the units of the leg this swap disposed of. */
+    readonly unitsIn?: bigint;
 }
 
-/** The leg of this token whose slice contains the given offset into the token's total spend. */
-function legAt(legs: readonly Leg[], asset: string, offset: bigint): number {
+/**
+ * Attributes what one swap returned back to the legs that paid for it.
+ *
+ * `swapPlan` groups legs by token and direction and cuts them at the trade cap, so one swap can cover
+ * several legs and one leg can be spread over several swaps. The plan consumes a group's legs in order,
+ * which is what makes this recoverable from the plan alone: what the earlier orders of the same group
+ * spent says which leg each slice of this one belongs to. Nothing about the other swaps' outcomes is
+ * needed, so a swap confirmed late is attributed exactly as it would have been at the time.
+ */
+export function orderShares(
+    legs: readonly Leg[],
+    plan: readonly SwapOrder[],
+    position: number,
+    amountOut: bigint,
+): SwapShare[] {
+    const order = plan[position];
+    if (order === undefined) throw new Error(`the plan has no order at position ${position}`);
+    const key = order.asset.toLowerCase();
+    const side = order.side ?? "buy";
+
+    let offset = 0n;
+    for (const earlier of plan.slice(0, position)) {
+        if (earlier.asset.toLowerCase() === key && (earlier.side ?? "buy") === side) offset += earlier.usdcIn;
+    }
+
+    const quantities = splitFill(amountOut, order.parts.map((p) => p.usdcIn));
+    return order.parts.map((part, k) => {
+        const leg = legAt(legs, key, side, offset);
+        if (leg < 0) throw new Error(`the plan spends more on ${order.symbol} than its legs do`);
+        offset += part.usdcIn;
+        return {
+            leg,
+            quantity: quantities[k]!,
+            usdcIn: part.usdcIn,
+            ...(part.unitsIn !== undefined && { unitsIn: part.unitsIn }),
+        };
+    });
+}
+
+/** The leg of this token and direction whose slice contains the offset into the group's total. */
+function legAt(legs: readonly Leg[], asset: string, side: string, offset: bigint): number {
     let seen = 0n;
     for (const [index, leg] of legs.entries()) {
-        if (leg.asset.toLowerCase() !== asset) continue;
+        if (leg.asset.toLowerCase() !== asset || (leg.side ?? "buy") !== side) continue;
         const end = seen + leg.usdcIn;
         if (offset < end) return index;
         seen = end;

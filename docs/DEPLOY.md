@@ -303,10 +303,11 @@ thing rather than on a phrase someone may reword:
 |---|---|---|
 | `sale_not_recorded` | a payment settled and storage refused the write | **yes** |
 | `execution_unresolved` | a signed swap whose outcome is still unknown | **yes** |
+| `execution_unbooked` | a swap happened and could not be put in the books; nothing new is proposed until it is | **yes** |
 | `startup_failed` | an instance could not assemble, usually the database | yes, if it persists |
 | `settled_wrong_asset` | a payment arrived in something other than the expected USDC | yes |
 | `rate_limit_unavailable` | the limiter could not answer; requests were let through | worth knowing |
-| `sale_booked`, `brief_generated`, `execution_recovered`, `assembled` | normal operation | no |
+| `sale_booked`, `brief_generated`, `execution_recovered`, `execution_booked`, `assembled` | normal operation | no |
 
 Every line also carries a readable `message`, because logs are read by people more often than by
 machines.
@@ -382,7 +383,9 @@ during US market hours**, when the gate is actually doing its job.
 4. Run the preflight above against the funded wallet and read every line of it.
 5. Propose, approve with the owner wallet, and execute **one order at the minimum trade size**, watching.
    The journal records the signed transaction before it is broadcast, so an interrupted run is
-   recoverable rather than a mystery.
+   recoverable rather than a mystery. If a run is interrupted, sync revenue: swaps that filled are
+   booked from the journal (a proposal still showing as approved is left alone for two minutes), and
+   proposals are refused until every swap has an outcome and is in the books.
 6. Run the position check: `GET /invest/positions` with the owner token. It compares the units the
    agent recorded receiving against the chain's own answer for the wallet, with no price involved.
    Short means the books claim tokens the wallet does not hold, which needs a person before anything

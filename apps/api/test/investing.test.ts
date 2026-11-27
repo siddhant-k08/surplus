@@ -21,11 +21,13 @@ import {
     themeHoldings,
     MemoryProposalStore,
     type ProposalStore,
+    type SwapOrder,
 } from "@surplus/core";
 import { privateKeyToAccount } from "viem/accounts";
 import { approvalTypedData } from "@surplus/core";
 import { InvestingEngine, UNATTRIBUTED, type MarketData } from "../src/investing";
 import { verifyApprovalSignature } from "../src/signature";
+import { MemoryJournal } from "../src/journal";
 import { buildServer } from "../src/server";
 import { loadConfig } from "../src/config";
 
@@ -1398,6 +1400,195 @@ describe("executing for real", () => {
         expect(result.fills.length).toBeGreaterThan(0);
         expect(e.treasury.ledger.all().find((x) => x.type === "PURCHASE_SETTLED")?.memo)
             .toContain("SIMULATED");
+    });
+});
+
+describe("a swap that happened but never reached the books", () => {
+    /**
+     * An executor with a journal, as the real one has: what it sent is on record whether or not the
+     * engine ever booked it. `stall` leaves a named symbol sent with no outcome, as a wait that timed
+     * out does; `land` is the chain later confirming it.
+     */
+    function journalled(over: { stall?: string; at?: () => Date } = {}) {
+        const journal = new MemoryJournal(over.at);
+        const sent: string[] = [];
+        const landing: string[] = [];
+        const hashOf = (key: string) => "0x" + Buffer.from(key).toString("hex").padEnd(64, "0");
+        const executor = {
+            fill: async (order: SwapOrder, _quote: Quote, key: string) => {
+                const prior = await journal.find(key);
+                if (prior?.status === "filled") {
+                    return { amountOut: prior.amountOutMinor!, transaction: prior.txHash! };
+                }
+                sent.push(key);
+                await journal.reserve({ key, symbol: order.symbol, asset: order.asset, usdcInMinor: order.usdcIn });
+                await journal.recordSigned(key, hashOf(key), "0x00");
+                if (order.symbol === over.stall) {
+                    landing.push(key);
+                    throw new Error("timed out waiting for the receipt");
+                }
+                await journal.settle(key, { status: "filled", amountOutMinor: 5_000n });
+                return { amountOut: 5_000n, transaction: hashOf(key) };
+            },
+            recover: async () => [],
+            records: async () => ({ filled: await journal.filled(), unresolved: await journal.unresolved() }),
+        };
+        const land = async () => {
+            for (const key of landing.splice(0)) {
+                await journal.settle(key, { status: "filled", amountOutMinor: 7_000n });
+            }
+        };
+        return { executor, journal, sent, land, hashOf };
+    }
+
+    const world = (mode: "sim" | "mainnet" = "mainnet") => {
+        const books = new JsonlLedgerStore(join(dir, `recovery-${mode}.jsonl`));
+        const proposals = new MemoryProposalStore();
+        const clock = { at: new Date() };
+        const instance = async (executor: unknown) =>
+            new InvestingEngine({
+                mode,
+                openingFloat: u("1.00"),
+                mandates: mandateFor(terms),
+                readBrief: savedBrief,
+                allBriefs: () => [savedBrief()],
+                salesLedger: () => salesLedger("3.00", "mainnet"),
+                market,
+                chainId: CHAIN_ID,
+                now: () => clock.at,
+                verifyApproval: ({ approval, signature }) =>
+                    verifyApprovalSignature({ approval, signature, chainId: CHAIN_ID, ownerAddress: ownerAccount.address }),
+                ledger: await openLedger(books),
+                sink: books,
+                proposals,
+                executor: executor as never,
+            });
+        return { instance, clock };
+    };
+
+    const approve = async (e: InvestingEngine) => {
+        await e.syncRevenue();
+        const p = await e.propose("p1");
+        if (!p.ok) throw new Error(p.reasons.join("; "));
+        const a = await e.approve("p1", await signOffer(ownerAccount, p.toSign));
+        if (!a.ok) throw new Error(a.reasons.join("; "));
+        return p;
+    };
+
+    const purchases = (e: InvestingEngine) =>
+        e.treasury.ledger.all().filter((x) => x.type === "PURCHASE_SETTLED");
+    const spent = (e: InvestingEngine) =>
+        purchases(e).reduce((a, x) => a + x.lines.find((l) => l.account.startsWith("positions."))!.amount, 0n);
+
+    /** The process dies after every swap has filled and before anything is booked. */
+    const crashed = async () => {
+        const chain = journalled();
+        const w = world();
+        const first = await w.instance(chain.executor);
+        const p = await approve(first);
+        const plan = p.view.swaps;
+        for (const [i, o] of plan.entries()) {
+            const asset = p.view.legs.find((l) => l.symbol === o.symbol)!.asset.toLowerCase();
+            await chain.executor.fill(
+                { asset, symbol: o.symbol, usdcIn: BigInt(o.usdcIn) } as SwapOrder, {} as Quote, `p1:${i}`,
+            );
+        }
+        const total = p.view.legs.reduce((a, l) => a + BigInt(l.usdcIn), 0n);
+        return { chain, w, total, swaps: plan.length };
+    };
+
+    const later = (w: { clock: { at: Date } }) => { w.clock.at = new Date(w.clock.at.getTime() + 3_600_000); };
+
+    it("books it from the journal on the next sync, once", async () => {
+        const { chain, w, total, swaps } = await crashed();
+        later(w);
+        const second = await w.instance(chain.executor);
+        const r = await second.syncRevenue();
+
+        expect(r.recovered.length).toBe(swaps);
+        expect(r.outstanding).toEqual([]);
+        expect(spent(second)).toBe(total);
+        expect(purchases(second).reduce((a, x) => a + x.units!, 0n)).toBe(5_000n * BigInt(swaps));
+        expect(purchases(second).every((x) => x.txHash !== undefined && x.theme !== undefined && x.briefId !== undefined)).toBe(true);
+        expect(second.treasury.state("p1")).toBe("SETTLED");
+        expect(reconcileInternal(second.treasury.ledger).ok).toBe(true);
+
+        const third = await w.instance(chain.executor);
+        const before = purchases(third).length;
+        expect((await third.syncRevenue()).recovered).toEqual([]);
+        expect(purchases(third).length).toBe(before);
+    });
+
+    it("will not propose again over swaps it has not booked yet", async () => {
+        // moments after the crash the proposal may still be running elsewhere, so it is neither booked
+        // nor ignored: a second proposal here would spend the same surplus twice
+        const { chain, w } = await crashed();
+        const second = await w.instance(chain.executor);
+        const p = await second.propose("p2");
+
+        expect(p.ok).toBe(false);
+        if (!p.ok) expect(p.reasons.join(" ")).toMatch(/may still be executing/);
+        expect(purchases(second)).toEqual([]);
+    });
+
+    it("lets the owner finish the same proposal instead, without sending anything twice", async () => {
+        const { chain, w, total, swaps } = await crashed();
+        const second = await w.instance(chain.executor);
+        const x = await second.execute("p1");
+
+        expect(x.ok).toBe(true);
+        expect(chain.sent.length).toBe(swaps);
+        expect(spent(second)).toBe(total);
+        expect(second.treasury.state("p1")).toBe("SETTLED");
+        expect((await second.syncRevenue()).recovered).toEqual([]);
+    });
+
+    it("books a swap that was confirmed only after its proposal had been closed as failed", async () => {
+        const chain = journalled({ stall: "NVDAc" });
+        const w = world();
+        const first = await w.instance(chain.executor);
+        const p = await approve(first);
+        const total = p.view.legs.reduce((a, l) => a + BigInt(l.usdcIn), 0n);
+        await first.execute("p1");
+        expect(first.treasury.state("p1")).toBe("FAILED");
+        const bookedAtFirst = spent(first);
+
+        // still unconfirmed: nothing new may be proposed
+        const waiting = await w.instance(chain.executor);
+        const blocked = await waiting.propose("p2");
+        expect(blocked.ok).toBe(false);
+        if (!blocked.ok) expect(blocked.reasons.join(" ")).toMatch(/no known outcome/);
+
+        await chain.land();
+        const second = await w.instance(chain.executor);
+        const r = await second.syncRevenue();
+        expect(r.recovered.map((x) => x.symbol)).toEqual(["NVDAc"]);
+        expect(spent(second)).toBeGreaterThan(bookedAtFirst);
+        expect(spent(second)).toBeLessThanOrEqual(total);
+        expect(purchases(second).some((x) => x.units === 7_000n)).toBe(true);
+        expect(second.treasury.state("p1")).toBe("FAILED");
+        expect(reconcileInternal(second.treasury.ledger).ok).toBe(true);
+    });
+
+    it("never writes a real swap into a simulated book", async () => {
+        const chain = journalled();
+        await chain.executor.fill(
+            { asset: "0x" + "11".repeat(20), symbol: "NVDAc", usdcIn: 1n } as SwapOrder, {} as Quote, "p1:0",
+        );
+        const e = await world("sim").instance(chain.executor);
+        expect((await e.syncRevenue()).recovered).toEqual([]);
+        expect(purchases(e)).toEqual([]);
+    });
+
+    it("says so, and blocks, when a swap belongs to no proposal it holds", async () => {
+        const chain = journalled();
+        await chain.executor.fill(
+            { asset: "0x" + "11".repeat(20), symbol: "NVDAc", usdcIn: 1n } as SwapOrder, {} as Quote, "gone:0",
+        );
+        const e = await world().instance(chain.executor);
+        const r = await e.syncRevenue();
+        expect(r.outstanding.join(" ")).toMatch(/gone/);
+        expect((await e.propose("p2")).ok).toBe(false);
     });
 });
 

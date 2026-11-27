@@ -21,7 +21,7 @@ import {
 import { InvestingEngine, type MarketData } from "./investing";
 import { ResearchService } from "./research";
 import { openBackends, bookNames } from "./backends";
-import { log } from "./log";
+import { log, errorFields } from "./log";
 import { openExecutor } from "./executor";
 import { verifyApprovalSignature } from "./signature";
 import { existsSync } from "node:fs";
@@ -254,6 +254,16 @@ export async function assemble(config: ApiConfig, opts: AssembleOptions = {}): P
                 key: r.key,
                 outcome: r.outcome,
             });
+        }
+    }
+
+    // Resolving says what the chain did; this puts it in the books. A failure here must not stop the
+    // server: the engine tries again before it proposes anything, and refuses to propose until it can.
+    if (execution.executor !== null && opts.recover !== false) {
+        try {
+            await engine.reconcileSwaps();
+        } catch (e) {
+            log.error("execution_unbooked", "could not check the books against the execution journal", errorFields(e));
         }
     }
 
