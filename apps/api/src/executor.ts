@@ -1,4 +1,7 @@
-import { createPublicClient, createWalletClient, http, erc20Abi, keccak256, type Hash } from "viem";
+import {
+    createPublicClient, createWalletClient, http, erc20Abi, keccak256, parseEventLogs,
+    type Hash, type TransactionReceipt,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 import {
@@ -29,6 +32,7 @@ const formatUsdcMinor = (v: bigint): string => {
  * - it simulates the swap first, so a revert costs nothing and is read before it is paid for
  * - it approves exactly what the order needs, never an unlimited allowance
  * - it books a fill only from a confirmed receipt with status success, never from a submitted hash
+ * - it books what that receipt shows arriving in the wallet, never what the route expected to deliver
  * - the spend cap is counted in storage, so it is one cap however many instances are running
  *
  * The ordering around the send is the part that matters most. The transaction is signed first, which
@@ -37,6 +41,32 @@ const formatUsdcMinor = (v: bigint): string => {
  * knows it signed. Sending first and recording after would leave a gap in which money moves and nothing
  * remembers, and no care inside the function closes that gap.
  */
+
+/** One ERC-20 transfer, as a receipt records it. */
+export interface TokenTransfer {
+    token: `0x${string}`;
+    from: `0x${string}`;
+    to: `0x${string}`;
+    value: bigint;
+}
+
+export interface ChainReceipt {
+    status: "success" | "reverted";
+    gasUsed: bigint;
+    /** Every ERC-20 transfer the transaction made. How a fill is measured. */
+    transfers: readonly TokenTransfer[];
+}
+
+const toReceipt = (receipt: TransactionReceipt): ChainReceipt => ({
+    status: receipt.status,
+    gasUsed: receipt.gasUsed,
+    transfers: parseEventLogs({ abi: erc20Abi, eventName: "Transfer", logs: receipt.logs }).map((l) => ({
+        token: l.address,
+        from: l.args.from,
+        to: l.args.to,
+        value: l.args.value,
+    })),
+});
 
 /**
  * The chain, as narrowly as this needs it.
@@ -53,9 +83,9 @@ export interface ChainAccess {
     /** Signs without broadcasting, so the hash is known before the chain is. */
     sign(tx: { to: `0x${string}`; data: `0x${string}` }): Promise<{ hash: Hash; raw: `0x${string}` }>;
     broadcast(raw: `0x${string}`): Promise<Hash>;
-    waitFor(hash: Hash): Promise<{ status: "success" | "reverted"; gasUsed: bigint }>;
+    waitFor(hash: Hash): Promise<ChainReceipt>;
     /** The receipt if the chain has one, or null if it has never seen the transaction. */
-    receiptFor(hash: Hash): Promise<{ status: "success" | "reverted"; gasUsed: bigint } | null>;
+    receiptFor(hash: Hash): Promise<ChainReceipt | null>;
     /** Native balance, for gas. A wallet with USDC and no ETH cannot send anything. */
     nativeBalance(): Promise<bigint>;
     /** Units of any token the wallet holds. The chain's own answer, for reconciliation. */
@@ -165,10 +195,7 @@ export class SwapExecutor {
                 return { hash: keccak256(raw), raw };
             },
             broadcast: async (raw) => publicClient.sendRawTransaction({ serializedTransaction: raw }),
-            waitFor: async (hash) => {
-                const receipt = await publicClient.waitForTransactionReceipt({ hash });
-                return { status: receipt.status, gasUsed: receipt.gasUsed };
-            },
+            waitFor: async (hash) => toReceipt(await publicClient.waitForTransactionReceipt({ hash })),
             nativeBalance: async () => publicClient.getBalance({ address: account.address }),
             tokenBalance: async (token) => publicClient.readContract({
                 address: token, abi: erc20Abi, functionName: "balanceOf", args: [account.address],
@@ -183,8 +210,7 @@ export class SwapExecutor {
             chainId: async () => publicClient.getChainId(),
             receiptFor: async (hash) => {
                 try {
-                    const receipt = await publicClient.getTransactionReceipt({ hash });
-                    return { status: receipt.status, gasUsed: receipt.gasUsed };
+                    return toReceipt(await publicClient.getTransactionReceipt({ hash }));
                 } catch {
                     return null; // the chain has never seen it
                 }
@@ -252,6 +278,35 @@ export class SwapExecutor {
         const receipt = await this.chain.waitFor(hash);
         if (receipt.status !== "success") throw new Error(`${symbol} approval failed in ${hash}`);
         return hash;
+    }
+
+    /**
+     * What a swap delivered to this wallet: stock tokens on a buy, USDC on a sale.
+     *
+     * Read from the transaction's own transfers. The amount a route was built for is an estimate, and
+     * anything inside the slippage tolerance can arrive instead of it; books holding the estimate claim
+     * units the wallet does not have.
+     *
+     * A successful swap showing nothing received is not a fill of zero. The money has moved and the
+     * result is unknown, so this throws and the record stays `sent`: still counted against the cap,
+     * retried by `recover`, and reported there until someone looks.
+     */
+    private received(receipt: ChainReceipt, token: string, hash: Hash): bigint {
+        const me = this.account.address.toLowerCase();
+        const wanted = token.toLowerCase();
+        let net = 0n;
+        for (const t of receipt.transfers) {
+            if (t.token.toLowerCase() !== wanted) continue;
+            if (t.to.toLowerCase() === me) net += t.value;
+            if (t.from.toLowerCase() === me) net -= t.value;
+        }
+        if (net <= 0n) {
+            throw new Error(
+                `swap ${hash} succeeded but its receipt shows nothing received by the wallet; ` +
+                "it is left unresolved and nothing was booked",
+            );
+        }
+        return net;
     }
 
     /**
@@ -334,15 +389,16 @@ export class SwapExecutor {
                 await this.journal.settle(key, { status: "failed", detail: `reverted in ${signed.hash}` });
                 throw new Error(`swap for ${order.symbol} reverted in ${signed.hash}; nothing was filled`);
             }
+            const amountOut = this.received(receipt, selling ? this.config.usdc : order.asset, signed.hash);
             await this.journal.settle(key, {
-                status: "filled", amountOutMinor: built.amountOut, gasUsed: receipt.gasUsed,
+                status: "filled", amountOutMinor: amountOut, gasUsed: receipt.gasUsed,
             });
 
             return {
                 symbol: order.symbol,
                 asset: order.asset,
                 usdcIn: order.usdcIn,
-                amountOut: built.amountOut,
+                amountOut,
                 transaction: signed.hash,
                 gasUsed: receipt.gasUsed,
             };
@@ -405,15 +461,25 @@ export class SwapExecutor {
             await this.journal.settle(record.key, { status: "failed", detail: `reverted in ${hash}` });
             throw new Error(`swap for ${record.symbol} reverted in ${hash}; nothing was filled`);
         }
-        await this.journal.settle(record.key, { status: "filled", gasUsed: receipt.gasUsed });
+        const amountOut = this.received(
+            receipt, record.side === "sell" ? this.config.usdc : record.asset, hash,
+        );
+        await this.journal.settle(record.key, {
+            status: "filled", amountOutMinor: amountOut, gasUsed: receipt.gasUsed,
+        });
         return {
             symbol: record.symbol,
             asset: record.asset,
             usdcIn: record.usdcInMinor,
-            amountOut: record.amountOutMinor ?? 0n,
+            amountOut,
             transaction: hash,
             gasUsed: receipt.gasUsed,
         };
+    }
+
+    /** What the journal knows: swaps that filled, and swaps signed with no outcome yet. */
+    async records(): Promise<{ filled: ExecutionRecord[]; unresolved: ExecutionRecord[] }> {
+        return { filled: await this.journal.filled(), unresolved: await this.journal.unresolved() };
     }
 
     /**

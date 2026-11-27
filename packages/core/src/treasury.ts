@@ -69,7 +69,17 @@ export interface RealizedFill {
      */
     quantity: bigint;
     transaction: string;
+    /** How much of the leg's notional this swap covered. Absent means the whole leg. */
+    usdcIn?: bigint;
+    /** Sale only: how many of the leg's units this swap sent. Absent means the whole leg. */
+    unitsIn?: bigint;
 }
+
+/** What swaps returned, by leg index. A leg spread over several swaps has one entry for each. */
+export type RealizedFills = ReadonlyMap<number, RealizedFill | readonly RealizedFill[]>;
+
+const asList = (r: RealizedFill | readonly RealizedFill[] | undefined): readonly RealizedFill[] =>
+    r === undefined ? [] : "transaction" in r ? [r] : r;
 
 interface BriefAccount {
     revenue: bigint;
@@ -442,7 +452,7 @@ export class Treasury {
             freshPrices: PriceMap;
             decimals: ReadonlyMap<string, number>;
             blocks?: readonly string[];
-            realized?: ReadonlyMap<number, RealizedFill>;
+            realized?: RealizedFills;
             /**
              * When `preflight` passed, if swaps were sent on the strength of it. Expiry is judged as of
              * then: money that has already moved has to be booked however long the swaps took.
@@ -492,28 +502,98 @@ export class Treasury {
         }
 
         rec.machine.transition("EXECUTING", this.now());
+        let booked;
+        try {
+            booked = this.bookLegs(rec, i);
+        } catch (e) {
+            rec.machine.transition("FAILED", this.now(), String(e));
+            throw e;
+        }
+        rec.fills = booked.fills;
+        this.close(rec, booked.unfilled);
+        return { ok: true, ...booked };
+    }
+
+    /**
+     * Books swaps that already happened and never reached the ledger.
+     *
+     * For a process that died, or gave up waiting, between a swap and its booking. There is no precheck:
+     * the checks exist to stop money moving, and this money has moved. Each swap is booked under its own
+     * transaction, so one already in the books is left alone and this can safely run again.
+     *
+     * A proposal still waiting as approved is closed here, settled if the swaps cover every leg and
+     * failed otherwise. One that already ended keeps the state it ended in.
+     */
+    bookExecuted(id: string, realized: RealizedFills): { fills: Fill[] } {
+        const rec = this.get(id);
+        const open = rec.machine.state === "APPROVED";
+        if (open) {
+            rec.machine.transition("PRECHECK", this.now(), "booking swaps already sent");
+            rec.machine.transition("EXECUTING", this.now(), "booking swaps already sent");
+        }
+        const { fills, unfilled } = this.bookLegs(rec, { realized, recovered: true });
+        if (open) {
+            rec.fills = fills;
+            this.close(rec, unfilled);
+        }
+        return { fills };
+    }
+
+    private close(rec: ProposalRecord, unfilled: readonly unknown[]): void {
+        // The money that did move is booked; a proposal that did not all happen is not settled. The owner
+        // proposes again for the remainder rather than this pretending.
+        if (unfilled.length === 0) return rec.machine.transition("SETTLED", this.now());
+        rec.machine.transition(
+            "FAILED",
+            this.now(),
+            `${unfilled.length} of ${rec.proposal.legs.length} legs did not fully execute`,
+        );
+    }
+
+    private bookLegs(
+        rec: ProposalRecord,
+        i: {
+            freshPrices?: PriceMap;
+            decimals?: ReadonlyMap<string, number>;
+            realized?: RealizedFills | undefined;
+            recovered?: boolean;
+        },
+    ): { fills: Fill[]; unfilled: { symbol: string; usdcIn: bigint; reason: string }[] } {
+        const id = rec.id;
         const fills: Fill[] = [];
         const unfilled: { symbol: string; usdcIn: bigint; reason: string }[] = [];
         // Positions as they stand, carried through the loop so two sales of the same token take their
         // cost basis in sequence rather than both costing it from the opening balance.
         const positions = positionsFromLedger(this.ledger.all());
-        try {
-            // The same asset can appear in more than one theme, so the key is per leg, not per asset.
-            // Legs are fixed when the proposal is created, so the index is stable across retries.
-            for (const [n, leg] of rec.proposal.legs.entries()) {
-                const key = leg.asset.toLowerCase();
-                const price = i.freshPrices.get(key)!;
-                const real = i.realized?.get(n);
-                if (i.realized !== undefined && real === undefined) {
-                    // the swap for this leg did not happen; booking it would invent a position
-                    unfilled.push({ symbol: leg.symbol, usdcIn: leg.usdcIn, reason: "the swap did not execute" });
-                    continue;
-                }
-                const tag = real === undefined ? "SIMULATED " : "";
+        const booked = (prefix: string): boolean =>
+            this.ledger.all().some(
+                (t) => t.idempotencyKey === prefix || t.idempotencyKey?.startsWith(`${prefix}:`) === true,
+            );
+
+        // The same asset can appear in more than one theme, so the key is per leg, not per asset.
+        // Legs are fixed when the proposal is created, so the index is stable across retries.
+        for (const [n, leg] of rec.proposal.legs.entries()) {
+            const key = leg.asset.toLowerCase();
+            // absent only when there is no quote to speak of, which is when booking after the fact
+            const quoted = i.freshPrices?.get(key);
+            const swaps = i.realized === undefined ? [undefined] : asList(i.realized.get(n));
+            const covered = swaps.reduce((a, s) => a + (s?.usdcIn ?? leg.usdcIn), 0n);
+            if (covered < leg.usdcIn) {
+                // the swap for this part did not happen; booking it would invent a position
+                unfilled.push({ symbol: leg.symbol, usdcIn: leg.usdcIn - covered, reason: "the swap did not execute" });
+            }
+
+            for (const real of swaps) {
+                const tag = real === undefined ? "SIMULATED " : i.recovered === true ? "RECOVERED " : "";
+                const idempotencyKey = real === undefined
+                    ? `fill:${id}:${n}:${key}`
+                    : `fill:${id}:${n}:${key}:${real.transaction}`;
+                if (real !== undefined && booked(idempotencyKey)) continue;
+                const usdcIn = real?.usdcIn ?? leg.usdcIn;
                 const common = {
                     mode: this.opts.mode,
                     at: this.now(),
-                    idempotencyKey: `fill:${id}:${n}:${key}`,
+                    idempotencyKey,
                     ...(real !== undefined && { txHash: real.transaction }),
                     // What justified this position, structured. The same token can be filled twice in one
                     // proposal under two themes, and these two fields are what keep those apart.
@@ -522,7 +602,7 @@ export class Treasury {
                 };
 
                 if (isSell(leg)) {
-                    const units = leg.unitsIn!;
+                    const units = real?.unitsIn ?? leg.unitsIn!;
                     const position = positions.get(key);
                     if (position === undefined || position.units < units) {
                         throw new Error(
@@ -548,7 +628,9 @@ export class Treasury {
                     }
 
                     // What the swap returned, or what the quote says those units are worth.
-                    const proceeds = real?.quantity ?? (units * price) / 10n ** BigInt(i.decimals.get(key)!);
+                    const proceeds =
+                        real?.quantity ?? (units * quoted!) / 10n ** BigInt(i.decimals!.get(key)!);
+                    const price = quoted ?? 0n;
                     // The basis of this theme's units, not the token's blended basis across every theme.
                     const cost = costOfUnits(
                         { ...position, units: held.units, costUsdcIn: held.costUsdcIn },
@@ -593,8 +675,9 @@ export class Treasury {
                             idempotencyKey: `${common.idempotencyKey}:${b}`,
                             units: -unitShare,
                             memo:
-                                `${tag}sale ${leg.symbol}: ${unitShare} units at ${price} => ` +
-                                `${formatUsdc(proceedShare)} USDC against ${formatUsdc(costShare)} cost` +
+                                `${tag}sale ${leg.symbol}: ${unitShare} units` +
+                                (quoted === undefined ? "" : ` at ${quoted}`) +
+                                ` => ${formatUsdc(proceedShare)} USDC against ${formatUsdc(costShare)} cost` +
                                 (bucket === undefined ? "" : ` (${bucket.briefId ?? "unattributed"}/${bucket.theme ?? "no theme"})`),
                             lines: [
                                 // the basis leaves the position, the money comes back as investable, and
@@ -612,47 +695,37 @@ export class Treasury {
                     position.costUsdcIn -= cost;
                     position.realizedUsdc += realized;
                     fills.push({
-                        asset: key, symbol: leg.symbol, usdcIn: leg.usdcIn, price,
+                        asset: key, symbol: leg.symbol, usdcIn, price,
                         quantity: units, side: "sell", proceedsUsdc: proceeds, realizedUsdc: realized,
                     });
                     continue;
                 }
 
-                const quantity = real?.quantity ?? (leg.usdcIn * 10n ** BigInt(i.decimals.get(key)!)) / price;
+                const quantity =
+                    real?.quantity ?? (usdcIn * 10n ** BigInt(i.decimals!.get(key)!)) / quoted!;
+                const price = quoted ?? 0n;
                 this.ledger.post({
                     ...common,
                     type: "PURCHASE_SETTLED",
                     units: quantity,
-                    memo: `${tag}fill ${leg.symbol}: ${formatUsdc(leg.usdcIn)} USDC at ${price} => ${quantity} units`,
+                    memo:
+                        `${tag}fill ${leg.symbol}: ${formatUsdc(usdcIn)} USDC` +
+                        (quoted === undefined ? "" : ` at ${quoted}`) +
+                        ` => ${quantity} units`,
                     lines: [
-                        { account: `positions.${key}`, amount: leg.usdcIn },
-                        { account: "surplus.investable", amount: -leg.usdcIn },
+                        { account: `positions.${key}`, amount: usdcIn },
+                        { account: "surplus.investable", amount: -usdcIn },
                     ],
                 });
                 const open = positions.get(key)
                     ?? { asset: key, units: 0n, costUsdcIn: 0n, realizedUsdc: 0n, buys: 0, sells: 0, buysWithoutUnits: 0 };
                 open.units += quantity;
-                open.costUsdcIn += leg.usdcIn;
+                open.costUsdcIn += usdcIn;
                 positions.set(key, open);
-                fills.push({ asset: key, symbol: leg.symbol, usdcIn: leg.usdcIn, price, quantity });
+                fills.push({ asset: key, symbol: leg.symbol, usdcIn, price, quantity });
             }
-        } catch (e) {
-            rec.machine.transition("FAILED", this.now(), String(e));
-            throw e;
         }
-        rec.fills = fills;
-        if (unfilled.length > 0) {
-            // The money that did move is booked; the proposal is not settled, because it did not all
-            // happen. The owner proposes again for the remainder rather than this pretending.
-            rec.machine.transition(
-                "FAILED",
-                this.now(),
-                `only ${fills.length} of ${rec.proposal.legs.length} legs executed`,
-            );
-            return { ok: true, fills, unfilled };
-        }
-        rec.machine.transition("SETTLED", this.now());
-        return { ok: true, fills, unfilled: [] };
+        return { fills, unfilled };
     }
 
     /** After a stopped precheck: refresh the quotes and put the proposal back in front of the Owner. */

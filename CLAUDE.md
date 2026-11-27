@@ -58,7 +58,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 32 files, 409 tests. API 14 files, 283 tests (about 35 fewer without `DATABASE_URL`). Web 3 files, 78 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 32 files, 411 tests. API 14 files, 294 tests (about 35 fewer without `DATABASE_URL`). Web 3 files, 78 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway key. Since
 27 Nov 2026 that wallet holds real USDC on Base mainnet, so a buy against production spends money.
@@ -104,7 +104,17 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
 - Approvals bind to proposal hash, mandate version and hash, max spend and expiry. Drift beyond tolerance means REAPPROVAL_REQUIRED.
 - An approval is refused if the mandate moved since the payload was offered: the signature covers a mandate version and hash, and `Treasury.approve` takes an `expect` approval so the domain layer enforces the match too.
 - An approval over HTTP needs the owner's EIP-712 signature (`src/eip712.ts` builds the payload, `apps/api/src/signature.ts` verifies it). The bearer token only decides who reaches the route. `OWNER_ADDRESS` is required and comes from config, never from the request. Core's `Treasury.approve` still allows an unsigned approval for the sim demos, so the requirement is enforced in the API layer.
-- A real fill is booked from what the swap returned, never from the quoted price: `Treasury.execute` takes a `realized` map and `attributeFills` puts the quantities back across the legs the way the money came out, remainder to the largest contributor so no unit is dropped. A leg whose swap did not execute is not booked and the proposal ends FAILED, because a proposal that half happened is not settled.
+- A real fill is booked from what the swap returned, never from the quoted price or the built route's
+  estimate: the executor nets the receipt's ERC-20 transfers to its own wallet (checked against
+  `balanceOf` for all ten stock tokens on 27 Nov 2026), and a successful swap showing nothing received
+  stays unresolved rather than booking zero. `Treasury.execute` takes a `realized` map and `attributeFills` puts the quantities back across the legs the way the money came out, remainder to the largest contributor so no unit is dropped. A leg whose swap did not execute is not booked and the proposal ends FAILED, because a proposal that half happened is not settled.
+- **A swap that happened gets booked, however late.** Real fills are booked per swap, keyed on its
+  transaction. `reconcileSwaps` (`apps/api/src/investing.ts`) books anything the execution journal
+  shows as filled and the mainnet ledger lacks, on start and before sync, propose, exit and execute. It
+  rebuilds the legs from the stored proposal and the mandate version it was signed under. While a swap
+  has no known outcome or cannot be booked, nothing new is proposed or executed, because the books
+  would still show its money as available. Approved proposals with swaps younger than two minutes are
+  left alone, since they may still be executing.
 - A position must say what argued for it. A fill is booked with the `briefId` of the brief the proposal
   came from and the `theme` of its leg, both structured fields on the entry, because the same token can
   be bought twice in one proposal under two themes and a memo is not something money may be attributed

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { swapPlan, swapPlanTotal, describeSwapPlan, splitFill, attributeFills } from "../src/swapplan";
+import { swapPlan, swapPlanTotal, describeSwapPlan, splitFill, orderShares, type SwapOrder } from "../src/swapplan";
 import { parseUsdc as u } from "../src/money";
 import type { Leg } from "../src/policy";
 import { NVDA, MSFT } from "./fixtures";
@@ -108,6 +108,17 @@ describe("splitting a real fill back across the legs that paid for it", () => {
     });
 });
 
+/** What each leg received across every swap that executed, keyed by position in the plan. */
+const attributeFills = (legs: Leg[], plan: SwapOrder[], filled: Map<number, bigint>) => {
+    const out = new Map<number, bigint>();
+    for (const [position, amount] of filled) {
+        for (const s of orderShares(legs, plan, position, amount)) {
+            out.set(s.leg, (out.get(s.leg) ?? 0n) + s.quantity);
+        }
+    }
+    return out;
+};
+
 describe("attributing real fills back to legs", () => {
     const leg = (theme: string, asset: string, usdc: string): Leg => ({
         symbol: asset === NVDA ? "NVDAc" : "MSFTc", asset, theme, usdcIn: u(usdc), maxSlippageBps: 100,
@@ -141,6 +152,24 @@ describe("attributing real fills back to legs", () => {
         const out = attributeFills(legs, plan, new Map([[nvdaFirst, 500n]]));
         expect(out.get(0)).toBe(500n);
         expect(out.has(1)).toBe(false); // the swap that never happened credits nothing
+    });
+
+    it("says how much of each leg one swap covered, whatever became of the others", () => {
+        const legs = [leg("ai-compute", NVDA, "1.50"), leg("platform-giants", NVDA, "1.50")];
+        const plan = swapPlan(legs, u("2.00"));
+        expect(orderShares(legs, plan, 1, 100n))
+            .toEqual([{ leg: 1, quantity: 100n, usdcIn: u("1.00") }]);
+    });
+
+    it("attributes a sale to the sale legs, not to a buy of the same token", () => {
+        const legs: Leg[] = [
+            leg("ai-compute", NVDA, "1.00"),
+            { ...leg("platform-giants", NVDA, "1.00"), side: "sell", unitsIn: 50n },
+        ];
+        const plan = swapPlan(legs, u("5.00"));
+        const sale = plan.findIndex((o) => o.side === "sell");
+        expect(orderShares(legs, plan, sale, 900n))
+            .toEqual([{ leg: 1, quantity: 900n, usdcIn: u("1.00"), unitsIn: 50n }]);
     });
 
     it("keeps every unit when a cap splits a swap that several themes share", () => {

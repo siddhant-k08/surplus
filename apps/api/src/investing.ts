@@ -6,7 +6,7 @@ import {
     validateBrief,
     swapPlan,
     swapPlanTotal,
-    attributeFills,
+    orderShares,
     exitPlan,
     positionsFromLedger,
     themeDrift,
@@ -42,6 +42,8 @@ import {
     type Drift,
     type Position,
 } from "@surplus/core";
+import type { ExecutionRecord } from "./journal";
+import { log, errorFields } from "./log";
 
 /** Everything the engine needs from the outside world, injected so tests need no network. */
 export interface MarketData {
@@ -95,6 +97,10 @@ export interface InvestingDeps {
      */
     executor?: {
         fill(order: SwapOrder, quote: Quote, key: string): Promise<{ amountOut: bigint; transaction: string }>;
+        /** Asks the chain what became of anything signed whose outcome is unknown. */
+        recover?(): Promise<unknown>;
+        /** The journal of what was sent, which is how a swap missing from the books is found. */
+        records?(): Promise<{ filled: ExecutionRecord[]; unresolved: ExecutionRecord[] }>;
     };
     /** The paid endpoint's ledger, read only, as the source of real revenue. */
     salesLedger: () => readonly LedgerTx[];
@@ -115,7 +121,20 @@ export interface InvestingDeps {
 /** Brief id used when a sale predates per-sale attribution and does not name its brief. */
 export const UNATTRIBUTED = "unattributed";
 
-export interface SyncResult {
+/**
+ * How long an approved proposal's swaps are left alone before they are booked from the journal. Longer
+ * than a request can live on the host, so a proposal still being executed is never booked twice over.
+ */
+const STILL_EXECUTING_MS = 120_000;
+
+export interface Reconciliation {
+    /** Swaps that had happened and were not in the books until now. */
+    recovered: { proposalId: string; symbol: string; transaction: string }[];
+    /** Why some swap is still not in the books. While this is not empty nothing new is proposed. */
+    outstanding: string[];
+}
+
+export interface SyncResult extends Reconciliation {
     sales: number;
     /** Brief files that could not be read, so their cost is not in the books. */
     unreadableBriefs: { file: string; error: string }[];
@@ -275,6 +294,8 @@ export class InvestingEngine {
      * for. The real money and its onchain proof stay in the endpoint's own ledger.
      */
     async syncRevenue(): Promise<SyncResult> {
+        const reconciled = await this.reconcileSwaps();
+
         // Every brief the agent produced cost real money, whether or not anyone bought it. Booking only
         // the newest one understated spending as soon as a second brief existed.
         const briefs = await this.deps.allBriefs();
@@ -340,6 +361,7 @@ export class InvestingEngine {
 
         await this.flush();
         return {
+            ...reconciled,
             gap: this.gap(),
             sales: sales.length - refusedSales.length,
             refusedSales,
@@ -407,6 +429,11 @@ export class InvestingEngine {
         | { ok: true; view: ProposalView; toSign: unknown; warnings: string[] }
         | { ok: false; reasons: string[] }
     > {
+        // A swap not yet in the books has spent money the books still show as available. Proposing over
+        // it would spend the same surplus twice.
+        const { outstanding } = await this.reconcileSwaps();
+        if (outstanding.length > 0) return { ok: false, reasons: outstanding };
+
         const saved = await this.deps.readBrief();
         const market = await this.deps.market();
         const eligible = new Set(market.trusted.map((t) => t.address.toLowerCase()));
@@ -601,6 +628,9 @@ export class InvestingEngine {
         }
         | { ok: false; reasons: string[]; skipped?: Skipped[]; drift?: Drift }
     > {
+        const { outstanding } = await this.reconcileSwaps();
+        if (outstanding.length > 0) return { ok: false, reasons: outstanding };
+
         const market = await this.deps.market();
         const positions = positionsFromLedger(this.treasury.ledger.all());
         const open = new Map([...positions].filter(([, p]) => p.units > 0n || p.costUsdcIn > 0n));
@@ -775,6 +805,10 @@ export class InvestingEngine {
         }
         | { ok: false; reasons: string[]; outcome?: string }
     > {
+        // Not this proposal's own swaps: running it again resumes those and books them below.
+        const { outstanding } = await this.reconcileSwaps(id);
+        if (outstanding.length > 0) return { ok: false, reasons: outstanding };
+
         await this.load(id);
         const rec = this.treasury.proposal(id);
         const market = await this.deps.market();
@@ -852,11 +886,10 @@ export class InvestingEngine {
         id: string,
         legs: readonly Leg[],
         quotes: ReadonlyMap<string, Quote>,
-    ): Promise<{ realized: Map<number, RealizedFill>; problems: string[] }> {
+    ): Promise<{ realized: Map<number, RealizedFill[]>; problems: string[] }> {
         const executor = this.deps.executor!;
         const plan = swapPlan(legs, this.mandates.current().terms.maxTradeUsdc);
-        const amounts = new Map<number, bigint>();
-        const transactions = new Map<number, string>();
+        const realized = new Map<number, RealizedFill[]>();
         const problems: string[] = [];
 
         for (const [position, order] of plan.entries()) {
@@ -867,30 +900,127 @@ export class InvestingEngine {
             }
             try {
                 const filled = await executor.fill(order, quote, `${id}:${position}`);
-                amounts.set(position, filled.amountOut);
-                transactions.set(position, filled.transaction);
+                this.attribute(realized, legs, plan, position, filled.amountOut, filled.transaction);
             } catch (e) {
                 problems.push(`${order.symbol}: ${e instanceof Error ? e.message : String(e)}`);
                 break;
             }
         }
 
-        const perLeg = attributeFills(legs, plan, amounts);
-        const realized = new Map<number, RealizedFill>();
-        for (const [legIndex, quantity] of perLeg) {
-            // The transaction recorded against a leg is the first swap that traded for it. The direction
-            // is part of the match: one token can have both a buy order and a sell order in one plan,
-            // and crediting a sale with the hash of the buy would point at the wrong transaction.
-            const leg = legs[legIndex]!;
-            const position = plan.findIndex(
-                (o, p) =>
-                    amounts.has(p) &&
-                    o.asset.toLowerCase() === leg.asset.toLowerCase() &&
-                    (o.side ?? "buy") === (leg.side ?? "buy"),
-            );
-            realized.set(legIndex, { quantity, transaction: transactions.get(position) ?? "" });
-        }
         return { realized, problems };
+    }
+
+    /** Adds one swap's result to the legs that paid for it, each under that swap's own transaction. */
+    private attribute(
+        into: Map<number, RealizedFill[]>,
+        legs: readonly Leg[],
+        plan: readonly SwapOrder[],
+        position: number,
+        amountOut: bigint,
+        transaction: string,
+    ): void {
+        for (const share of orderShares(legs, plan, position, amountOut)) {
+            const { leg, ...fill } = share;
+            into.set(leg, [...(into.get(leg) ?? []), { ...fill, transaction }]);
+        }
+    }
+
+    /**
+     * Puts into the books any swap that happened and is not there.
+     *
+     * Booking follows a swap in the same request, so a process that is replaced, or that stops waiting
+     * for a receipt, leaves money moved that the ledger does not show. The journal knows about it. This
+     * resolves what is unresolved against the chain, then books every filled swap the ledger lacks,
+     * rebuilding which legs it was for from the stored proposal and the mandate version it was signed
+     * under.
+     *
+     * Only a mainnet book is ever written: the journal holds real swaps, and a simulated book must not.
+     * `except` names a proposal that is about to be executed again, which books its own.
+     */
+    async reconcileSwaps(except?: string): Promise<Reconciliation> {
+        const executor = this.deps.executor;
+        const out: Reconciliation = { recovered: [], outstanding: [] };
+        if (this.deps.mode !== "mainnet" || executor?.records === undefined) return out;
+
+        await executor.recover?.();
+        const { filled, unresolved } = await executor.records();
+        // a key is the proposal id, a colon and the position in its swap plan
+        const proposalOf = (key: string): string => key.slice(0, key.lastIndexOf(":"));
+
+        for (const r of unresolved) {
+            if (proposalOf(r.key) === except) continue;
+            out.outstanding.push(
+                `the ${r.symbol} swap ${r.txHash ?? r.key} was sent and has no known outcome yet`,
+            );
+        }
+
+        const entries = this.treasury.ledger.all();
+        const missing = new Map<string, ExecutionRecord[]>();
+        for (const r of filled) {
+            const id = proposalOf(r.key);
+            if (id === except) continue;
+            const inBooks = entries.some(
+                (t) => t.txHash === r.txHash && t.idempotencyKey?.startsWith(`fill:${id}:`) === true,
+            );
+            if (!inBooks) missing.set(id, [...(missing.get(id) ?? []), r]);
+        }
+
+        for (const [id, records] of missing) {
+            try {
+                await this.load(id);
+                const rec = this.treasury.proposal(id);
+                if (rec.approval === undefined) throw new Error("the proposal carries no approval");
+                const young = records.some((r) => this.now().getTime() - Date.parse(r.at) < STILL_EXECUTING_MS);
+                if (rec.machine.state === "APPROVED" && young) {
+                    out.outstanding.push(
+                        `proposal ${id} may still be executing; execute it again, or retry in two minutes`,
+                    );
+                    continue;
+                }
+                const signedUnder = this.mandates.get(rec.approval.mandateVersion);
+                if (signedUnder === undefined) throw new Error("the mandate it was signed under is not on record");
+                const legs = rec.proposal.legs;
+                const plan = swapPlan(legs, signedUnder.terms.maxTradeUsdc);
+
+                const realized = new Map<number, RealizedFill[]>();
+                // every filled swap of this proposal, so each leg's coverage is judged whole
+                for (const r of filled.filter((x) => proposalOf(x.key) === id)) {
+                    const position = Number(r.key.slice(r.key.lastIndexOf(":") + 1));
+                    const order = plan[position];
+                    if (
+                        order === undefined ||
+                        order.asset.toLowerCase() !== r.asset.toLowerCase() ||
+                        order.usdcIn !== r.usdcInMinor ||
+                        (order.side ?? "buy") !== (r.side ?? "buy")
+                    ) {
+                        throw new Error(`swap ${r.key} does not match the proposal's plan`);
+                    }
+                    if (r.txHash === undefined || r.amountOutMinor === undefined || r.amountOutMinor <= 0n) {
+                        throw new Error(`swap ${r.key} is recorded as filled but is missing its result`);
+                    }
+                    this.attribute(realized, legs, plan, position, r.amountOutMinor, r.txHash);
+                }
+
+                this.treasury.bookExecuted(id, realized);
+                await this.flush();
+                await this.save(id);
+                for (const r of records) {
+                    out.recovered.push({ proposalId: id, symbol: r.symbol, transaction: r.txHash! });
+                    log.info("execution_booked", `booked a swap that was missing from the books: ${r.key}`, {
+                        key: r.key, symbol: r.symbol, transaction: r.txHash,
+                    });
+                }
+            } catch (e) {
+                const why = e instanceof Error ? e.message : String(e);
+                out.outstanding.push(
+                    `swaps of proposal ${id} (${records.map((r) => r.txHash).join(", ")}) are not in the books: ${why}`,
+                );
+                log.error("execution_unbooked", `could not book the swaps of proposal ${id}`, {
+                    proposal: id, ...errorFields(e),
+                });
+            }
+        }
+        return out;
     }
 
     view(id: string): ProposalView {

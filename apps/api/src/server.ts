@@ -1122,6 +1122,9 @@ export function buildServer(deps: ServerDeps): BuiltServer {
                 settled: r.settled.map((x) => ({ briefId: x.briefId, investableUsdcMinor: x.investable.toString() })),
                 gap: gapView(r.gap),
                 refusedSales: r.refusedSales,
+                // swaps booked late, and any still missing from the books
+                recovered: r.recovered,
+                outstanding: r.outstanding,
             });
         });
 
