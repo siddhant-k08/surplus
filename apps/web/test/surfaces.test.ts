@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { explorerTx, networkName, shortHash } from "../src/explorer";
+import { explorerTx, explorerTokenBalance, networkName, shortHash } from "../src/explorer";
+import { change, changeWords, formatUnits, ordered } from "../src/Holdings";
+import { normalizeHoldings } from "../src/api";
 import { stepStates, activeStep } from "../src/steps";
 import {
     percentToBps, bpsToPercent, isAmount, toSeconds, parseThemeTargets, formatThemeTargets,
@@ -583,5 +585,57 @@ describe("what the agent put behind a brief", () => {
         // The one sentence on the site that could be false. A simulated fill bought nothing.
         expect(verb(true)).toBe("committed");
         expect(verb(false)).toBe("holds");
+    });
+});
+
+describe("the holdings table", () => {
+    it("shows units as whole tokens, exactly", () => {
+        expect(formatUnits("126944672", 8)).toBe("1.26944672");
+        expect(formatUnits("100000000", 8)).toBe("1");
+        expect(formatUnits("5826500000000000", 18)).toBe("0.0058265");
+        expect(formatUnits("0", 8)).toBe("0");
+        // without decimals it says what the number is rather than guessing
+        expect(formatUnits("123", null)).toBe("123 units");
+    });
+
+    it("measures value against cost, and says nothing without a value", () => {
+        expect(change({ costUsdcMinor: "1000000", valueUsdcMinor: "1050000" })).toEqual({ usdc: 50000n, bps: 500 });
+        expect(change({ costUsdcMinor: "1000000", valueUsdcMinor: null })).toBeNull();
+        expect(change({ costUsdcMinor: "0", valueUsdcMinor: "5" })).toBeNull();
+        expect(changeWords({ usdc: -25000n, bps: -250 })).toBe("-0.025000 (-2.50%)");
+        expect(changeWords({ usdc: 50000n, bps: 500 })).toBe("+0.050000 (+5.00%)");
+    });
+
+    it("lists open positions first, largest first, and keeps closed ones", () => {
+        const h = (symbol: string, units: string, cost: string) => ({
+            asset: symbol, symbol, units, costUsdcMinor: cost, realizedUsdcMinor: "0",
+            buys: 1, sells: 0, decimals: 8, transactions: [],
+        });
+        expect(ordered([h("A", "0", "0"), h("B", "5", "10"), h("C", "5", "30")]).map((x) => x.symbol))
+            .toEqual(["C", "B", "A"]);
+    });
+
+    it("links a wallet's token balance on the explorer of its chain", () => {
+        const token = "0x" + "b2".repeat(20);
+        const wallet = "0x" + "11".repeat(20);
+        expect(explorerTokenBalance("eip155:8453", token, wallet)?.url)
+            .toBe(`https://basescan.org/token/${token}?a=${wallet}`);
+        expect(explorerTokenBalance("eip155:1", token, wallet)).toBeNull();
+        expect(explorerTokenBalance("eip155:8453", "nope", wallet)).toBeNull();
+    });
+});
+
+describe("holdings from an older server", () => {
+    it("reads a response without the new fields instead of crashing", () => {
+        // the shape the API answered with before the holdings table existed
+        const h = normalizeHoldings({
+            positions: [{ asset: "0xab", symbol: "NVDAc", units: "5", costUsdcMinor: "10", realizedUsdcMinor: "0", buys: 1, sells: 0 }],
+            realizedUsdcMinor: "0",
+        });
+        expect(h.positions[0]!.transactions).toEqual([]);
+        expect(h.positions[0]!.decimals).toBeNull();
+        expect(formatUnits(h.positions[0]!.units, h.positions[0]!.decimals)).toBe("5 units");
+        // never claims tokens exist when the server did not say
+        expect(h.simulated).toBe(true);
     });
 });

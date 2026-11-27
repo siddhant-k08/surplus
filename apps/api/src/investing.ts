@@ -134,6 +134,18 @@ export interface Reconciliation {
     outstanding: string[];
 }
 
+/** What one holding is denominated in, and, when asked, what it would sell for now. */
+export interface HoldingValue {
+    /** Null when the token list could not be read, so units cannot be shown as whole tokens. */
+    decimals: number | null;
+    /** USDC minor units per whole token from a live sell quote for the units held. */
+    priceUsdc?: bigint;
+    /** What selling every unit held would return, by that quote, before gas. */
+    valueUsdc?: bigint;
+    /** Why there is no value, when one was asked for and none could be had. */
+    error?: string;
+}
+
 export interface SyncResult extends Reconciliation {
     sales: number;
     /** Brief files that could not be read, so their cost is not in the books. */
@@ -616,6 +628,46 @@ export class InvestingEngine {
             decimals,
             terms,
         });
+    }
+
+    /**
+     * The decimals of every token held and, with `live`, what each holding would sell for now.
+     *
+     * A sale quote for the units actually held, which is a different number from units times a buy
+     * price: it is what selling would return, slippage included and gas not. Asked for rather than
+     * loaded, since it costs one quote per token held. A token that cannot be quoted says why instead
+     * of being left out, so the total is never quietly smaller than what is held.
+     */
+    async valueHoldings(live: boolean): Promise<Map<string, HoldingValue>> {
+        const positions = positionsFromLedger(this.treasury.ledger.all());
+        const open = new Map([...positions].filter(([, p]) => p.units > 0n));
+        const out = new Map<string, HoldingValue>();
+        if (positions.size === 0) return out;
+
+        let market: MarketData;
+        try {
+            market = await this.deps.market();
+        } catch (e) {
+            const why = e instanceof Error ? e.message : String(e);
+            for (const asset of positions.keys()) out.set(asset, { decimals: null, ...(live && { error: why }) });
+            return out;
+        }
+        const decimals = new Map(market.trusted.map((t) => [t.address.toLowerCase(), t.decimals]));
+        for (const asset of positions.keys()) out.set(asset, { decimals: decimals.get(asset) ?? null });
+        if (!live || open.size === 0) return out;
+
+        const quoted = await this.sellQuotes(market, open, this.mandates.current().terms.maxSlippageBps);
+        for (const [asset, p] of open) {
+            const row = out.get(asset)!;
+            const price = quoted.prices.get(asset);
+            if (price === undefined || row.decimals === null) {
+                row.error = quoted.errors.get(asset) ?? "no quote for this token";
+                continue;
+            }
+            row.priceUsdc = price;
+            row.valueUsdc = (p.units * price) / 10n ** BigInt(row.decimals);
+        }
+        return out;
     }
 
     async exit(

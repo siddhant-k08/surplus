@@ -58,7 +58,7 @@ npx tsx scripts/demo-research.ts             # real research brief (costs a few 
 node scripts/spike-edgar.mjs            # read-only SEC shape check
 ```
 
-Last known test count: core 32 files, 411 tests. API 14 files, 294 tests (about 35 fewer without `DATABASE_URL`). Web 3 files, 78 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
+Last known test count: core 32 files, 411 tests. API 14 files, 294 tests (about 35 fewer without `DATABASE_URL`). Web 3 files, 83 tests (`npm test -w @surplus/web`; pure logic only, no DOM). The Postgres tests (`apps/api/test/pg.test.ts`, `pgserver.test.ts`, 25 of them) skip themselves unless `DATABASE_URL` is set, and run against a disposable schema they drop afterwards.
 
 The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed, and is a throwaway key. Since
 27 Nov 2026 that wallet holds real USDC on Base mainnet, so a buy against production spends money.

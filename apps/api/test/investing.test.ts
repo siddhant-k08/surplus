@@ -719,6 +719,22 @@ describe("the owner routes", () => {
         expect(done.body.fills[0].side).toBe("sell");
         expect(done.body.fills[0].proceedsUsdc).toBeDefined();
 
+        // in whole tokens and live value, said to be simulated
+        expect(holdings.body.simulated).toBe(true);
+        expect(nvda.decimals).toBe(DECIMALS);
+        expect(nvda.transactions).toEqual([]);
+        expect(nvda.valueUsdcMinor).toBeUndefined();
+        const valued = await auth(request(app).get("/invest/holdings?value=live"));
+        // NVDAc has been sold by now; MSFTc is still held
+        const priced = valued.body.positions.find((p: { symbol: string }) => p.symbol === "MSFTc");
+        expect(priced.valueError).toBeUndefined();
+        expect(priced.priceUsdcMinor).toBe(PRICE.toString());
+        expect(priced.valueUsdcMinor).toBe(((BigInt(priced.units) * PRICE) / 10n ** BigInt(DECIMALS)).toString());
+        // a closed position has nothing to value, and says so with nulls rather than a zero
+        const closed = valued.body.positions.find((p: { symbol: string }) => p.symbol === "NVDAc");
+        expect(closed.valueUsdcMinor).toBeNull();
+        expect(valued.body.valuedAt).toBeDefined();
+
         const after = await auth(request(app).get("/invest/holdings"));
         const sold = after.body.positions.find((p: { symbol: string }) => p.symbol === "NVDAc");
         expect(BigInt(sold.units)).toBe(0n);

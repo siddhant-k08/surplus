@@ -14,6 +14,7 @@ import { CountUp, Reveal, riseItem, stagger , motion } from "./motion";
 import { STEPS, activeStep, stepStates, type StepState } from "./steps";
 import { bpsToPercent } from "./terms";
 import { navigate } from "./App";
+import { HoldingsPanel } from "./Holdings";
 
 export type DeskTab = "decision" | "mandate" | "book";
 
@@ -155,7 +156,7 @@ export function Desk({ tab, address, onSignedOut }: { tab: DeskTab; address: str
                     `${count(r.fills.length, "fill")} at the quoted prices.`,
                     ...(r.simulated
                         ? ["No token moved. The book is tagged sim and the wallet holds nothing new."]
-                        : ["Tokens moved onchain. Check the positions panel against the books."]),
+                        : ["Tokens moved onchain. The Book tab shows what the agent now holds, checked against the wallet."]),
                     ...r.warnings,
                 ],
             };
@@ -455,7 +456,7 @@ export function Desk({ tab, address, onSignedOut }: { tab: DeskTab; address: str
                     <div className="shell py-16"><p className="font-mono text-sm text-dim" role="status">Reading the mandate…</p></div>
                 )}
 
-                {tab === "book" && <TheBook ledger={ledger} positions={positions} />}
+                {tab === "book" && <TheBook ledger={ledger} positions={positions} wallet={execution?.address} />}
             </main>
 
             <Footer>
@@ -660,7 +661,11 @@ function LegRow({
     );
 }
 
-function TheBook({ ledger, positions }: { ledger: InvestLedger | null; positions: PositionsView | null }) {
+function TheBook({ ledger, positions, wallet }: {
+    ledger: InvestLedger | null;
+    positions: PositionsView | null;
+    wallet: string | undefined;
+}) {
     return (
         <section className="py-[clamp(2.5rem,5vw,3.5rem)]">
             <div className="shell">
@@ -677,7 +682,9 @@ function TheBook({ ledger, positions }: { ledger: InvestLedger | null; positions
                     </p>
                 </Reveal>
 
-                {positions !== null && <AgainstTheChain positions={positions} />}
+                <HoldingsPanel wallet={wallet} />
+
+                {positions !== null && <div className="mt-6"><AgainstTheChain positions={positions} /></div>}
 
                 <div className="mt-6 border-t border-line">
                     {(ledger?.entries ?? []).map((e, i) => {
