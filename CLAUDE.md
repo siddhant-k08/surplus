@@ -80,6 +80,12 @@ The buyer key lives only in `.env` as `X402_BUYER_PRIVATE_KEY`, is never printed
   per rebuild would exhaust the database's ceiling) and skipping execution recovery (that belongs to
   taking over from a predecessor, not to noticing a neighbour's write). Absent for files, where one
   process owns the disk.
+- **A proposal is stored, not remembered** (`packages/core/src/proposalstore.ts`). Propose, approve and
+  execute are three requests, and the staleness rebuild above fires on the ledger entries propose itself
+  writes, so a proposal held in memory was gone before the signature arrived and every approval in
+  production failed. The engine saves after each step and reads storage back before the next. Anything
+  new that has to live between two requests belongs in storage. Real swaps go out only after
+  `Treasury.preflight` passes: the treasury's own refusal comes after the broadcast.
 - A database is not optional on a host that can replace the process between two requests. The ledger, the mandate history, the receipts, the buyer-commissioned briefs and the owner's session are all written at runtime; the owner's catalogue (`BRIEFS_DIR`) is repository content and stays on disk in both modes.
 - Mandates are versioned and hashed; the agent never changes user constraints. Unplaceable money stays uninvested with a stated reason.
 - The mandate persists to `MANDATE_PATH` as a hash-chained JSONL history, verified on load: an altered or truncated file makes the server refuse to start. A stored mandate is authoritative; the terms in code only create version 1 on a first run.

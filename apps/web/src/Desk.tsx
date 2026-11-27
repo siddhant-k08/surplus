@@ -6,7 +6,7 @@ import {
     type Mandate, type OwnerBrief, type Proposal, type SyncResult, type InvestLedger, type ExecuteResult,
     type ExecutionStatus, type PositionsView, type BriefClaim, type BriefSource,
 } from "./api";
-import { signTypedData, currentAccount, describeWalletError } from "./wallet";
+import { signTypedData, currentAccount, describeWalletError, ensureChain } from "./wallet";
 import { EvidenceBody, WhatAQuoteProves, count } from "./Evidence";
 import { MandatePanel } from "./MandatePanel";
 import { Button, Chip, Footer, Led, NavLink, TopBar } from "./Chrome";
@@ -128,6 +128,8 @@ export function Desk({ tab, address, onSignedOut }: { tab: DeskTab; address: str
                     "Switch back to that account, or sign out and sign in again.",
                 );
             }
+            // The domain pins a chain, and a session outlives the wallet staying on it.
+            await ensureChain((proposal.toSign as { domain: { chainId: number } }).domain.chainId);
             const signature = await signTypedData(address, proposal.toSign);
             const r = await api.approve(proposal.id, signature);
             setProposal({ ...proposal, state: "APPROVED" });
