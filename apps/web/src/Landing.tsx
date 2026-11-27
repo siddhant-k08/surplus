@@ -35,7 +35,7 @@ export function Landing() {
         get<Catalogue>("/catalogue").then(setCat).catch(() => setDown(true));
     }, []);
 
-    const chain = networkName(cat?.network) ?? "Base Sepolia";
+    const chain = networkName(cat?.network) ?? "Base";
     const price = cat?.briefPriceUsd ?? "—";
     const custom = cat?.researchPriceUsd ?? "—";
 

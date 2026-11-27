@@ -64,13 +64,14 @@ export function AppHome() {
     }, [wallet.address, cat]);
 
     async function purchase(kind: "brief" | "research") {
-        if (wallet.address === null) return;
+        // the catalogue says which chain is being paid on, and nothing is signed on a guess
+        if (wallet.address === null || cat === null) return;
         setBusy(kind);
         setError(null);
         setBought(null);
         try {
             // before anything is signed: a wallet on the wrong chain fails in a way nobody can read
-            const network = cat?.network ?? "eip155:84532";
+            const network = cat.network;
             const wanted = chainIdFromCaip(network);
             if (wanted !== null) await ensureChain(wanted);
             const { buy } = await import("./buy"); // the payment stack, only now
@@ -97,7 +98,7 @@ export function AppHome() {
     const custom = cat?.researchPriceUsd ?? "—";
     const parsed = parseThemes(themes);
     const soldOut = cat !== null && cat.latest === null;
-    const chain = networkName(cat?.network) ?? "Base Sepolia";
+    const chain = networkName(cat?.network) ?? "Base";
     const connected = wallet.address !== null;
     /*
      * Shown to the owner and to nobody else: for a buyer it is a door they cannot open, and a hint

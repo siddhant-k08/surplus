@@ -64,7 +64,7 @@ export function Library({ terms }: { terms: Terms | null }) {
         }
     }
 
-    const chain = networkName(terms?.network) ?? "Base Sepolia";
+    const chain = networkName(terms?.network) ?? "Base";
     const receipts = state.k === "open" ? state.receipts : [];
     const spent = receipts.reduce((a, r) => a + BigInt(r.amountUsdcMinor), 0n);
     const connected = wallet.address !== null;

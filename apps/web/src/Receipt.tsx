@@ -76,7 +76,7 @@ export function Receipt({ id }: { id: string }) {
     const backed = forBrief(backing.k === "ready" ? backing.backing : null, paid.brief.id);
 
     return (
-        <Shell>
+        <Shell chain={chain}>
             <main id="main">
                 <section className="border-b border-line">
                     <div className="shell grid items-start gap-10 py-[clamp(2.5rem,5vw,3.5rem)] lg:grid-cols-[1fr_22rem]">
@@ -234,14 +234,15 @@ export function Receipt({ id }: { id: string }) {
     );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+/** The chip names where this receipt settled, so it is absent until a receipt says. */
+function Shell({ chain, children }: { chain?: string | null; children: React.ReactNode }) {
     return (
         <>
             <SiteHeader
                 here="app"
                 right={
                     <>
-                        <Chip><Led />Base Sepolia</Chip>
+                        {chain != null && <Chip><Led />{chain}</Chip>}
                         <Button href="/app/library" tone="ghost" size="sm">Your library</Button>
                     </>
                 }
