@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { signableTypedData, chainIdFromCaip } from "../src/wallet";
+import { signableTypedData, chainIdFromCaip, describeWalletError } from "../src/wallet";
 import { describePaymentFailure, checkPaymentSignature } from "../src/buy";
 import { privateKeyToAccount } from "viem/accounts";
 
@@ -147,5 +147,13 @@ describe("describePaymentFailure, signature rejection", () => {
         expect(msg).toMatch(/different account/);
         expect(msg).toMatch(/second wallet/);
         expect(msg).toContain("nothing was charged");
+    });
+});
+
+describe("describeWalletError", () => {
+    it("says what to do when the wallet has disconnected under a live session", () => {
+        const e = Object.assign(new Error("Connector not connected."), { name: "ConnectorNotConnectedError" });
+        expect(describeWalletError(e)).toMatch(/not connected\. Unlock it or reconnect/);
+        expect(describeWalletError(new Error("Connector not connected."))).toMatch(/reconnect the owner wallet/);
     });
 });

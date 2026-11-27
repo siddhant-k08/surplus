@@ -133,6 +133,11 @@ export function describeWalletError(e: unknown): string {
         return "Your wallet already has a request open. Finish it there, then try again.";
     }
     if (name === "ConnectorAlreadyConnectedError") return "That wallet is already connected.";
+    // A session outlives the wallet connection: a reload, a locked extension or a closed app leaves the
+    // desk signed in with nothing to sign with, and wagmi's own words for that say nothing useful.
+    if (name === "ConnectorNotConnectedError" || (e instanceof Error && /connector not connected/i.test(e.message))) {
+        return "Your wallet is not connected. Unlock it or reconnect the owner wallet, then try again. Nothing was signed.";
+    }
     if (typeof err?.shortMessage === "string") return err.shortMessage;
     return e instanceof Error ? e.message : String(e);
 }

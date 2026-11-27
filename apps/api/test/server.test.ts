@@ -65,6 +65,18 @@ const facts = (over: Partial<Parameters<typeof bookSettlement>[0]["facts"]> = {}
 });
 
 describe("the paid endpoint", () => {
+    it("lets the page talk to the wallet popup it opens", async () => {
+        // "same-origin" severed the Coinbase Wallet popup from the page, so connecting and signing in
+        // hung with no error; the SDK says so in the console and nowhere else
+        const res = await request(build().app).get("/health");
+        expect(res.headers["cross-origin-opener-policy"]).toBe("same-origin-allow-popups");
+        const csp = String(res.headers["content-security-policy"]);
+        expect(csp).toContain("frame-ancestors 'none'");
+        for (const host of ["https://mainnet.base.org", "https://rpc.wallet.coinbase.com", "wss://www.walletlink.org"]) {
+            expect(csp).toContain(host);
+        }
+    });
+
     it("answers /health for free and says what it sells", async () => {
         const { app } = build();
         const res = await request(app).get("/health");

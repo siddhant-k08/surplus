@@ -77,14 +77,18 @@ writeFileSync(
                         "x-content-type-options": "nosniff",
                         "x-frame-options": "DENY",
                         "referrer-policy": "no-referrer",
-                        "cross-origin-opener-policy": "same-origin",
+                        // "same-origin-allow-popups", as the function sets it: see server.ts.
+                        "cross-origin-opener-policy": "same-origin-allow-popups",
                         "content-security-policy": [
                             "default-src 'self'",
                             "script-src 'self'",
                             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
                             "font-src 'self' https://fonts.gstatic.com",
                             "img-src 'self' data:",
-                            "connect-src 'self'",
+                            // The Coinbase Wallet SDK answers read calls through the chain's public RPC and its
+                            // own, and the mobile app is reached through WalletLink. Without these the wallet
+                            // connects and then cannot read a thing.
+                            "connect-src 'self' https://mainnet.base.org https://sepolia.base.org https://rpc.wallet.coinbase.com https://www.walletlink.org wss://www.walletlink.org",
                             "frame-ancestors 'none'",
                             "base-uri 'none'",
                             "form-action 'self'",
