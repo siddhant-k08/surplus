@@ -5,6 +5,7 @@ import {
     estimateCostUsd,
     usdToUsdcMinor,
     type CandidateCompany,
+    BASE_REGISTRY,
     type DocProvider,
     type LlmClient,
     type SavedBrief,
@@ -312,7 +313,10 @@ export class ResearchService {
         // as a duplicate. The random suffix keeps ids unique while the timestamp keeps them sortable.
         const briefId = `brief-${now.toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
         const result = await researchBrief(
-            { briefId, themes, companies, now, disclaimer: DISCLAIMER },
+            {
+                briefId, themes, companies, now, disclaimer: DISCLAIMER,
+                preferred: new Set(BASE_REGISTRY.map((r) => r.address)),
+            },
             { docs: this.deps.docs(), llm },
         );
 
@@ -341,6 +345,7 @@ export class ResearchService {
             brief: saved.brief,
             issues: result.issues,
             rejected: result.rejected,
+            reworded: result.reworded,
             usage: result.usage,
             costUsd,
             costUsdcMinor: costUsdcMinor.toString(),

@@ -26,6 +26,8 @@ export * from "./quote";
 export * from "./swapbuild";
 export * from "./gates";
 export * from "./pipeline";
+export * from "./shortlist";
+export * from "./factcheck";
 export * from "./edgar";
 export * from "./anthropic";
 export * from "./gemini";

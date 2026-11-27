@@ -15,6 +15,7 @@ import {
     type SourceDoc,
     type ThemeSpec,
 } from "@surplus/core";
+import { CHECK_SYSTEM_PROMPT } from "@surplus/core";
 import { ResearchService, normalizeThemes, themesKey, MAX_THEMES, MAX_DESCRIPTION } from "../src/research";
 import { buildServer, RESEARCH_ROUTE } from "../src/server";
 import { loadConfig } from "../src/config";
@@ -67,7 +68,11 @@ const docs = (): DocProvider => ({
 function countingLlm(): { llm: () => LlmClient; calls: () => number } {
     let n = 0;
     const client: LlmClient = {
-        complete: async () => {
+        complete: async (system, user) => {
+            // the quote check is part of the same generation, so it is not counted as another one
+            if (system === CHECK_SYSTEM_PROMPT) {
+                return { text: JSON.stringify({ facts: JSON.parse(user).items }), inputTokens: 100, outputTokens: 10 };
+            }
             n += 1;
             return {
                 text: JSON.stringify({

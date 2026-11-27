@@ -6,9 +6,9 @@ import {
     formatUsdc,
     loadAllTokens,
     crossCheck,
+    researchUniverse,
     loadLiquidityScores,
     quoteLegs,
-    BASE_REGISTRY as REGISTRY,
     EdgarClient,
     EdgarDocProvider,
     createAnthropicClient,
@@ -181,12 +181,8 @@ export async function assemble(config: ApiConfig, opts: AssembleOptions = {}): P
         briefs: customBriefs,
         companies: async (): Promise<readonly CandidateCompany[]> => {
             const { tokens } = await loadAllTokens();
-            const names = new Map(REGISTRY.map((r) => [r.address.toLowerCase(), r.name]));
-            return crossCheck(tokens).trusted.map((t) => ({
-                asset: t.address.toLowerCase(),
-                symbol: t.symbol,
-                name: names.get(t.address.toLowerCase()) ?? t.name,
-            }));
+            // Research may cover everything listed. Investing stays on the trusted set above.
+            return researchUniverse(tokens);
         },
         docs: () => new EdgarDocProvider(new EdgarClient({ userAgent: env("SEC_USER_AGENT") })),
         llm: (): LlmClient =>

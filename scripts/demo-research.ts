@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import {
     loadAllTokens,
-    crossCheck,
+    researchUniverse,
     BASE_REGISTRY,
+    SHORTLIST_SYSTEM_PROMPT,
     EdgarClient,
     EdgarDocProvider,
     createAnthropicClient,
@@ -32,10 +33,34 @@ const THEMES: ThemeSpec[] = [
         keywords: ["advertising", "ads", "app store", "apps", "subscription", "subscriptions", "e-commerce", "marketplace", "online stores", "devices", "consumer"],
     },
     {
-        id: "longevity-biotech",
-        name: "Longevity biotech",
-        description: "Therapeutics or research aimed at aging, healthspan or age-related disease",
-        keywords: ["aging", "ageing", "longevity", "healthspan", "lifespan", "age-related", "therapeutic", "therapeutics", "drug", "drugs", "disease", "diseases", "biotech", "biotechnology"],
+        id: "digital-assets",
+        name: "Digital assets and crypto infrastructure",
+        description: "Revenue or treasury value tied to bitcoin and other digital assets: holding them, mining them, trading them, or issuing stablecoins",
+        keywords: ["bitcoin", "digital asset", "digital assets", "crypto", "cryptocurrency", "cryptocurrencies", "stablecoin", "stablecoins", "blockchain", "USDC"],
+    },
+    {
+        id: "space-defense",
+        name: "Space and defense",
+        description: "Revenue from launch services, satellites, spacecraft, missiles or defense programs",
+        keywords: ["satellite", "satellites", "spacecraft", "rocket", "rockets", "launch services", "launch vehicle", "launch vehicles", "space systems", "space infrastructure", "space missions", "spaceflight", "space-based", "defense", "missile", "missiles", "aerospace", "unmanned"],
+    },
+    {
+        id: "data-center-power",
+        name: "Power and cooling for data centers",
+        description: "Revenue from generating electricity, building reactors, or supplying the power and cooling equipment that data centers need",
+        keywords: ["electricity", "power generation", "power plants", "nuclear", "reactor", "reactors", "megawatts", "gigawatts", "grid", "cooling", "power management", "energy", "generation capacity", "fission", "powerhouse", "powerhouses"],
+    },
+    {
+        id: "cybersecurity",
+        name: "Cybersecurity",
+        description: "Revenue from selling security software or services that protect networks, devices, identities and cloud workloads",
+        keywords: ["cybersecurity", "cyber", "cyberattacks", "threat", "threats", "endpoint", "endpoints", "secure", "securely", "firewall", "zero trust", "identity security", "network security", "cloud security", "security", "breaches"],
+    },
+    {
+        id: "metabolic-health",
+        name: "Obesity and metabolic medicine",
+        description: "Medicines for obesity, diabetes and related metabolic disease",
+        keywords: ["obesity", "diabetes", "weight loss", "weight management", "GLP-1", "incretin", "metabolic", "insulin", "MASH", "cardiometabolic", "tirzepatide", "semaglutide", "Mounjaro", "Zepbound", "Ozempic", "Wegovy"],
     },
 ];
 
@@ -73,17 +98,12 @@ function budgeted(inner: LlmClient, capUsd: number, inPerM: number, outPerM: num
 async function main(): Promise<void> {
     if (existsSync(".env")) process.loadEnvFile(".env");
 
-    console.log("Loading the token list and checking it against the Base registry...");
+    console.log("Loading the token list...");
     const { tokens } = await loadAllTokens();
-    const check = crossCheck(tokens);
-    const names = new Map(BASE_REGISTRY.map((r) => [r.address.toLowerCase(), r.name]));
-    const companies: CandidateCompany[] = check.trusted.map((t) => ({
-        asset: t.address,
-        symbol: t.symbol,
-        name: names.get(t.address.toLowerCase()) ?? t.name,
-    }));
-    console.log(`Trusted tokens: ${companies.map((c) => c.symbol).join(", ")}`);
-    if (companies.length === 0) throw new Error("No trusted tokens, stopping");
+    const companies: CandidateCompany[] = researchUniverse(tokens);
+    const tradable = new Set(BASE_REGISTRY.map((r) => r.address));
+    console.log(`Research covers ${companies.length} companies; the agent may trade ${tradable.size} of them`);
+    if (companies.length === 0) throw new Error("No tokens listed, stopping");
 
     const edgar = new EdgarClient({ userAgent: env("SEC_USER_AGENT") });
     const docs = new EdgarDocProvider(edgar);
@@ -95,6 +115,11 @@ async function main(): Promise<void> {
         llm = {
             spentUsd: () => 0,
             async complete(system, user) {
+                // No model to choose with, so a dry run reads the tradable companies.
+                if (system === SHORTLIST_SYSTEM_PROMPT) {
+                    const symbols = BASE_REGISTRY.map((r) => r.symbol);
+                    return { text: JSON.stringify({ symbols }), inputTokens: 0, outputTokens: 0 };
+                }
                 prompts.push(system.length + user.length);
                 return { text: '{"claims":[],"fits":[]}', inputTokens: 0, outputTokens: 0 };
             },
@@ -114,7 +139,7 @@ async function main(): Promise<void> {
     const briefId = `brief-${new Date().toISOString().replace(/[:.]/g, "-")}`;
     console.log(`\nFetching SEC filings and ${DRY_RUN ? "building prompts (DRY RUN, no model calls)" : "calling the model"}...`);
     const r = await researchBrief(
-        { briefId, themes: THEMES, companies, now: new Date(), disclaimer: "Informational research only. Not investment advice. Simulated where labeled." },
+        { briefId, themes: THEMES, companies, preferred: tradable, now: new Date(), disclaimer: "Informational research only. Not investment advice. Simulated where labeled." },
         { docs, llm },
     );
 
@@ -125,6 +150,8 @@ async function main(): Promise<void> {
         console.log(`  ${t.themeId.padEnd(20)} filings ${String(t.docsMs).padStart(6)} ms, model ${String(t.modelMs).padStart(6)} ms`);
     }
     console.log(`  ${"total".padEnd(20)} filings ${String(docsMs).padStart(6)} ms, model ${String(modelMs).padStart(6)} ms`);
+    console.log("\nShortlisted to be read:");
+    for (const s of r.shortlists) console.log(`  ${s.themeId.padEnd(20)} ${s.symbols.join(", ") || "none"}`);
     console.log(`\nSEC requests made: ${edgar.requests}`);
     if (docs.warnings.length > 0) {
         console.log("SEC warnings:");
@@ -153,6 +180,8 @@ async function main(): Promise<void> {
 
     console.log(`\nValidation issues: ${r.issues.length}`);
     for (const i of r.issues) console.log(`  - ${i.path} ${i.rule}: ${i.message}`);
+    console.log(`Reworded by the quote check: ${r.reworded.length}`);
+    for (const x of r.reworded) console.log(`  - ${x}`);
     console.log(`Dropped by verification: ${r.rejected.length}`);
     for (const x of r.rejected) console.log(`  - ${x}`);
 
@@ -166,7 +195,7 @@ async function main(): Promise<void> {
     writeFileSync(
         path,
         JSON.stringify(
-            { provider: process.env.LLM_PROVIDER ?? "anthropic", model: env("RESEARCH_MODEL"), brief: r.brief, issues: r.issues, rejected: r.rejected, usage: r.usage, costUsd: usd, costUsdcMinor: minor.toString(), secWarnings: docs.warnings },
+            { provider: process.env.LLM_PROVIDER ?? "anthropic", model: env("RESEARCH_MODEL"), brief: r.brief, issues: r.issues, rejected: r.rejected, reworded: r.reworded, usage: r.usage, costUsd: usd, costUsdcMinor: minor.toString(), secWarnings: docs.warnings },
             null,
             2,
         ),

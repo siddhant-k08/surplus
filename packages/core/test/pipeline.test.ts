@@ -14,6 +14,7 @@ import {
     selectPassages,
     usdToUsdcMinor,
 } from "../src/pipeline";
+import { CHECK_SYSTEM_PROMPT } from "../src/factcheck";
 import type { CandidateCompany, DocProvider, LlmClient, SourceDoc, ThemeSpec } from "../src/pipeline";
 import { isFactSupported } from "../src/research";
 
@@ -36,8 +37,13 @@ const doc: SourceDoc = {
 };
 
 const docsOf = (d: SourceDoc[]): DocProvider => ({ fetchDocs: async () => d });
+/** Answers the research call with `text`, and the quote check by leaving every sentence as it was. */
 const llmOf = (text: string): LlmClient => ({
-    complete: async () => ({ text, inputTokens: 1000, outputTokens: 200 }),
+    complete: async (system, user) => ({
+        text: system === CHECK_SYSTEM_PROMPT ? JSON.stringify({ facts: JSON.parse(user).items }) : text,
+        inputTokens: 1000,
+        outputTokens: 200,
+    }),
 });
 
 const good = JSON.stringify({
@@ -235,7 +241,8 @@ describe("researchBrief", () => {
         const r = await researchBrief(input, { docs: docsOf([doc]), llm: llmOf(good) });
         expect(r.issues).toEqual([]);
         expect(r.brief.themes[0]?.fits.length).toBe(1);
-        expect(r.usage).toEqual({ inputTokens: 1000, outputTokens: 200, calls: 1 });
+        // the research call and the quote check
+        expect(r.usage).toEqual({ inputTokens: 2000, outputTokens: 400, calls: 2 });
     });
     it("documents a known limit: injected text that is quoted verbatim still passes verification", async () => {
         const injected = JSON.stringify({
