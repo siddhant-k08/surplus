@@ -3,6 +3,8 @@ import {
     JsonlMandateStore,
     type LedgerStore,
     type MandateBackend,
+    MemoryProposalStore,
+    type ProposalStore,
 } from "@surplus/core";
 import type { ApiConfig } from "./config";
 import { DirBriefBackend, type BriefBackend } from "./briefs";
@@ -13,7 +15,7 @@ import { MemoryReservations, PgReservations, type Reservations } from "./reserva
 import { MemoryJournal, PgJournal, type ExecutionJournal } from "./journal";
 import {
     migrate, openSql,
-    PgBriefBackend, PgLedgerStore, PgMandateBackend, PgReceiptStore, PgSessionStore,
+    PgBriefBackend, PgLedgerStore, PgMandateBackend, PgProposalStore, PgReceiptStore, PgSessionStore,
     type Sql,
 } from "./pg";
 
@@ -41,6 +43,8 @@ export interface Backends {
     /** Buyer-commissioned briefs, written while the agent runs. */
     custom: BriefBackend;
     sessions: SessionStore;
+    /** Proposals between offer and execution, which are separate requests. */
+    proposals: ProposalStore;
     /** The ceiling on the free routes that do work. Shared across instances when there is a database. */
     throttle: Throttle;
     /** Money committed to a brief being generated right now, so the spend cap holds across instances. */
@@ -85,6 +89,7 @@ export function fileBackends(config: ApiConfig): Backends {
         catalogue: new DirBriefBackend(config.briefsDir),
         custom: new DirBriefBackend(config.customBriefsDir),
         sessions: new MemorySessionStore(),
+        proposals: new MemoryProposalStore(),
         throttle: new MemoryThrottle(),
         reservations: new MemoryReservations(),
         executions: new MemoryJournal(),
@@ -127,6 +132,7 @@ export function pgBackends(config: ApiConfig, sql: Sql): Backends {
         catalogue: new DirBriefBackend(config.briefsDir),
         custom: new PgBriefBackend(sql, "custom"),
         sessions: new PgSessionStore(sql),
+        proposals: new PgProposalStore(sql, investBook),
         throttle: new PgThrottle(sql),
         reservations: new PgReservations(sql),
         executions: new PgJournal(sql),

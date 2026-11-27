@@ -19,6 +19,8 @@ import {
     type TokenRecord,
     openLedger,
     themeHoldings,
+    MemoryProposalStore,
+    type ProposalStore,
 } from "@surplus/core";
 import { privateKeyToAccount } from "viem/accounts";
 import { approvalTypedData } from "@surplus/core";
@@ -1302,7 +1304,7 @@ describe("executing for real", () => {
         };
     }
 
-    const mainnetEngine = async (executor?: { fill: unknown }) =>
+    const mainnetEngine = async (executor?: { fill: unknown }, clock?: () => Date) =>
         new InvestingEngine({
             mode: "mainnet",
             openingFloat: u("1.00"),
@@ -1316,6 +1318,7 @@ describe("executing for real", () => {
             verifyApproval: ({ approval, signature }) =>
                 verifyApprovalSignature({ approval, signature, chainId: CHAIN_ID, ownerAddress: ownerAccount.address }),
             ...(executor !== undefined && { executor: executor as never }),
+            ...(clock !== undefined && { now: clock }),
         });
 
     const approved = async (e: InvestingEngine) => {
@@ -1364,6 +1367,27 @@ describe("executing for real", () => {
         expect(e.treasury.state("p1")).toBe("FAILED");
     });
 
+    it("sends nothing for a proposal the owner never signed", async () => {
+        // The swaps go out before the treasury books them, so its refusal alone would come too late.
+        const fake = fakeExecutor();
+        const e = await mainnetEngine(fake.executor);
+        await e.syncRevenue();
+        await e.propose("p1");
+        await expect(e.execute("p1")).rejects.toThrow(/expected APPROVED/);
+        expect(fake.sent).toEqual([]);
+    });
+
+    it("sends nothing once the approval has expired", async () => {
+        const fake = fakeExecutor();
+        let at = new Date();
+        const e = await mainnetEngine(fake.executor, () => at);
+        await approved(e);
+        at = new Date(at.getTime() + 3_600_000);
+        const result = await e.execute("p1");
+        expect(result.ok).toBe(false);
+        expect(fake.sent).toEqual([]);
+    });
+
     it("sends nothing at all without an executor, and says the fills are simulated", async () => {
         const e = await mainnetEngine();
         await approved(e);
@@ -1374,5 +1398,77 @@ describe("executing for real", () => {
         expect(result.fills.length).toBeGreaterThan(0);
         expect(e.treasury.ledger.all().find((x) => x.type === "PURCHASE_SETTLED")?.memo)
             .toContain("SIMULATED");
+    });
+});
+
+describe("a proposal served by a different process at each step", () => {
+    /** A fresh engine over the same storage, which is what every request gets on a serverless host. */
+    const instance = async (books: JsonlLedgerStore, proposals: ProposalStore) =>
+        new InvestingEngine({
+            mode: "sim",
+            openingFloat: u("1.00"),
+            mandates: mandateFor(terms),
+            readBrief: savedBrief,
+            allBriefs: () => [savedBrief()],
+            salesLedger: () => salesLedger("3.00"),
+            market,
+            chainId: CHAIN_ID,
+            verifyApproval: ({ approval, signature }) =>
+                verifyApprovalSignature({ approval, signature, chainId: CHAIN_ID, ownerAddress: ownerAccount.address }),
+            ledger: await openLedger(books),
+            sink: books,
+            proposals,
+        });
+
+    const offered = async () => {
+        const books = new JsonlLedgerStore(join(dir, "invest.jsonl"));
+        const proposals = new MemoryProposalStore();
+        const first = await instance(books, proposals);
+        await first.syncRevenue();
+        const p = await first.propose("p1");
+        if (!p.ok) throw new Error(p.reasons.join("; "));
+        return { books, proposals, p };
+    };
+
+    it("is approved and executed after the process that offered it has gone", async () => {
+        const { books, proposals, p } = await offered();
+
+        const second = await instance(books, proposals);
+        const a = await second.approve("p1", await signOffer(ownerAccount, p.toSign));
+        expect(a.ok).toBe(true);
+
+        const third = await instance(books, proposals);
+        const x = await third.execute("p1");
+        expect(x.ok).toBe(true);
+        expect(third.treasury.state("p1")).toBe("SETTLED");
+        expect(reconcileInternal(third.treasury.ledger).ok).toBe(true);
+    });
+
+    it("keeps the hash the owner signed, bigint for bigint", async () => {
+        const { books, proposals, p } = await offered();
+        const second = await instance(books, proposals);
+        await second.approve("p1", await signOffer(ownerAccount, p.toSign));
+        expect(second.view("p1").hash).toBe(p.view.hash);
+    });
+
+    it("is not executed a second time by an instance that has not seen the first", async () => {
+        const { books, proposals, p } = await offered();
+        const second = await instance(books, proposals);
+        await second.approve("p1", await signOffer(ownerAccount, p.toSign));
+        const stale = await instance(books, proposals);
+        await second.execute("p1");
+        await expect(stale.execute("p1")).rejects.toThrow(/is SETTLED/);
+    });
+
+    it("still refuses an unsigned proposal after the move", async () => {
+        const { books, proposals } = await offered();
+        const second = await instance(books, proposals);
+        await expect(second.execute("p1")).rejects.toThrow(/expected APPROVED/);
+    });
+
+    it("will not reuse an id another instance has taken", async () => {
+        const { books, proposals } = await offered();
+        const second = await instance(books, proposals);
+        await expect(second.propose("p1")).rejects.toThrow(/already exists/);
     });
 });

@@ -11,7 +11,7 @@ import {
     type SavedBrief,
 } from "@surplus/core";
 import {
-    PgLedgerStore, PgMandateBackend, PgReceiptStore, PgBriefBackend, PgSessionStore,
+    PgLedgerStore, PgMandateBackend, PgReceiptStore, PgBriefBackend, PgSessionStore, PgProposalStore,
 } from "../src/pg";
 import { PgThrottle } from "../src/throttle";
 import { PgReservations } from "../src/reservations";
@@ -592,6 +592,15 @@ describeDb("sessions in Postgres", () => {
         const [a, b] = await Promise.all([store.consumeNonce(nonce), store.consumeNonce(nonce)]);
         expect([a, b].filter((x) => x !== null)).toEqual([issuedAt]);
         expect(await store.consumeNonce(nonce)).toBe(null);
+    });
+
+    it("keeps where a proposal has got to, one book apart from the other", async () => {
+        const store = new PgProposalStore(scratch.sql, "invest-sim");
+        expect(await store.load("p1")).toBe(null);
+        await store.save("p1", "offered");
+        await store.save("p1", "approved");
+        expect(await store.load("p1")).toBe("approved");
+        expect(await new PgProposalStore(scratch.sql, "invest-mainnet").load("p1")).toBe(null);
     });
 
     it("stops recognising an expired session and sweeps it away", async () => {

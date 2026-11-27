@@ -237,6 +237,7 @@ export async function assemble(config: ApiConfig, opts: AssembleOptions = {}): P
         market,
         ledger: investLedger,
         sink: investStore,
+        proposals: backends.proposals,
         chainId: config.approvalChainId,
         verifyApproval: ({ approval, signature }) =>
             verifyApprovalSignature({

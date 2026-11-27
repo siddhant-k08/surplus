@@ -5,7 +5,7 @@ import {
     parseTxLine,
     serializeMandate,
     parseMandateLine,
-    type LedgerStore,
+    type LedgerStore, type ProposalStore,
     type LedgerTx,
     type MandateBackend,
     type MandateVersion,
@@ -181,6 +181,16 @@ export async function migrate(sql: Sql): Promise<void> {
      * database missing them would read every sale as a purchase. `add column if not exists` is
      * idempotent and costs one statement at startup.
      */
+    // Where each proposal has got to. Overwritten as it moves; the books remain the record.
+    await sql`
+        create table if not exists proposals (
+            book       text not null,
+            id         text not null,
+            document   text not null,
+            updated_at timestamptz not null default now(),
+            primary key (book, id)
+        )
+    `;
     await sql`alter table executions add column if not exists side text`;
     await sql`alter table executions add column if not exists units_in_minor text`;
 }
@@ -244,6 +254,25 @@ export class PgLedgerStore implements LedgerStore {
             insert into ledger_entries ${this.sql(rows)}
             on conflict (book, id) do nothing
         `;
+    }
+}
+
+/** Proposals in flight, one row each. `book` keeps a simulated proposal out of a mainnet engine. */
+export class PgProposalStore implements ProposalStore {
+    constructor(private readonly sql: Sql, readonly book: string) {}
+
+    async save(id: string, document: string): Promise<void> {
+        await this.sql`
+            insert into proposals ${this.sql([{ book: this.book, id, document }])}
+            on conflict (book, id) do update set document = excluded.document, updated_at = now()
+        `;
+    }
+
+    async load(id: string): Promise<string | null> {
+        const [row] = await this.sql<{ document: string }[]>`
+            select document from proposals where book = ${this.book} and id = ${id}
+        `;
+        return row?.document ?? null;
     }
 }
 

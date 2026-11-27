@@ -18,6 +18,9 @@ import {
     blockReasons,
     warnings,
     proposalHash,
+    serializeProposal,
+    parseProposal,
+    type ProposalStore,
     approvalTypedDataJson,
     formatUsdc,
     type InvestmentGap,
@@ -100,6 +103,8 @@ export interface InvestingDeps {
     ledger?: Ledger;
     /** Where new entries go. Absent means nothing is persisted. */
     sink?: LedgerSink;
+    /** Where proposals are kept between requests. Absent means they live and die with this engine. */
+    proposals?: ProposalStore;
     now?: () => Date;
     /** Required to approve anything. Without it the engine refuses every approval. */
     verifyApproval?: ApprovalVerifier;
@@ -368,6 +373,32 @@ export class InvestingEngine {
         });
     }
 
+    /** Writes down where a proposal has got to, so the next request can be served by any process. */
+    private async save(id: string): Promise<void> {
+        if (this.deps.proposals === undefined) return;
+        const offered = this.offered.get(id);
+        await this.deps.proposals.save(id, serializeProposal({
+            ...this.treasury.exportProposal(id),
+            ...(offered !== undefined && { offered }),
+        }));
+    }
+
+    /** Reads a proposal back. Storage wins over memory: another process may have moved it on. */
+    private async load(id: string): Promise<void> {
+        const document = await this.deps.proposals?.load(id);
+        if (document === undefined || document === null) return;
+        const stored = parseProposal(document, `proposal ${id}`);
+        this.treasury.restoreProposal(stored);
+        this.proposalIds.add(id);
+        if (stored.offered === undefined) this.offered.delete(id);
+        else this.offered.set(id, stored.offered);
+    }
+
+    /** An id used twice would overwrite one proposal and silently drop the other's fills as duplicates. */
+    private async refuseReusedId(id: string): Promise<void> {
+        if (await this.deps.proposals?.load(id)) throw new Error(`Proposal ${id} already exists`);
+    }
+
     /**
      * Builds a proposal from the newest brief and live quotes. Never approves it: approval is the owner's
      * separate decision.
@@ -434,6 +465,7 @@ export class InvestingEngine {
             };
         }
 
+        await this.refuseReusedId(id);
         const quoted = await market.quote(alloc.legs);
         // The brief goes on the proposal so every fill it books can be traced back to the research that
         // argued for it, which is what `backing` reads and what the buyer sees on their own brief.
@@ -461,6 +493,7 @@ export class InvestingEngine {
             expiresAt: new Date(this.now().getTime() + mandate.terms.approvalExpirySeconds * 1000).toISOString(),
         };
         this.offered.set(id, approval);
+        await this.save(id);
 
         return {
             ok: true,
@@ -597,6 +630,7 @@ export class InvestingEngine {
             };
         }
 
+        await this.refuseReusedId(id);
         const created = this.treasury.createProposal({ id, legs: plan.legs, quotedPrices: prices });
         this.proposalIds.add(id);
         await this.flush();
@@ -614,6 +648,7 @@ export class InvestingEngine {
             expiresAt: new Date(this.now().getTime() + mandate.terms.approvalExpirySeconds * 1000).toISOString(),
         };
         this.offered.set(id, approval);
+        await this.save(id);
 
         return {
             ok: true,
@@ -668,6 +703,7 @@ export class InvestingEngine {
         if (verify === undefined) {
             return { ok: false, reasons: ["this server cannot verify owner signatures, so it cannot approve"] };
         }
+        await this.load(id);
         const approval = this.offered.get(id);
         if (approval === undefined) {
             return { ok: false, reasons: [`no approval payload was offered for ${id}; propose it first`] };
@@ -678,6 +714,7 @@ export class InvestingEngine {
         const mandate = this.mandates.current();
         if (approval.mandateVersion !== mandate.version || approval.mandateHash !== mandate.hash) {
             this.offered.delete(id);
+            await this.save(id);
             return {
                 ok: false,
                 reasons: [
@@ -696,6 +733,7 @@ export class InvestingEngine {
             expect: approval,
         });
         await this.flush();
+        await this.save(id);
         if (!result.ok) return { ok: false, reasons: result.reasons };
         return { ok: true, expiresAt: result.approval.expiresAt, signer: verdict.signer };
     }
@@ -720,6 +758,7 @@ export class InvestingEngine {
         }
         | { ok: false; reasons: string[]; outcome?: string }
     > {
+        await this.load(id);
         const rec = this.treasury.proposal(id);
         const market = await this.deps.market();
         const fresh = await market.quote(rec.proposal.legs);
@@ -737,18 +776,29 @@ export class InvestingEngine {
 
         // Real swaps, when there are any to send. Anything the gates stopped is not sent at all: the
         // checks exist to be read before the money moves, not after.
-        const sending = this.deps.executor !== undefined && this.deps.mode === "mainnet" && blocks.length === 0;
+        const live = this.deps.executor !== undefined && this.deps.mode === "mainnet" && blocks.length === 0;
+        // Signature, expiry, drift and mandate are all settled before anything is broadcast. A proposal
+        // that was never approved throws here, with nothing sent.
+        const checkedAt = this.now();
+        const sending = live && this.treasury.preflight(id, fresh.prices, checkedAt).length === 0;
         const { realized, problems } = sending
             ? await this.sendSwaps(id, rec.proposal.legs, fresh.quotes)
             : { realized: undefined, problems: [] as string[] };
 
-        const result = this.treasury.execute(id, {
-            freshPrices: fresh.prices,
-            decimals,
-            blocks,
-            ...(realized !== undefined && { realized }),
-        });
-        await this.flush();
+        let result;
+        try {
+            result = this.treasury.execute(id, {
+                freshPrices: fresh.prices,
+                decimals,
+                blocks,
+                ...(sending && { checkedAt }),
+                ...(realized !== undefined && { realized }),
+            });
+        } finally {
+            // Saved however it ended. Books first, so a proposal never reads as settled ahead of them.
+            await this.flush();
+            if (this.treasury.state(id) !== "APPROVED") await this.save(id);
+        }
 
         if (!result.ok) return { ok: false, reasons: result.reasons, outcome: result.outcome };
         return {
@@ -852,9 +902,8 @@ export class InvestingEngine {
     }
 
     /**
-     * Proposals this process knows about, tracked directly rather than parsed back out of ledger memos.
-     * They are deliberately not persisted: an approval binds to a quote and expires in minutes, so a
-     * proposal must not outlive the process that made it.
+     * Proposals this process has offered or been asked about, tracked directly rather than parsed back
+     * out of ledger memos. Storage is read by id, so this is not a list of everything ever proposed.
      */
     ids(): string[] {
         return [...this.proposalIds];
