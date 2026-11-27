@@ -3,6 +3,10 @@ name: Backup the books
 # A copy of the ledgers, the mandate history and every receipt, held somewhere that is not the database.
 # The provider's own backups are theirs, retention on a small plan is short, and a dropped database is a
 # dropped database. The export is the same JSONL the file backend reads, so it can be replayed.
+#
+# This repository is public, so an artifact and a log line are both readable by strangers, and a receipt id
+# opens a paid brief. Only the encrypted archive leaves the runner, and the export prints nothing here.
+# To open one, see "Backups you hold yourself" in docs/DEPLOY.md.
 on:
   schedule:
     # 03:00 UTC daily. The agent sells at human hours; this runs when it is quietest.
@@ -14,13 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    env:
-      # Set this in the repository's secrets. Read-only use: the export never writes to the database.
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      X402_PAY_TO: "0x0000000000000000000000000000000000000001"
-      OWNER_ADDRESS: "0x0000000000000000000000000000000000000002"
-      OWNER_TOKEN: owner-token-for-the-backup-job
-
     steps:
       - uses: actions/checkout@v4
 
@@ -31,13 +28,49 @@ jobs:
 
       - run: npm ci
 
-      - name: Export
-        run: npm run db:export -w @surplus/api -- --out=data/backup
+      - name: Export and encrypt
+        shell: bash
+        env:
+          # Both are repository secrets. The export never writes to the database.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          # Values the config insists on. None of them spend anything.
+          X402_PAY_TO: "0x0000000000000000000000000000000000000001"
+          OWNER_ADDRESS: "0x0000000000000000000000000000000000000002"
+          OWNER_TOKEN: owner-token-for-the-backup-job
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Add the DATABASE_URL repository secret."
+            exit 1
+          fi
+          if [ "${#BACKUP_PASSPHRASE}" -lt 20 ]; then
+            echo "::error::Add a BACKUP_PASSPHRASE repository secret of at least 20 characters."
+            exit 1
+          fi
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+
+          # Each network has its own sales book, so one pass per network. MAINNET_ENABLED only lets the
+          # config name the mainnet book: this job holds no key and cannot move money.
+          for target in testnet:eip155:84532 mainnet:eip155:8453; do
+            name="${target%%:*}"
+            if ! X402_NETWORK="${target#*:}" MAINNET_ENABLED="$([ "$name" = mainnet ] && echo true || echo false)" \
+                npm run db:export -w @surplus/api -- --out="$work/backup/$name" > "$work/export.log" 2>&1; then
+              echo "::error::The $name export failed. Its output is withheld from this public log; run npm run db:export locally to see it."
+              exit 1
+            fi
+          done
+
+          tar -czf "$work/books.tar.gz" -C "$work" backup
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 --output books.tar.gz.gpg "$work/books.tar.gz"
 
       - name: Keep it
         uses: actions/upload-artifact@v4
         with:
           name: books-${{ github.run_id }}
-          path: data/backup
+          path: books.tar.gz.gpg
           retention-days: 90
           if-no-files-found: error

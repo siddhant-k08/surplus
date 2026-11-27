@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
-import { api } from "./api";
+import { api, get } from "./api";
+import { networkName } from "./explorer";
 import { Button, Chip, Footer, Led, Wordmark } from "./Chrome";
 import { ConnectButton } from "./Connect";
 import { MaskedLine, motion, riseItem, stagger } from "./motion";
@@ -17,6 +18,13 @@ export function SignIn({ onSignedIn }: { onSignedIn: (address: string) => void }
     const { address } = useAccount();
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // The chip names the chain this deployment serves, so it is absent until the server has said.
+    const [chain, setChain] = useState<string | null>(null);
+    useEffect(() => {
+        get<{ network: string }>("/catalogue")
+            .then((c) => setChain(networkName(c.network)))
+            .catch(() => setChain(null));
+    }, []);
 
     async function run() {
         if (address === undefined) return;
@@ -51,7 +59,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (address: string) => void }
             <div className="shell flex items-center gap-7 py-4">
                 <Wordmark />
                 <nav aria-label="Main" className="ml-auto flex items-center gap-3">
-                    <Chip><Led />Base Sepolia</Chip>
+                    {chain !== null && <Chip><Led />{chain}</Chip>}
                     <Button href="/" tone="ghost" size="sm">Home</Button>
                 </nav>
             </div>

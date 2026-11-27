@@ -225,9 +225,21 @@ Writes the ledgers, the mandate history and every receipt as the same JSONL the 
 a copy can be replayed rather than merely read. The export reads back what it wrote and refuses to
 claim success if it does not load.
 
-`.github/workflows/backup.yml` runs that nightly and keeps the result as an artifact for 90 days. It
-needs `DATABASE_URL` in the repository's secrets. The provider's own backups are theirs and retention
-on a small plan is short, which is the point of holding your own.
+`.github/workflows/backup.yml` runs that nightly, once for each network, and keeps the result as an
+encrypted artifact for 90 days. It needs two repository secrets: `DATABASE_URL`, and `BACKUP_PASSPHRASE`
+of at least 20 characters. Keep the passphrase in a password manager: nothing can open a backup without
+it, and changing it does not re-encrypt the old ones. The provider's own backups are theirs and
+retention on a small plan is short, which is the point of holding your own.
+
+The repository is public, so only the encrypted archive is uploaded and the export prints nothing to the
+job log. To open one, download it, decrypt it (gpg asks for the passphrase) and unpack it into `data/`,
+which git ignores:
+
+```bash
+gh run download <run-id> --name books-<run-id> --dir data/restore
+gpg --decrypt --output data/restore/books.tar.gz data/restore/books.tar.gz.gpg
+tar -xzf data/restore/books.tar.gz -C data/restore
+```
 
 ## Limits on the open routes
 
